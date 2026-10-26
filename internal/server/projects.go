@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/agentruntime/agent-runtime/products/coding/internal/samples"
+	"github.com/agentruntime/coding-agent/internal/samples"
 )
 
 const (

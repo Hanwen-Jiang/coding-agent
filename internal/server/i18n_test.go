@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agentruntime/agent-runtime/products/coding/internal/samples"
+	"github.com/agentruntime/coding-agent/internal/samples"
 )
 
 // sourceMessages 按源码找出全部给用户看的中文格式串：msg 的第一个参数、writeMsg 的第四个参数。

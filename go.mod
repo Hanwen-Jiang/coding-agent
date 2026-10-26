@@ -1,4 +1,4 @@
-module github.com/agentruntime/agent-runtime/products/coding
+module github.com/agentruntime/coding-agent
 
 go 1.26.0
 
@@ -10,6 +10,6 @@ require (
 )
 
 replace (
-	github.com/agentruntime/agent-runtime/libs/go-core => ../../libs/go-core
-	github.com/agentruntime/agent-runtime/proto/gen/go => ../../proto/gen/go
+	github.com/agentruntime/agent-runtime/libs/go-core => ../agent-runtime/libs/go-core
+	github.com/agentruntime/agent-runtime/proto/gen/go => ../agent-runtime/proto/gen/go
 )

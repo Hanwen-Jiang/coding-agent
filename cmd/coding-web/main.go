@@ -1,5 +1,5 @@
 // Command coding-web 是在线多租户 coding agent 的 MVP 服务（docs/plan/coding-agent-mvp.md）：网页、项目（Git 工作区）、
-// 经 Task API 下任务、代理 SSE 进度、看改动与提交。Runtime 一侧用 task-service 与 Worker（scripts/dev_stack.py up --coding）。
+// 经 Task API 下任务、代理 SSE 进度、看改动与提交。Runtime 一侧用 task-service 与 Worker；本机用 scripts/dev.py up 一起拉起。
 //
 // 环境变量：
 //
@@ -37,7 +37,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/agentruntime/agent-runtime/products/coding/internal/server"
+	"github.com/agentruntime/coding-agent/internal/server"
 )
 
 func main() {

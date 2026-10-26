@@ -19,7 +19,7 @@ import (
 
 	"github.com/agentruntime/agent-runtime/libs/go-core/dev/localingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/providers/ingress"
-	"github.com/agentruntime/agent-runtime/products/coding/internal/web"
+	"github.com/agentruntime/coding-agent/internal/web"
 )
 
 const (
