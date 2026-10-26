@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/agentruntime/agent-runtime/libs/go-core/dev/localingress"
@@ -64,8 +63,6 @@ type Server struct {
 	api       *TaskAPI
 	git       Git
 	providers map[string]*Provider
-	// 按租户串行“改写租户策略、提交任务”，让每个任务固定的是它自己选的沙箱等级。
-	tenantLocks sync.Map
 }
 
 // New 校验配置并构造 Server。
@@ -213,7 +210,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dev_login": s.cfg.DevLogin, "github_login": s.providers["github"] != nil, "providers": providers,
 		// 有开发租户策略文件才能按任务设沙箱等级（见 runsettings.go）。
-		"sandbox_control": s.cfg.PoliciesFile != "", "sandbox": s.cfg.Sandbox,
+		"sandbox_control": true, "sandbox": s.cfg.Sandbox,
 	})
 }
 
@@ -283,14 +280,9 @@ func (s *Server) handleMe(w http.ResponseWriter, _ *http.Request, id identity) {
 	writeJSON(w, http.StatusOK, me)
 }
 
-// ensureTenantPolicy 在开发租户策略文件里给新租户 write_reversible 的 effect 上限（改代码、跑测试要用）；
-// 已经列出的租户不动。task-service 每次提交都重新读这个文件。
+// ensureTenantPolicy 在开发租户策略文件里给新租户 write_reversible 的 effect 上限（改代码、跑测试要用；每个任务再经
+// effect_ceiling 往下调）。已经列出的租户不动。只用于本机开发：集群里租户策略经 Runtime 的 Registry 发布。
 func (s *Server) ensureTenantPolicy(tenant string) error {
-	return s.writeTenantCeiling(tenant, defaultSandbox, true)
-}
-
-// writeTenantCeiling 把租户的 effect 上限写进开发租户策略文件；onlyIfMissing 时已经列出的租户不动。
-func (s *Server) writeTenantCeiling(tenant, ceiling string, onlyIfMissing bool) error {
 	if s.cfg.PoliciesFile == "" {
 		return nil
 	}
@@ -304,18 +296,10 @@ func (s *Server) writeTenantCeiling(tenant, ceiling string, onlyIfMissing bool) 
 	if tenants == nil {
 		tenants = map[string]any{}
 	}
-	entry, ok := tenants[tenant].(map[string]any)
-	if ok && onlyIfMissing {
+	if _, ok := tenants[tenant]; ok {
 		return nil
 	}
-	if entry == nil {
-		entry = map[string]any{}
-	}
-	if entry["effect_ceiling"] == ceiling {
-		return nil
-	}
-	entry["effect_ceiling"] = ceiling
-	tenants[tenant] = entry
+	tenants[tenant] = map[string]any{"effect_ceiling": defaultSandbox}
 	doc["tenants"] = tenants
 	return writeFileAtomic(s.cfg.PoliciesFile, doc)
 }

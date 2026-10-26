@@ -120,18 +120,12 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		"message":         msg,
 		"sessionAccess":   "SESSION_ACCESS_READ_WRITE",
 		"inputs":          map[string]any{"constraints": map[string]any{"model_preference": model}},
+		// 沙箱等级是这个 Task 的 effect 上限（Runtime 的 SubmitTaskRequest.effect_ceiling，D-08）：只能比租户策略低，
+		// 高了 Task API 直接拒绝，不悄悄截断。不再改写租户策略文件。
+		"effectCeiling": effectEnum(sandbox),
 	}
 	if sess.RuntimeSessionID != "" {
 		submit["sessionId"] = sess.RuntimeSessionID
-	}
-	// 改写租户策略与提交在同一把租户锁里：task-service 提交时读策略文件，把上限固定进这个 Task。
-	unlock := s.lockTenant(id.TenantID)
-	defer unlock()
-	if s.cfg.PoliciesFile == "" {
-		sandbox = "" // 这个部署定不了沙箱等级，以 task-service 的租户策略为准
-	} else if err := s.writeTenantCeiling(id.TenantID, sandbox, false); err != nil {
-		writeMsg(w, r, http.StatusInternalServerError, "写租户策略失败：%v", err)
-		return
 	}
 	var resp submitResponse
 	ctx, cancel := ctxTimeout(r, 30*time.Second)

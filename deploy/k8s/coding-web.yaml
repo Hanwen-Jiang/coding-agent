@@ -1,0 +1,108 @@
+# coding-web 上云（单节点，与 Runtime 的 docs/plan/cloud-deploy.md 第 7 节对应）：
+# - 装在 agent-runtime 命名空间：要挂 Worker 用的同一个工作区卷（PVC workspaces，Runtime 的 deploy/cluster/workspaces.yaml）。
+#   工作区跟着沙箱走（Runtime 的 D-06）之后改用 Workspace API，不再挂卷。
+# - 令牌：Runtime 第一期仍是开发 Ingress，coding-web 用同一把开发签名密钥签 Task API 的令牌（Secret agent-runtime-secrets）。
+# - 开发登录关掉（CODING_DEV_LOGIN 不设）：线上只用第三方登录，OAuth 的 Client ID 与 Secret 在 Secret coding-oauth
+#   （键 CODING_GITHUB_CLIENT_ID、CODING_GITHUB_CLIENT_SECRET 等，见 cmd/coding-web 的说明）。
+# - 沙箱等级经 effect_ceiling 逐个任务传给 Runtime，租户策略由 Runtime 的 Registry 定，不给 CODING_TENANT_POLICIES_FILE。
+# 改 <…> 的地方：镜像、域名、Task API 的 Service 名（Runtime 的 Helm release 名为 ar 时是 ar-agent-runtime-task-service）。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: coding-data
+  namespace: agent-runtime
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests: {storage: 5Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coding-web
+  namespace: agent-runtime
+  labels: {app.kubernetes.io/name: coding-web, app.kubernetes.io/part-of: coding-agent}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: coding-web}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: coding-web, app.kubernetes.io/part-of: coding-agent}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: coding-web
+          image: ghcr.io/<所有者>/coding-web:<版本>
+          ports:
+            - {name: http, containerPort: 8095}
+          env:
+            - {name: CODING_ADDR, value: "0.0.0.0:8095"}
+            - {name: CODING_TASK_API, value: "http://ar-agent-runtime-task-service:8080"}
+            - {name: CODING_WORKSPACE_ROOT, value: /workspaces}
+            - {name: CODING_DATA_DIR, value: /data}
+            - {name: CODING_PUBLIC_URL, value: "https://<coding 的域名>"}
+            - {name: CODING_SECURE_COOKIE, value: "1"}
+            - {name: CODING_SANDBOX, value: sandbox}
+            - name: AR_DEV_SIGNING_KEY
+              valueFrom:
+                secretKeyRef: {name: agent-runtime-secrets, key: dev-signing-key}
+          envFrom:
+            - secretRef: {name: coding-oauth}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          volumeMounts:
+            - {name: workspaces, mountPath: /workspaces}
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim: {claimName: workspaces}
+        - name: data
+          persistentVolumeClaim: {claimName: coding-data}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coding-web
+  namespace: agent-runtime
+spec:
+  selector: {app.kubernetes.io/name: coding-web}
+  ports:
+    - {name: http, port: 8095, targetPort: http}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: coding-web
+  namespace: agent-runtime
+spec:
+  entryPoints: [websecure]
+  routes:
+    - kind: Rule
+      match: Host(`<coding 的域名>`)
+      services:
+        - name: coding-web
+          port: http
+          # 任务进度是 SSE（coding-web 代理 Runtime 的事件流）。
+          responseForwarding: {flushInterval: 10ms}
+  tls:
+    secretName: cloudflare-origin-tls

@@ -1,0 +1,43 @@
+# 打标签（v*）时构建 coding-web 的镜像并推到 GHCR（deploy/Dockerfile）。go.mod 指向并排检出的 Runtime 仓库，所以这里把两个仓库
+# 都检出到同一个目录下再构建。Runtime 是私有仓库：仓库的 Secret RUNTIME_REPO_TOKEN 是只读它的令牌（fine-grained，Contents: Read）。
+# Runtime 的版本用 RUNTIME_REF（默认 main）；发版时把它固定到与线上 Runtime 相同的标签。
+name: image
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  RUNTIME_REPO: Hanwen-Jiang/agent-runtime
+  RUNTIME_REF: main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: coding-agent
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.RUNTIME_REPO }}
+          ref: ${{ env.RUNTIME_REF }}
+          token: ${{ secrets.RUNTIME_REPO_TOKEN }}
+          path: agent-runtime
+      - name: 构建并推送
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          image="ghcr.io/${OWNER,,}/coding-web:${tag}"
+          echo "${TOKEN}" | docker login ghcr.io -u "${ACTOR}" --password-stdin
+          DOCKER_BUILDKIT=1 docker build --platform linux/amd64 -f coding-agent/deploy/Dockerfile -t "${image}" .
+          docker push "${image}"

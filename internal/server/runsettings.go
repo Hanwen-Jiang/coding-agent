@@ -7,17 +7,21 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 )
 
 // 沙箱等级就是 Task 的 effect 上限（docs/plan/coding-agent-mvp.md 第 7.3 节）：
 // read 只读代码、回答问题（shell_run 是 write_reversible，跑不了）；write_reversible 能改工作区、在沙箱里跑命令。
-// Task API 没有逐个任务的上限，上限来自租户策略：提交前把开发租户策略文件里这个租户的上限改成所选的等级，
-// task-service 在提交那一刻把它固定进 Task。完全访问（联网、不可逆的外部写）不开放。
+// 提交时经 SubmitTaskRequest.effect_ceiling 传给 Runtime（Runtime 的 D-08），只能比租户策略低；租户策略本身由 Runtime 的
+// 运维定（开发时第一次登录给新租户 write_reversible，见 ensureTenantPolicy）。完全访问（联网、不可逆的外部写）不开放。
 const defaultSandbox = "write_reversible"
 
 var sandboxLevels = []string{"read", "write_reversible"}
+
+// effectEnum 把沙箱等级换成 Task API 的 Effect 枚举名（proto 的 agentruntime.common.v1.Effect）。
+func effectEnum(level string) string {
+	return "EFFECT_" + strings.ToUpper(level)
+}
 
 // 模型倾向放进 inputs.constraints.model_preference，进 Task State 的约束，Planner 选 Tier 时参考。
 const defaultModel = "balanced"
@@ -30,14 +34,6 @@ func pickOption(value string, allowed []string, fallback string) (string, bool) 
 		return fallback, true
 	}
 	return value, slices.Contains(allowed, value)
-}
-
-// lockTenant 取这个租户的锁，返回解锁函数。
-func (s *Server) lockTenant(tenant string) func() {
-	mu, _ := s.tenantLocks.LoadOrStore(tenant, &sync.Mutex{})
-	m := mu.(*sync.Mutex)
-	m.Lock()
-	return m.Unlock
 }
 
 // withQuery 用 QueryTask 的结果更新任务记录：状态、各 Round 花费之和、轮数与 usage；结束了就标为 Settled。

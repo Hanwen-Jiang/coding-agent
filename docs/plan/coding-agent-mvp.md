@@ -113,7 +113,7 @@ task-service（Task API、Session 与 Task 工作流）→ Worker（Planner、to
 
 ### 7.3 这些开关落到 Runtime 的哪里
 
-- **沙箱等级**：effect 上限。只读是 `read`（只能读代码、回答，不改文件、不跑命令，`shell_run` 是 write_reversible）；工作区可写是 `write_reversible`（命令在断网的一次性容器里跑）。Task API 没有逐个任务的上限，effect 上限来自租户策略：coding-web 在提交前把开发租户策略文件里这个租户的上限改成所选的等级，同一租户的“改写策略、提交”串行，task-service 在提交那一刻把上限固定进 Task。缺口：正式部署要在 `SubmitTaskRequest` 加一个只能调低的 `effect_ceiling`（走 S-01）。
+- **沙箱等级**：effect 上限。只读是 `read`（只能读代码、回答，不改文件、不跑命令，`shell_run` 是 write_reversible）；工作区可写是 `write_reversible`（命令在断网的一次性容器里跑）。所选的等级经 `SubmitTaskRequest.effect_ceiling` 传给 Runtime，只能比租户策略低（第 10 节）。
 - **模型倾向**：放进 `inputs.constraints.model_preference`，进入 Task State 的约束；Planner 的提示说明它的含义，规划 model 节点的 Tier 时参考（只能选可用的 Tier）。tool_loop 与 Reviewer 的 Tier 是固定配置，不受它影响。
 - **已用 token**：`QueryTask` 的 usage；任务结束时缓存进 coding-web 的任务记录，项目合计在前端相加。
 
@@ -147,9 +147,11 @@ task-service（Task API、Session 与 Task 工作流）→ Worker（Planner、to
 2026-10-26 用户定：Coding Agent 不放在 Runtime 仓库里，单独一个仓库。Runtime 仓库（`agent-runtime`）只放通用的部分；本仓库是建在它上面的一个应用。
 
 - **代码依赖**：只用 Runtime 的 `libs/go-core`（开发登录用的 `dev/localingress` 与 `providers/ingress`）。两个仓库并排检出（`../agent-runtime`），`go.mod` 的 replace 指过去；Runtime 的模块路径还是占位，定下真实地址后改成正常的版本依赖。
-- **运行时接口**：Task API（提交、查询、取消、信号、SSE 事件）。本机开发时另外共用三样东西，都由 Runtime 的 `scripts/dev_stack.py status --json` 报出来：工作区根（coding-web 克隆仓库、Worker 的工具读写同一处）、开发租户策略文件（沙箱等级）、开发签名密钥所在的文件（coding-web 签发 Runtime 令牌）。
-- **要去掉的耦合**（上云前，与 Runtime 仓库的 `docs/plan/cloud-deploy.md` 对应）：
-  - 沙箱等级改走 `SubmitTaskRequest` 里只能调低的 effect 上限（Runtime 走 S-01），不再改写共用的策略文件。
+- **运行时接口**：Task API（提交、查询、取消、信号、SSE 事件）。本机开发时另外共用三样东西，都由 Runtime 的 `scripts/dev_stack.py status --json` 报出来：工作区根（coding-web 克隆仓库、Worker 的工具读写同一处）、开发租户策略文件（只在租户首次登录时把上限设为 write_reversible）、开发签名密钥所在的文件（coding-web 签发 Runtime 令牌）。
+- **沙箱等级**（2026-10-26 改）：每个任务经 `SubmitTaskRequest.effect_ceiling` 传给 Runtime（Runtime 的 D-08），只能比租户策略低，高了 Task API 拒绝并说明原因；不再在提交前改写租户策略文件，也不再按租户串行提交。
+- **上云**：镜像 `deploy/Dockerfile`（构建上下文是两个仓库的上一级目录；打 `v*` 标签时 `.github/workflows/image.yml` 推到 GHCR），清单 `deploy/k8s/coding-web.yaml`（单节点：装在 Runtime 的 agent-runtime 命名空间、挂同一个工作区卷，只开第三方登录）。
+- **要去掉的耦合**（与 Runtime 仓库的 `docs/plan/cloud-deploy.md` 对应）：
+  - ~~沙箱等级改走 effect_ceiling~~（已做）。
   - 令牌改由 Runtime 的正式 Ingress 签发或交换，coding-web 不再持有签名密钥。
-  - 工作区跟着沙箱走：读文件、diff、提交、推送经 Runtime 的 Sandbox 接口，coding-web 与 Worker 不再共用一块盘。
+  - 工作区跟着沙箱走：读文件、diff、提交、推送经 Runtime 的 Workspace API（Runtime 的 D-06，设计书改动稿在 `docs/plan/design-changes-workspace.md`），coding-web 与 Worker 不再共用一块盘。
 - **Runtime 里为 coding agent 做、但本身通用的能力**留在 Runtime：shell_run 的 Docker 沙箱、`model_preference` 约束、按租户的 effect 上限。

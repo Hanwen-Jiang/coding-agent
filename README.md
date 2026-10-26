@@ -76,4 +76,4 @@ CODING_GITLAB_URL = https://git.example.com
 
 ## 已知限制
 
-GitHub 用的是 OAuth App（用户级令牌、权限按 scope 而不是按仓库），以后换 GitHub App；不支持 fork 后提 PR（要有仓库的写权限）；Gitee、Bitbucket 的一些细节只对着替身测过，还没在真平台上验；每家只能配一个实例；令牌加密的密钥由开发签名密钥派生，生产要换 SecretStore；元数据存 JSON 文件，单实例；进度只到节点级，没有 token 级流式输出。沙箱等级靠在提交前改写 Runtime 的开发租户策略文件实现，工作区与 Worker 共用一块盘；上云前要去掉的这些耦合见计划第 10 节。
+GitHub 用的是 OAuth App（用户级令牌、权限按 scope 而不是按仓库），以后换 GitHub App；不支持 fork 后提 PR（要有仓库的写权限）；Gitee、Bitbucket 的一些细节只对着替身测过，还没在真平台上验；每家只能配一个实例；令牌加密的密钥由开发签名密钥派生，生产要换 SecretStore；元数据存 JSON 文件，单实例；进度只到节点级，没有 token 级流式输出。工作区与 Worker 共用一块盘（沙箱等级已改为逐个任务经 `effect_ceiling` 传给 Runtime）；上云的镜像与清单在 `deploy/`，还要去掉的耦合见计划第 10 节。

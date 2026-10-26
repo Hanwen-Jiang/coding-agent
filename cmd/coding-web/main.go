@@ -10,6 +10,7 @@
 //	CODING_DEV_LOGIN=1          打开开发登录（租户 + 用户名换令牌，仅供测试）；要同时给 AR_DEV_SIGNING_KEY
 //	AR_DEV_SIGNING_KEY          与 task-service 相同的开发签名密钥
 //	CODING_TENANT_POLICIES_FILE task-service 的开发租户策略文件；给了就在租户首次登录时把 effect 上限设为 write_reversible
+//	                            （只给本机开发；每个任务的沙箱等级经 effect_ceiling 传，集群里租户策略由 Runtime 的 Registry 定）
 //	CODING_GIT                  git 可执行文件，默认 PATH 上的 git
 //	CODING_SECURE_COOKIE=1      Cookie 只走 HTTPS
 //	CODING_PUBLIC_URL           对外的地址（拼 OAuth 回调 <地址>/api/auth/<平台>/callback），例如 http://127.0.0.1:8095

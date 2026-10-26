@@ -369,8 +369,13 @@ func TestEachTaskGetsItsOwnSandboxLevelAndModelPreference(t *testing.T) {
 	if code, task, raw := c.do("POST", api+"/tasks", map[string]string{"message": "修好测试"}); code != http.StatusCreated || task["sandbox"] != "write_reversible" || task["model"] != "balanced" {
 		t.Fatalf("不选时应是工作区可写、均衡：%d %s", code, raw)
 	}
-	if len(fake.seenPolicies) != 2 || !strings.Contains(fake.seenPolicies[0], `"effect_ceiling": "read"`) || !strings.Contains(fake.seenPolicies[1], `"effect_ceiling": "write_reversible"`) {
-		t.Fatalf("提交那一刻租户策略应是这个任务选的等级：%q", fake.seenPolicies)
+	if len(fake.submits) != 2 || fake.submits[0]["effectCeiling"] != "EFFECT_READ" || fake.submits[1]["effectCeiling"] != "EFFECT_WRITE_REVERSIBLE" {
+		t.Fatalf("每个任务的沙箱等级经 effect_ceiling 传给 Runtime：%v", fake.submits)
+	}
+	for _, seen := range fake.seenPolicies {
+		if !strings.Contains(seen, `"effect_ceiling": "write_reversible"`) {
+			t.Fatalf("租户策略不随任务改写，保持首次登录时的上限：%q", fake.seenPolicies)
+		}
 	}
 	constraints := fake.submits[0]["inputs"].(map[string]any)["constraints"].(map[string]any)
 	if constraints["model_preference"] != "economy" {
