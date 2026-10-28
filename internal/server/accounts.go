@@ -334,6 +334,27 @@ func (s *Server) newAccountFor(p *Provider, u remoteUser) (identityRef, error) {
 	return identityRef{Tenant: tenant, User: user}, nil
 }
 
+// loginAllowed 按 Config.AllowedLogins 判断这个平台账号能不能登录：在名单里，或者它已经关联到的本地账号连着名单里的账号。
+func (s *Server) loginAllowed(provider, login, key string) bool {
+	if len(s.allowed) == 0 || s.allowed[provider+":"+strings.ToLower(login)] {
+		return true
+	}
+	ref, ok := s.lookupIdentity(key)
+	if !ok {
+		return false
+	}
+	a, err := s.readAccount(ref.Tenant, ref.User)
+	if err != nil {
+		return false
+	}
+	for _, c := range a.Connections {
+		if s.allowed[c.Provider+":"+strings.ToLower(c.Login)] {
+			return true
+		}
+	}
+	return false
+}
+
 // --- OAuth 路由 ---
 
 func (s *Server) callbackURL(provider string) string {
@@ -429,6 +450,10 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := identityKey(p.id, u.ID)
+	if mode == "login" && !s.loginAllowed(p.id, u.Login, key) {
+		fail(msg("这个 %s 账号还没有开通", p.Name))
+		return
+	}
 	now := time.Now().UTC()
 	conn := Connection{Provider: p.id, RemoteID: u.ID, Login: u.Login, Name: u.Name, AvatarURL: u.AvatarURL, Email: u.Email, ConnectedAt: now}
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -410,6 +411,50 @@ func TestOneAccountLinksSeveralProviders(t *testing.T) {
 	}
 	if code, _, _ := c.do("POST", "/api/account/connections/gitlab/disconnect", nil); code != http.StatusConflict {
 		t.Fatalf("最后一个登录方式不能断开，实际 %d", code)
+	}
+}
+
+func TestAllowedLoginsLimitWhoCanSignIn(t *testing.T) {
+	gh := newFakeGitHub(t)
+	gl := newFakeForge(t, "gitlab", map[string]any{"id": 77, "username": "octo", "name": "Octo GL"})
+	ts, _, cfg, srv := newServerWith(t, func(c *Config) {
+		c.Providers = map[string]ProviderConfig{"github": {ClientID: "client", ClientSecret: "secret"}, "gitlab": {ClientID: "client", ClientSecret: "secret"}}
+		c.PublicURL = "http://placeholder"
+		c.AllowedLogins = []string{" GitHub:octo-CAT "}
+	})
+	srv.cfg.PublicURL = ts.URL
+	pointProvider(srv, "github", gh.server.URL)
+	pointProvider(srv, "gitlab", gl.server.URL)
+
+	// 不在名单里的 GitLab 账号登录不了，也不建账号。
+	stranger := newClient(t, ts.URL)
+	res := oauthFlow(t, stranger, ts, "gitlab", "", "good-code")
+	if loc, _ := url.QueryUnescape(res.Header.Get("Location")); !strings.HasPrefix(loc, "/#/login?error=") || !strings.Contains(loc, "还没有开通") {
+		t.Fatalf("名单外的账号应被拒：%s", loc)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.DataDir, "gl-octo")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("被拒的登录不能建账号：%v", err)
+	}
+
+	// 名单里的 GitHub 账号（不分大小写）能登录；连上 GitLab 之后，用这个 GitLab 账号也能登录。
+	c, res := githubLoginFlow(t, ts, "good-code")
+	if res.Header.Get("Location") != "/" {
+		t.Fatalf("名单里的账号应能登录：%s", res.Header.Get("Location"))
+	}
+	if res := oauthFlow(t, c, ts, "gitlab", "?link=1", "good-code"); res.Header.Get("Location") != "/#/?linked=gitlab" {
+		t.Fatalf("连接 GitLab：%s", res.Header.Get("Location"))
+	}
+	again := newClient(t, ts.URL)
+	if res := oauthFlow(t, again, ts, "gitlab", "", "good-code"); res.Header.Get("Location") != "/" {
+		t.Fatalf("关联到名单账号的 GitLab 应能登录：%s", res.Header.Get("Location"))
+	}
+
+	// 写错的名单项让服务起不来。
+	for _, bad := range []string{"octo-cat", "nowhere:octo", "github:"} {
+		cfg.AllowedLogins = []string{bad}
+		if _, err := New(cfg); err == nil {
+			t.Fatalf("名单项 %q 应被拒", bad)
+		}
 	}
 }
 

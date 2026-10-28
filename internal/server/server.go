@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -54,6 +55,9 @@ type Config struct {
 	GitHubAPI          string
 	GitHubScopes       string
 	PublicURL          string
+	// AllowedLogins 是放行的平台账号（"<平台>:<登录名>"，不分大小写）：给了就只有它们（与关联到它们的别家账号）能用平台登录，
+	// 线上还没对外开放时用；空表示谁都能登录。
+	AllowedLogins []string
 	// Worker 的 shell_run 在哪里跑（docker 或 host）与 docker 时的镜像；只用来在界面上说明环境。
 	Sandbox      string
 	SandboxImage string
@@ -68,6 +72,7 @@ type Server struct {
 	git       Git
 	ws        Workspaces
 	providers map[string]*Provider
+	allowed   map[string]bool
 }
 
 // New 校验配置并构造 Server。
@@ -101,8 +106,17 @@ func New(cfg Config) (*Server, error) {
 	if len(providers) > 0 && cfg.PublicURL == "" {
 		return nil, errors.New("打开第三方登录要给 CODING_PUBLIC_URL（拼 OAuth 回调地址）")
 	}
+	allowed := map[string]bool{}
+	for _, entry := range cfg.AllowedLogins {
+		provider, login, ok := strings.Cut(strings.ToLower(strings.TrimSpace(entry)), ":")
+		if _, known := specOf(provider); !ok || login == "" || !known {
+			return nil, fmt.Errorf("CODING_ALLOWED_LOGINS 的 %q 不是 <平台>:<登录名>", entry)
+		}
+		allowed[provider+":"+login] = true
+	}
 	api := NewTaskAPI(strings.TrimRight(cfg.TaskAPI, "/"))
 	s := &Server{
+		allowed:   allowed,
 		cfg:       cfg,
 		ingress:   localingress.New(localingress.Options{SigningKey: cfg.SigningKey, Limit: 1 << 30, Window: time.Minute}),
 		store:     NewStore(cfg.DataDir),

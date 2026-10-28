@@ -16,6 +16,8 @@
 //	CODING_GIT                  git 可执行文件，默认 PATH 上的 git
 //	CODING_SECURE_COOKIE=1      Cookie 只走 HTTPS
 //	CODING_PUBLIC_URL           对外的地址（拼 OAuth 回调 <地址>/api/auth/<平台>/callback），例如 http://127.0.0.1:8095
+//	CODING_ALLOWED_LOGINS       逗号分隔的 <平台>:<登录名>（例如 github:octo-cat）：给了就只放行这些账号（与关联到它们的别家账号）；
+//	                            不给时谁都能用第三方登录
 //
 // 第三方登录（<平台> 是 GITHUB、GITEE、GITLAB、GITEA、BITBUCKET、GOOGLE；Client ID 与 Secret 都给了才打开这一家）：
 //
@@ -55,8 +57,9 @@ func main() {
 		Git:           os.Getenv("CODING_GIT"),
 		SecureCookie:  os.Getenv("CODING_SECURE_COOKIE") == "1",
 
-		PublicURL: os.Getenv("CODING_PUBLIC_URL"),
-		Providers: map[string]server.ProviderConfig{},
+		PublicURL:     os.Getenv("CODING_PUBLIC_URL"),
+		Providers:     map[string]server.ProviderConfig{},
+		AllowedLogins: strings.FieldsFunc(os.Getenv("CODING_ALLOWED_LOGINS"), func(r rune) bool { return r == ',' }),
 
 		Sandbox:      os.Getenv("CODING_SANDBOX"),
 		SandboxImage: os.Getenv("CODING_SANDBOX_IMAGE"),

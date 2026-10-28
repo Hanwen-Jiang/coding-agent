@@ -5,7 +5,7 @@
 # - 开发登录关掉（CODING_DEV_LOGIN 不设）：线上只用第三方登录，OAuth 的 Client ID 与 Secret 在 Secret coding-oauth
 #   （键 CODING_GITHUB_CLIENT_ID、CODING_GITHUB_CLIENT_SECRET 等，见 cmd/coding-web 的说明）。
 # - 沙箱等级经 effect_ceiling 逐个任务传给 Runtime，租户策略由 Runtime 的 Registry 定，不给 CODING_TENANT_POLICIES_FILE。
-# 改 <…> 的地方：镜像、域名、Task API 的 Service 名（Runtime 的 Helm release 名为 ar 时是 ar-agent-runtime-task-service）。
+# 改 <…> 的地方：镜像、域名、放行的账号、Task API 的 Service 名（Runtime 的 Helm release 名为 ar 时是 ar-agent-runtime-task-service）。
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -51,6 +51,8 @@ spec:
             - {name: CODING_DATA_DIR, value: /data}
             - {name: CODING_PUBLIC_URL, value: "https://<coding 的域名>"}
             - {name: CODING_SECURE_COOKIE, value: "1"}
+            # 还没对外开放时只放行这些平台账号（逗号分隔的 <平台>:<登录名>）；删掉这一行就谁都能登录。
+            - {name: CODING_ALLOWED_LOGINS, value: "<放行的账号>"}
             - {name: CODING_SANDBOX, value: sandbox}
             - name: AR_DEV_SIGNING_KEY
               valueFrom:

@@ -19,6 +19,7 @@ var english = map[string]string{
 	"没有配置这个登录方式":                  "This sign-in method isn't configured",
 	"先登录，再连接 %s":                  "Sign in first, then connect %s",
 	"登录状态不匹配，请重新登录":               "Sign-in state doesn't match. Please sign in again.",
+	"这个 %s 账号还没有开通":               "This %s account doesn't have access yet",
 	"%s 没有授权：%s":                  "%s didn't grant access: %s",
 	"%s 登录没有完成：%v":                "Signing in with %s didn't complete: %v",
 	"读不到 %s 账号：%v":                "Couldn't read your %s account: %v",
