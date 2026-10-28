@@ -806,6 +806,8 @@ dialog::backdrop { background: rgba(20, 19, 18, 0.35); }
 .pick-list { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 4px; background: var(--surface); }
 .pick { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; color: var(--text); }
 .pick:hover { background: var(--sunken); }
+.pick-group { padding: 8px 8px 3px; font-size: 11.5px; color: var(--muted); }
+.pick-group:first-child { padding-top: 3px; }
 .pick.active { background: var(--accent-soft); }
 .sample-card { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); cursor: pointer; }
 .sample-card:hover { border-color: var(--line-2); }

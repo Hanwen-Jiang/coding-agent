@@ -299,9 +299,19 @@ func writeAPIError(w http.ResponseWriter, r *http.Request, err error) {
 		if status < 400 || status > 599 {
 			status = http.StatusBadGateway
 		}
-		if apiErr.Note != nil {
+		switch m := runtimeMsg(apiErr.Reason); {
+		case apiErr.Note != nil:
 			writeErr(w, r, status, apiErr.Note)
-		} else {
+		case m != nil:
+			writeErr(w, r, status, m)
+		case requestLang(r) == langEN:
+			// Runtime 的说明是中文：没有翻译的错误，英文界面只给错误码。
+			code := apiErr.Reason
+			if code == "" {
+				code = apiErr.Code
+			}
+			writeMsg(w, r, status, "Runtime 返回了错误（%s）", code)
+		default:
 			writeErr(w, r, status, errors.New(apiErr.Message)) // task-service 的说明原样转出
 		}
 		return

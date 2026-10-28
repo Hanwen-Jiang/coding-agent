@@ -29,12 +29,43 @@ func (a *TaskAPI) CallWorkspace(ctx context.Context, token, method string, req, 
 	return a.call(ctx, a.slow, "/agentruntime.workspace.v1.WorkspaceService/"+method, token, req, resp)
 }
 
-// APIError 是 Task API 返回的错误：Message 是 task-service 给的说明（原样）；连不上这类我们这边的原因用 Note，按请求的语言写。
+// APIError 是 Task API 返回的错误：Message 是 task-service 给的说明（原样，中文）；Reason 是 Runtime 错误模型里稳定的
+// code（google.rpc.ErrorInfo，例如 network_not_allowed），界面按它翻译（runtimeMsg）。连不上这类我们这边的原因用 Note，按请求的语言写。
 type APIError struct {
 	Status  int
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	Reason  string `json:"-"`
 	Note    *Msg   `json:"-"`
+}
+
+// errorInfoDomain 是 Runtime 放进 google.rpc.ErrorInfo 的 domain（task-service 的 taskapi.ErrorDomain）。
+const errorInfoDomain = "agentruntime"
+
+// parseAPIError 读 connect 的 JSON 错误：code、message，以及 details 里 ErrorInfo 的 reason（connect 把 detail 的 JSON 放在 debug）。
+func parseAPIError(status int, data []byte) *APIError {
+	e := &APIError{Status: status}
+	var wire struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Details []struct {
+			Type  string `json:"type"`
+			Debug struct {
+				Reason string `json:"reason"`
+				Domain string `json:"domain"`
+			} `json:"debug"`
+		} `json:"details"`
+	}
+	if json.Unmarshal(data, &wire) != nil {
+		return e
+	}
+	e.Code, e.Message = wire.Code, wire.Message
+	for _, d := range wire.Details {
+		if d.Type == "google.rpc.ErrorInfo" && d.Debug.Domain == errorInfoDomain {
+			e.Reason = d.Debug.Reason
+		}
+	}
+	return e
 }
 
 func (e *APIError) Error() string {
@@ -64,9 +95,7 @@ func (a *TaskAPI) call(ctx context.Context, client *http.Client, path, token str
 	defer res.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(res.Body, 8<<20))
 	if res.StatusCode != http.StatusOK {
-		e := &APIError{Status: res.StatusCode}
-		_ = json.Unmarshal(data, e)
-		return e
+		return parseAPIError(res.StatusCode, data)
 	}
 	if resp == nil {
 		return nil

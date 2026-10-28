@@ -2463,13 +2463,20 @@ function openNewProject(initial) {
     const repos = repoCache[p];
     if (repos === "loading") return repoList.replaceChildren(h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("new.loadingRepos", { name: providerInfo(p).name })));
     const q = filter.trim().toLowerCase();
-    const shown = repos.filter((r) => !q || r.full_name.toLowerCase().includes(q)).slice(0, 40);
-    repoList.replaceChildren(...(shown.length ? shown.map((r) => h("button", {
-      class: "pick" + (gitUrl.value === r.clone_url ? " active" : ""),
-      onclick: () => { gitUrl.value = r.clone_url; branch.value = r.default_branch || ""; name.value = r.full_name.split("/").pop(); drawRepos(); },
-    }, badge(r.provider, "sm"), h("span", { class: "mono grow ellipsis" }, r.full_name),
-      r.private ? h("span", { class: "chip" }, t("new.private")) : null,
-      r.can_push ? null : h("span", { class: "chip warn" }, t("new.readOnly")))) : [h("div", { class: "muted" }, t("new.noRepos"))]));
+    const shown = repos.filter((r) => !q || r.full_name.toLowerCase().includes(q)).slice(0, 100);
+    // 服务端已把自己名下的排在前面：两组都有时各加一个小标题（别人的多是协作者或私有 fork 继承来的权限）。
+    const grouped = shown.some((r) => r.mine) && shown.some((r) => !r.mine);
+    const rows = [];
+    shown.forEach((r, i) => {
+      if (grouped && (i === 0 || shown[i - 1].mine !== r.mine)) rows.push(h("div", { class: "pick-group" }, t(r.mine ? "new.yourRepos" : "new.sharedRepos")));
+      rows.push(h("button", {
+        class: "pick" + (gitUrl.value === r.clone_url ? " active" : ""),
+        onclick: () => { gitUrl.value = r.clone_url; branch.value = r.default_branch || ""; name.value = r.full_name.split("/").pop(); drawRepos(); },
+      }, badge(r.provider, "sm"), h("span", { class: "mono grow ellipsis" }, r.full_name),
+        r.private ? h("span", { class: "chip" }, t("new.private")) : null,
+        r.can_push ? null : h("span", { class: "chip warn" }, t("new.readOnly"))));
+    });
+    repoList.replaceChildren(...(rows.length ? rows : [h("div", { class: "muted" }, t("new.noRepos"))]));
   };
   const draw = () => {
     seg.replaceChildren(...[["git", "branch", conns.length ? t("new.myRepos") : t("new.gitUrl")], ["sample", "box", t("new.sample")], ["empty", "folder", t("source.empty")]].map(([k, ic, l]) =>

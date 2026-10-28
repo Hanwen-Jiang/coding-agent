@@ -99,6 +99,9 @@ type remoteRepo struct {
 	Private       bool   `json:"private"`
 	DefaultBranch string `json:"default_branch"`
 	CanPush       bool   `json:"can_push"`
+	// Mine：仓库在这个账号自己名下（full_name 的第一段是登录名）。其余是协作者、组织成员能看到的，包括别人对你有权限的
+	// 私有仓库的 fork（GitHub 的私有 fork 继承上游的权限）。
+	Mine bool `json:"mine"`
 }
 
 // repoPages 是“我的仓库”最多翻几页：每页 100 个（Gitea 50 个），再多的用户自己贴地址。

@@ -613,7 +613,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request, id identity
 		writeMsg(w, r, http.StatusNotFound, "没有配置这个 Git 平台")
 		return
 	}
-	_, token, err := s.connToken(r, id, p)
+	conn, token, err := s.connToken(r, id, p)
 	if errors.Is(err, errNotConnected) {
 		writeMsg(w, r, http.StatusForbidden, "先在“账号与平台”里连接 %s", p.Name)
 		return
@@ -628,15 +628,21 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request, id identity
 		writeGitError(w, r, err)
 		return
 	}
-	slices.SortStableFunc(repos, func(a, b remoteRepo) int {
-		if a.CanPush != b.CanPush {
-			if a.CanPush {
-				return -1
-			}
+	for i := range repos {
+		owner, _, _ := strings.Cut(repos[i].FullName, "/")
+		repos[i].Mine = conn.Login != "" && strings.EqualFold(owner, conn.Login)
+	}
+	// 自己名下的在前，再按能不能推送；同一组里保持平台给的顺序（最近活动的在前）。
+	rank := func(x remoteRepo) int {
+		switch {
+		case x.Mine:
+			return 0
+		case x.CanPush:
 			return 1
 		}
-		return 0
-	})
+		return 2
+	}
+	slices.SortStableFunc(repos, func(a, b remoteRepo) int { return rank(a) - rank(b) })
 	writeJSON(w, http.StatusOK, repos)
 }
 

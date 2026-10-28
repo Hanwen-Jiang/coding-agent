@@ -23,6 +23,8 @@ type fakeGitHub struct {
 	pulls  []map[string]any
 	auths  []string
 	server *httptest.Server
+	// extraRepos 排在 /user/repos 的最前面（别人名下、最近更新过的仓库）。
+	extraRepos []map[string]any
 }
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
@@ -50,7 +52,7 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/user":
 		_ = json.NewEncoder(w).Encode(map[string]any{"login": "Octo-Cat", "id": 42, "name": "Octo", "avatar_url": "https://avatars.githubusercontent.com/u/42"})
 	case r.URL.Path == "/user/repos":
-		_ = json.NewEncoder(w).Encode([]map[string]any{{"full_name": "octo-cat/demo", "clone_url": f.server.URL + "/octo-cat/demo.git", "private": true, "default_branch": "main", "permissions": map[string]bool{"push": true}}})
+		_ = json.NewEncoder(w).Encode(append(f.extraRepos, map[string]any{"full_name": "octo-cat/demo", "clone_url": f.server.URL + "/octo-cat/demo.git", "private": true, "default_branch": "main", "permissions": map[string]bool{"push": true}}))
 	case r.Method == http.MethodPost && r.URL.Path == "/repos/octo-cat/demo/pulls":
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
