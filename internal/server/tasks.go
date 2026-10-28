@@ -113,7 +113,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		writeMsg(w, r, http.StatusBadRequest, "模型倾向只能是 economy、balanced 或 best")
 		return
 	}
-	base := s.git.Head(r.Context(), s.sessionDir(id.TenantID, sess))
+	base := s.head(r, id, sess.WorkspaceID)
 	submit := map[string]any{
 		"workspaceId":     sess.WorkspaceID,
 		"clientRequestId": randomHex(16),

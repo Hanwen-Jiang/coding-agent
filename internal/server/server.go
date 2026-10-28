@@ -1,7 +1,8 @@
 // Package server 是 coding-web 的 HTTP 服务：JSON API 与内嵌的网页。
 //
 // 租户与用户只来自登录得到的 Runtime 令牌（放在 HttpOnly Cookie 里），每个请求都重新校验签名与过期时间；
-// 项目与任务的元数据按租户分目录存放，工作区路径一律由服务端按（租户、项目 id）拼出，请求给不出别的路径。
+// 项目与任务的元数据按租户分目录存放；工作区的 id 一律由服务端按（项目、会话）拼出，文件经 Workspaces（默认是 Runtime 的
+// Workspace API，租户按令牌定）读写，请求给不出别的工作区。
 // 改写操作要带 X-Coding-Web 头（配合 SameSite Cookie 防跨站请求）。
 package server
 
@@ -33,7 +34,10 @@ var slug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
 // Config 是 coding-web 的配置，见 cmd/coding-web 的说明。
 type Config struct {
-	TaskAPI       string
+	TaskAPI string
+	// Workspaces 是工作区在哪里（见 Workspaces）：runtime（默认，经 Runtime 的 Workspace API）或 local（本机的
+	// WorkspaceRoot 下自己跑 git，要与 Worker 共用这块盘）。WorkspaceRoot 只有 local 要。
+	Workspaces    string
 	WorkspaceRoot string
 	DataDir       string
 	DevLogin      bool
@@ -62,16 +66,22 @@ type Server struct {
 	store     *Store
 	api       *TaskAPI
 	git       Git
+	ws        Workspaces
 	providers map[string]*Provider
 }
 
 // New 校验配置并构造 Server。
 func New(cfg Config) (*Server, error) {
+	if cfg.Workspaces == "" {
+		cfg.Workspaces = "runtime"
+	}
 	switch {
 	case cfg.TaskAPI == "":
 		return nil, errors.New("缺少 CODING_TASK_API")
-	case cfg.WorkspaceRoot == "":
-		return nil, errors.New("缺少 CODING_WORKSPACE_ROOT")
+	case cfg.Workspaces != "runtime" && cfg.Workspaces != "local":
+		return nil, errors.New("CODING_WORKSPACES 只能是 runtime 或 local")
+	case cfg.Workspaces == "local" && cfg.WorkspaceRoot == "":
+		return nil, errors.New("CODING_WORKSPACES=local 时要给 CODING_WORKSPACE_ROOT")
 	case cfg.DataDir == "":
 		return nil, errors.New("缺少 CODING_DATA_DIR")
 	case len(cfg.SigningKey) == 0:
@@ -80,10 +90,8 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Git == "" {
 		cfg.Git = "git"
 	}
-	for _, dir := range []string{cfg.WorkspaceRoot, cfg.DataDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, err
-		}
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		return nil, err
 	}
 	hooks := filepath.Join(cfg.DataDir, "empty-hooks")
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
@@ -93,14 +101,23 @@ func New(cfg Config) (*Server, error) {
 	if len(providers) > 0 && cfg.PublicURL == "" {
 		return nil, errors.New("打开第三方登录要给 CODING_PUBLIC_URL（拼 OAuth 回调地址）")
 	}
-	return &Server{
+	api := NewTaskAPI(strings.TrimRight(cfg.TaskAPI, "/"))
+	s := &Server{
 		cfg:       cfg,
 		ingress:   localingress.New(localingress.Options{SigningKey: cfg.SigningKey, Limit: 1 << 30, Window: time.Minute}),
 		store:     NewStore(cfg.DataDir),
-		api:       NewTaskAPI(strings.TrimRight(cfg.TaskAPI, "/")),
+		api:       api,
 		git:       Git{Bin: cfg.Git, HooksDir: hooks},
+		ws:        runtimeWorkspaces{api: api},
 		providers: providers,
-	}, nil
+	}
+	if cfg.Workspaces == "local" {
+		if err := os.MkdirAll(cfg.WorkspaceRoot, 0o755); err != nil {
+			return nil, err
+		}
+		s.ws = localWorkspaces{root: cfg.WorkspaceRoot, git: &s.git}
+	}
+	return s, nil
 }
 
 // Handler 返回挂好全部路由的 http.Handler。
@@ -371,10 +388,6 @@ func (s *Server) project(w http.ResponseWriter, r *http.Request, id identity) (P
 		return Project{}, false
 	}
 	return p, true
-}
-
-func (s *Server) workspace(tenant, project string) string {
-	return filepath.Join(s.cfg.WorkspaceRoot, tenant, project)
 }
 
 func ctxTimeout(r *http.Request, d time.Duration) (context.Context, context.CancelFunc) {

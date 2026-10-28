@@ -627,16 +627,16 @@ func (s *Server) providerOfURL(raw string) (*Provider, string) {
 	return nil, ""
 }
 
-// gitCredentials 是对这个工作区的平台做 git 操作要带的认证（主机、用户名、密码）；没有连接时为空，按公开仓库处理。
-func (s *Server) gitCredentials(r *http.Request, id identity, p Project) (host, user, pass string) {
+// gitCredentials 是对这个工作区的平台做 git 操作要带的认证；没有连接时为空，按公开仓库处理。
+func (s *Server) gitCredentials(r *http.Request, id identity, p Project) GitAuth {
 	prov := s.providers[p.Provider]
 	if prov == nil {
-		return "", "", ""
+		return GitAuth{}
 	}
 	c, token, err := s.connToken(r, id, prov)
 	if err != nil {
-		return "", "", ""
+		return GitAuth{}
 	}
-	user, pass = prov.gitAuth(c, token)
-	return prov.Web + "/", user, pass
+	user, pass := prov.gitAuth(c, token)
+	return GitAuth{Host: prov.Web + "/", User: user, Pass: pass}
 }

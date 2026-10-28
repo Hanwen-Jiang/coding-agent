@@ -16,10 +16,17 @@ type TaskAPI struct {
 	base   string
 	client *http.Client
 	stream *http.Client
+	// 工作区的操作（克隆大仓库、推送）比 Task API 的调用慢得多：单独的超时。
+	slow *http.Client
 }
 
 func NewTaskAPI(base string) *TaskAPI {
-	return &TaskAPI{base: base, client: &http.Client{Timeout: 30 * time.Second}, stream: &http.Client{}}
+	return &TaskAPI{base: base, client: &http.Client{Timeout: 30 * time.Second}, stream: &http.Client{}, slow: &http.Client{Timeout: 15 * time.Minute}}
+}
+
+// CallWorkspace 调 task-service 上的 Workspace API（同一个端口：POST /agentruntime.workspace.v1.WorkspaceService/<方法>）。
+func (a *TaskAPI) CallWorkspace(ctx context.Context, token, method string, req, resp any) error {
+	return a.call(ctx, a.slow, "/agentruntime.workspace.v1.WorkspaceService/"+method, token, req, resp)
 }
 
 // APIError 是 Task API 返回的错误：Message 是 task-service 给的说明（原样）；连不上这类我们这边的原因用 Note，按请求的语言写。
@@ -35,17 +42,21 @@ func (e *APIError) Error() string {
 }
 
 func (a *TaskAPI) Call(ctx context.Context, token, method string, req, resp any) error {
+	return a.call(ctx, a.client, "/agentruntime.taskapi.v1.TaskService/"+method, token, req, resp)
+}
+
+func (a *TaskAPI) call(ctx context.Context, client *http.Client, path, token string, req, resp any) error {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
-	r, err := http.NewRequestWithContext(ctx, http.MethodPost, a.base+"/agentruntime.taskapi.v1.TaskService/"+method, bytes.NewReader(body))
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, a.base+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+token)
-	res, err := a.client.Do(r)
+	res, err := client.Do(r)
 	if err != nil {
 		note := msg("连不上 task-service")
 		return &APIError{Status: http.StatusBadGateway, Code: "unavailable", Message: note.Error(), Note: note}

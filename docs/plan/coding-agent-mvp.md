@@ -121,8 +121,8 @@ task-service（Task API、Session 与 Task 工作流）→ Worker（Planner、to
 
 2026-10-25 用户要求：一个工作区可以开很多会话；侧栏上半部分放一些入口。用户选定“每个会话一份独立副本”。
 
-- **工作区**（原来的“项目”）是一个基线仓库：`<工作区根>/<租户>/<工作区>`，由克隆、示例或空仓库建出来，之后不直接在里面改。
-- **会话**是一段对话（Runtime 的一个 Session）加一份自己的工作副本：从基线仓库本地克隆（`git clone --local`，对象用硬链接，得到一个完整、独立的仓库，Docker 沙箱里也能用 git），检出基线分支；GitHub 工作区再把远端换回 GitHub、尽量拉到基线分支的最新提交。目录与 Runtime 的 workspace id 都是 `<工作区>--<会话>`，Worker 的工具与沙箱只看得到这份副本。会话之间互不干扰、可以同时跑；改动、提交、补丁、推送都按会话，GitHub 工作区里一个会话一个 `agent/*` 分支、一个 PR。
+- **工作区**（原来的“项目”）是一个基线仓库（Runtime 的一个 workspace，id 就是工作区 id），由克隆、示例或空仓库建出来，之后不直接在里面改。
+- **会话**是一段对话（Runtime 的一个 Session）加一份自己的工作副本：从基线仓库复制（Runtime 的 Workspace API 的 `from_workspace_id`，得到一个完整、独立的仓库，沙箱里也能用 git）；Git 平台的工作区再尽量切到基线分支在远端的最新提交（`SyncWorkspace`）。Runtime 的 workspace id 是 `<工作区>--<会话>`，Worker 的工具与沙箱只看得到这份副本。会话之间互不干扰、可以同时跑；改动、提交、补丁、推送都按会话，GitHub 工作区里一个会话一个 `agent/*` 分支、一个 PR。
 - **草稿**：“新建会话”只打开草稿，第一条消息发出时才开会话（复制副本），标题取这条消息的第一行（最多 40 字），可以改名。
 - **迁移**：会话出现之前的项目（记着 Runtime Session、推送记录或任务）读到时变成这个工作区的 `main` 会话，直接用工作区自己的目录与原来的任务记录；删 `main` 会话只删记录，不删目录。
 - **接口**：工作区 `GET/POST /api/projects`、`DELETE /api/projects/{p}`（连同所有会话的副本）；会话 `GET /api/sessions`、`POST /api/projects/{p}/sessions`，其余（任务、事件、回复、取消、改动、提交、补丁、推送、回到基线、文件、提交历史、环境、改名、删除）都在 `/api/projects/{p}/sessions/{s}/…` 下；`GET /api/tasks/active` 带上工作区与会话。
@@ -147,11 +147,11 @@ task-service（Task API、Session 与 Task 工作流）→ Worker（Planner、to
 2026-10-26 用户定：Coding Agent 不放在 Runtime 仓库里，单独一个仓库。Runtime 仓库（`agent-runtime`）只放通用的部分；本仓库是建在它上面的一个应用。
 
 - **代码依赖**：只用 Runtime 的 `libs/go-core`（开发登录用的 `dev/localingress` 与 `providers/ingress`）。两个仓库并排检出（`../agent-runtime`），`go.mod` 的 replace 指过去；Runtime 的模块路径还是占位，定下真实地址后改成正常的版本依赖。
-- **运行时接口**：Task API（提交、查询、取消、信号、SSE 事件）。本机开发时另外共用三样东西，都由 Runtime 的 `scripts/dev_stack.py status --json` 报出来：工作区根（coding-web 克隆仓库、Worker 的工具读写同一处）、开发租户策略文件（只在租户首次登录时把上限设为 write_reversible）、开发签名密钥所在的文件（coding-web 签发 Runtime 令牌）。
+- **运行时接口**：Task API（提交、查询、取消、信号、SSE 事件）与 Workspace API（2026-10-28 起：建工作区（克隆、复制、示例文件）、文件树、读文件、提交记录、改动、提交、丢弃改动、推送、与远端同步、删除；`internal/server/workspaces.go`），两者在 task-service 的同一个地址。本机开发时另外共用两样东西，都由 Runtime 的 `scripts/dev_stack.py status --json` 报出来：开发租户策略文件（只在租户首次登录时把上限设为 write_reversible）、开发签名密钥所在的文件（coding-web 签发 Runtime 令牌）。`CODING_WORKSPACES=local` 时退回旧做法（coding-web 自己在共用的工作区根里跑 git），只留给单元测试与没有 Workspace API 的 Runtime。
 - **沙箱等级**（2026-10-26 改）：每个任务经 `SubmitTaskRequest.effect_ceiling` 传给 Runtime（Runtime 的 D-08），只能比租户策略低，高了 Task API 拒绝并说明原因；不再在提交前改写租户策略文件，也不再按租户串行提交。
-- **上云**：镜像 `deploy/Dockerfile`（构建上下文是两个仓库的上一级目录；打 `v*` 标签时 `.github/workflows/image.yml` 推到 GHCR），清单 `deploy/k8s/coding-web.yaml`（单节点：装在 Runtime 的 agent-runtime 命名空间、挂同一个工作区卷，只开第三方登录）。
+- **上云**：镜像 `deploy/Dockerfile`（构建上下文是两个仓库的上一级目录；打 `v*` 标签时 `.github/workflows/image.yml` 推到 GHCR），清单 `deploy/k8s/coding-web.yaml`（装在 Runtime 的 agent-runtime 命名空间，经 Workspace API、不挂工作区卷，只开第三方登录）。
 - **要去掉的耦合**（与 Runtime 仓库的 `docs/plan/cloud-deploy.md` 对应）：
   - ~~沙箱等级改走 effect_ceiling~~（已做）。
   - 令牌改由 Runtime 的正式 Ingress 签发或交换，coding-web 不再持有签名密钥。
-  - 工作区跟着沙箱走：读文件、diff、提交、推送经 Runtime 的 Workspace API（Runtime 的 D-06，设计书改动稿在 `docs/plan/design-changes-workspace.md`），coding-web 与 Worker 不再共用一块盘。
+  - ~~工作区跟着沙箱走：读文件、diff、提交、推送经 Runtime 的 Workspace API~~（已做，2026-10-28；Runtime 的 D-06，`docs/plan/workspace-layer.md`），coding-web 与 Worker 不再共用一块盘。
 - **Runtime 里为 coding agent 做、但本身通用的能力**留在 Runtime：shell_run 的 Docker 沙箱、`model_preference` 约束、按租户的 effect 上限。

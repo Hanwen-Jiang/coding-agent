@@ -106,8 +106,9 @@ func newServerWith(t *testing.T, edit func(*Config)) (*httptest.Server, *fakeTas
 	api := httptest.NewServer(fake)
 	t.Cleanup(api.Close)
 	dir := t.TempDir()
+	// 这些用例看本机的工作区目录：用 local（runtime 经 Workspace API 的那一种在 workspaces_test.go）。
 	cfg := Config{
-		TaskAPI: api.URL, WorkspaceRoot: filepath.Join(dir, "ws"), DataDir: filepath.Join(dir, "data"),
+		TaskAPI: api.URL, Workspaces: "local", WorkspaceRoot: filepath.Join(dir, "ws"), DataDir: filepath.Join(dir, "data"),
 		DevLogin: true, SigningKey: []byte("test-key"), PoliciesFile: filepath.Join(dir, "policies.json"),
 	}
 	if edit != nil {

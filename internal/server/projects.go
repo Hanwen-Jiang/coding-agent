@@ -1,18 +1,16 @@
 package server
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -72,6 +70,11 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request, id i
 	writeJSON(w, http.StatusOK, projects)
 }
 
+// author 是 coding-web 自己做的提交（初始提交、页面上点的提交）的作者。
+func author(id identity) (string, string) {
+	return id.UserID, id.UserID + "@" + id.TenantID + ".coding.local"
+}
+
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request, id identity) {
 	var req struct {
 		Name   string `json:"name"`
@@ -87,7 +90,9 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request, id 
 		writeMsg(w, r, http.StatusBadRequest, "项目名要有，且不超过 80 个字符")
 		return
 	}
-	source := "empty"
+	p := Project{ID: newProjectID(req.Name), Name: req.Name, Source: "empty", CreatedAt: time.Now().UTC(), CreatedBy: id.UserID}
+	spec := CreateSpec{}
+	spec.AuthorName, spec.AuthorEmail = author(id)
 	switch {
 	case req.GitURL != "":
 		u, err := url.Parse(req.GitURL)
@@ -99,65 +104,41 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request, id 
 			writeMsg(w, r, http.StatusBadRequest, "分支名不合法")
 			return
 		}
-		source = req.GitURL
+		p.Source = req.GitURL
+		spec.RepoURL, spec.Ref = req.GitURL, req.Branch
+		// 已配置的 Git 平台上的仓库：记下平台与仓库路径；连接了这一家就带令牌克隆（私有仓库要），令牌只用这一次。
+		if prov, repo := s.providerOfURL(req.GitURL); prov != nil {
+			p.Provider, p.Repo = prov.id, repo
+			spec.Auth = s.gitCredentials(r, id, p)
+		}
 	case req.Sample != "":
-		if _, ok := samples.Find(req.Sample); !ok {
+		files, err := samples.Files(req.Sample)
+		if _, ok := samples.Find(req.Sample); !ok || err != nil {
 			writeMsg(w, r, http.StatusBadRequest, "没有这个示例")
 			return
 		}
-		source = "sample:" + req.Sample
+		p.Source = "sample:" + req.Sample
+		for _, f := range files {
+			spec.Files = append(spec.Files, InitialFile{Path: f.Path, Content: f.Content})
+		}
+	default:
+		spec.Files = []InitialFile{{Path: "README.md", Content: "# " + req.Name + "\n"}}
 	}
-	p := Project{ID: newProjectID(req.Name), Name: req.Name, Source: source, CreatedAt: time.Now().UTC(), CreatedBy: id.UserID}
-	dir := s.workspace(id.TenantID, p.ID)
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
-		return
-	}
-	ctx, cancel := ctxTimeout(r, 5*time.Minute)
+	ctx, cancel := ctxTimeout(r, 10*time.Minute)
 	defer cancel()
-	name, email := id.UserID, id.UserID+"@"+id.TenantID+".coding.local"
-	err := func() error {
-		if req.GitURL != "" {
-			args := []string{"clone", "--depth", "50", "--no-tags"}
-			if req.Branch != "" {
-				args = append(args, "--branch", req.Branch)
-			}
-			args = append(args, "--", req.GitURL, dir)
-			// 已配置的 Git 平台上的仓库：记下平台与仓库路径；连接了这一家就带令牌克隆（私有仓库要），令牌只在这次 git 进程的环境变量里。
-			if prov, repo := s.providerOfURL(req.GitURL); prov != nil {
-				p.Provider, p.Repo = prov.id, repo
-				host, user, pass := s.gitCredentials(r, id, p)
-				_, err := s.git.RunWithAuth(ctx, filepath.Dir(dir), host, user, pass, args...)
-				return err
-			}
-			_, err := s.git.Run(ctx, filepath.Dir(dir), args...)
-			return err
-		}
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-		if req.Sample != "" {
-			if err := samples.Write(req.Sample, dir); err != nil {
-				return err
-			}
-		} else if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# "+req.Name+"\n"), 0o644); err != nil {
-			return err
-		}
-		for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"add", "-A"}, {"commit", "-q", "-m", "Initial commit"}} {
-			if _, err := s.git.RunAs(ctx, dir, name, email, args...); err != nil {
-				return err
-			}
-		}
-		return nil
-	}()
-	if err != nil {
-		_ = os.RemoveAll(dir)
-		writeMsg(w, r, http.StatusBadRequest, "建项目失败：%v", err)
+	info, err := s.ws.Create(ctx, id, p.ID, spec)
+	var apiErr *APIError
+	switch {
+	case errors.As(err, &apiErr):
+		writeAPIError(w, r, err) // Workspace API 的说明原样转出
+		return
+	case err != nil:
+		writeMsg(w, r, statusOf(err, http.StatusBadRequest), "建项目失败：%v", err)
 		return
 	}
-	p.BaseBranch = s.git.Branch(ctx, dir)
+	p.BaseBranch = info.Branch
 	if err := s.store.UpdateProjects(id.TenantID, func(ps []Project) ([]Project, error) { return append(ps, p), nil }); err != nil {
-		_ = os.RemoveAll(dir)
+		_ = s.ws.Delete(ctx, id, p.ID)
 		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
@@ -181,9 +162,11 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request, id 
 			return
 		}
 	}
-	for _, dir := range append(s.sessionDirs(id.TenantID, p, sessions), s.workspace(id.TenantID, p.ID)) {
-		if err := os.RemoveAll(dir); err != nil {
-			writeErr(w, r, http.StatusInternalServerError, err)
+	ctx, cancel := ctxTimeout(r, 5*time.Minute)
+	defer cancel()
+	for _, ws := range append(sessionWorkspaces(p, sessions), p.ID) {
+		if err := s.ws.Delete(ctx, id, ws); err != nil {
+			writeWorkspaceError(w, r, err, http.StatusInternalServerError)
 			return
 		}
 	}
@@ -194,7 +177,7 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request, id 
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// safePath 把请求里的相对路径解析到工作区里；.git、绝对路径、..、反斜杠、经符号链接出界的一律拒绝。
+// safePath 把请求里的相对路径解析到工作区里；.git、绝对路径、..、反斜杠、经符号链接出界的一律拒绝（local 用）。
 func safePath(root, rel string) (string, error) {
 	rel = strings.TrimSpace(rel)
 	if rel == "" || rel == "." {
@@ -225,38 +208,40 @@ func safePath(root, rel string) (string, error) {
 	return target, nil
 }
 
+// cleanRel 把网页给的路径整理成 Workspace API 的写法（相对、/ 分隔、没有 . 段）；.git 与出界的路径拒绝。
+func cleanRel(rel string) (string, error) {
+	rel = strings.TrimSpace(rel)
+	if rel == "" || rel == "." {
+		return "", nil
+	}
+	if strings.ContainsAny(rel, "\\\x00") {
+		return "", msg("路径不合法")
+	}
+	clean := strings.TrimPrefix(path.Clean("/"+rel), "/")
+	if slices.Contains(strings.Split(clean, "/"), ".git") {
+		return "", msg("不能访问 .git")
+	}
+	return clean, nil
+}
+
 func (s *Server) handleTree(w http.ResponseWriter, r *http.Request, id identity) {
 	_, sess, ok := s.session(w, r, id)
 	if !ok {
 		return
 	}
-	dir, err := safePath(s.sessionDir(id.TenantID, sess), r.URL.Query().Get("path"))
+	rel, err := cleanRel(r.URL.Query().Get("path"))
 	if err != nil {
 		writeErr(w, r, http.StatusBadRequest, err)
 		return
 	}
-	entries, err := os.ReadDir(dir)
+	ctx, cancel := ctxTimeout(r, 2*time.Minute)
+	defer cancel()
+	out, err := s.ws.List(ctx, id, sess.WorkspaceID, rel)
 	if err != nil {
-		writeMsg(w, r, http.StatusNotFound, "目录不存在")
+		writeWorkspaceError(w, r, err, http.StatusInternalServerError)
 		return
 	}
-	type entry struct {
-		Name string `json:"name"`
-		Dir  bool   `json:"dir"`
-		Size int64  `json:"size"`
-	}
-	out := []entry{}
-	for _, e := range entries {
-		if e.Name() == ".git" {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		out = append(out, entry{Name: e.Name(), Dir: e.IsDir(), Size: info.Size()})
-	}
-	slices.SortFunc(out, func(a, b entry) int {
+	slices.SortFunc(out, func(a, b FileEntry) int {
 		if a.Dir != b.Dir {
 			if a.Dir {
 				return -1
@@ -273,30 +258,26 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request, id identity)
 	if !ok {
 		return
 	}
-	file, err := safePath(s.sessionDir(id.TenantID, sess), r.URL.Query().Get("path"))
+	rel, err := cleanRel(r.URL.Query().Get("path"))
+	if err != nil || rel == "" {
+		writeMsg(w, r, http.StatusBadRequest, "路径不合法")
+		return
+	}
+	ctx, cancel := ctxTimeout(r, 2*time.Minute)
+	defer cancel()
+	f, err := s.ws.Read(ctx, id, sess.WorkspaceID, rel)
 	if err != nil {
-		writeErr(w, r, http.StatusBadRequest, err)
+		writeWorkspaceError(w, r, err, http.StatusInternalServerError)
 		return
 	}
-	info, err := os.Stat(file)
-	if err != nil || info.IsDir() {
-		writeMsg(w, r, http.StatusNotFound, "文件不存在")
-		return
+	switch {
+	case f.TooLarge:
+		writeJSON(w, http.StatusOK, map[string]any{"too_large": true, "size": f.Size})
+	case f.Binary:
+		writeJSON(w, http.StatusOK, map[string]any{"binary": true, "size": f.Size})
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"content": f.Content, "size": f.Size})
 	}
-	if info.Size() > maxFileBytes {
-		writeJSON(w, http.StatusOK, map[string]any{"too_large": true, "size": info.Size()})
-		return
-	}
-	data, err := os.ReadFile(file)
-	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
-		return
-	}
-	if bytes.IndexByte(data[:min(len(data), 8192)], 0) >= 0 {
-		writeJSON(w, http.StatusOK, map[string]any{"binary": true, "size": info.Size()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"content": string(data), "size": info.Size()})
 }
 
 func (s *Server) handleLog(w http.ResponseWriter, r *http.Request, id identity) {
@@ -304,51 +285,14 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request, id identity) 
 	if !ok {
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 30*time.Second)
+	ctx, cancel := ctxTimeout(r, 2*time.Minute)
 	defer cancel()
-	out, err := s.git.Run(ctx, s.sessionDir(id.TenantID, sess), "log", "-n", "30", "--date=iso-strict", "--pretty=format:%H%x1f%an%x1f%ad%x1f%s")
+	commits, err := s.ws.Log(ctx, id, sess.WorkspaceID, 30, "")
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeWorkspaceError(w, r, err, http.StatusInternalServerError)
 		return
 	}
-	commits := []map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if f := strings.Split(line, "\x1f"); len(f) == 4 {
-			commits = append(commits, map[string]string{"hash": f[0], "author": f[1], "date": f[2], "subject": f[3]})
-		}
-	}
 	writeJSON(w, http.StatusOK, commits)
-}
-
-// diff 返回工作区相对 HEAD 的改动（含新文件）。
-func (s *Server) diff(r *http.Request, dir string) (files []map[string]any, diff string, truncated bool, err error) {
-	ctx, cancel := ctxTimeout(r, time.Minute)
-	defer cancel()
-	if _, err = s.git.Run(ctx, dir, "add", "--intent-to-add", "--", "."); err != nil {
-		return nil, "", false, err
-	}
-	numstat, err := s.git.Run(ctx, dir, "diff", "HEAD", "--numstat", "--no-color", "--no-ext-diff")
-	if err != nil {
-		return nil, "", false, err
-	}
-	files = []map[string]any{}
-	for _, line := range strings.Split(strings.TrimSpace(numstat), "\n") {
-		f := strings.SplitN(line, "\t", 3)
-		if len(f) != 3 {
-			continue
-		}
-		added, _ := strconv.Atoi(f[0])
-		deleted, _ := strconv.Atoi(f[1])
-		files = append(files, map[string]any{"path": f[2], "added": added, "deleted": deleted, "binary": f[0] == "-"})
-	}
-	diff, err = s.git.Run(ctx, dir, "diff", "HEAD", "--no-color", "--no-ext-diff", "--find-renames")
-	if err != nil {
-		return nil, "", false, err
-	}
-	if len(diff) > maxDiffBytes {
-		diff, truncated = diff[:maxDiffBytes], true
-	}
-	return files, diff, truncated, nil
 }
 
 func (s *Server) handleChanges(w http.ResponseWriter, r *http.Request, id identity) {
@@ -356,13 +300,14 @@ func (s *Server) handleChanges(w http.ResponseWriter, r *http.Request, id identi
 	if !ok {
 		return
 	}
-	dir := s.sessionDir(id.TenantID, sess)
-	files, diff, truncated, err := s.diff(r, dir)
+	ctx, cancel := ctxTimeout(r, 2*time.Minute)
+	defer cancel()
+	c, err := s.ws.Changes(ctx, id, sess.WorkspaceID)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeWorkspaceError(w, r, err, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"head": s.git.Head(r.Context(), dir), "branch": s.git.Branch(r.Context(), dir), "files": files, "diff": diff, "truncated": truncated})
+	writeJSON(w, http.StatusOK, map[string]any{"head": c.Head, "branch": c.Branch, "files": c.Files, "diff": c.Diff, "truncated": c.Truncated})
 }
 
 func (s *Server) handlePatch(w http.ResponseWriter, r *http.Request, id identity) {
@@ -370,14 +315,16 @@ func (s *Server) handlePatch(w http.ResponseWriter, r *http.Request, id identity
 	if !ok {
 		return
 	}
-	_, diff, _, err := s.diff(r, s.sessionDir(id.TenantID, sess))
+	ctx, cancel := ctxTimeout(r, 2*time.Minute)
+	defer cancel()
+	c, err := s.ws.Changes(ctx, id, sess.WorkspaceID)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeWorkspaceError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/x-patch; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", sess.WorkspaceID+".patch"))
-	_, _ = w.Write([]byte(diff))
+	_, _ = w.Write([]byte(c.Diff))
 }
 
 func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request, id identity) {
@@ -391,35 +338,27 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request, id identit
 	if !readJSON(w, r, &req) {
 		return
 	}
-	msg := strings.TrimSpace(req.Message)
-	if msg == "" {
-		msg = "Apply agent changes"
+	message := strings.TrimSpace(req.Message)
+	if message == "" {
+		message = "Apply agent changes"
 	}
 	if s.busy(r, id, sess.WorkspaceID) {
 		writeMsg(w, r, http.StatusConflict, "还有任务在跑，等它结束再提交")
 		return
 	}
-	dir := s.sessionDir(id.TenantID, sess)
-	ctx, cancel := ctxTimeout(r, time.Minute)
+	ctx, cancel := ctxTimeout(r, 2*time.Minute)
 	defer cancel()
-	if _, err := s.git.Run(ctx, dir, "add", "-A"); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
-		return
-	}
-	status, err := s.git.Run(ctx, dir, "status", "--porcelain")
+	name, email := author(id)
+	head, committed, err := s.ws.Commit(ctx, id, sess.WorkspaceID, message, name, email)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeWorkspaceError(w, r, err, http.StatusInternalServerError)
 		return
 	}
-	if strings.TrimSpace(status) == "" {
+	if !committed {
 		writeMsg(w, r, http.StatusBadRequest, "没有可提交的改动")
 		return
 	}
-	if _, err := s.git.RunAs(ctx, dir, id.UserID, id.UserID+"@"+id.TenantID+".coding.local", "commit", "-q", "-m", msg); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"head": s.git.Head(ctx, dir)})
+	writeJSON(w, http.StatusOK, map[string]string{"head": head})
 }
 
 func (s *Server) handleDiscard(w http.ResponseWriter, r *http.Request, id identity) {
@@ -431,14 +370,22 @@ func (s *Server) handleDiscard(w http.ResponseWriter, r *http.Request, id identi
 		writeMsg(w, r, http.StatusConflict, "还有任务在跑，等它结束或先取消")
 		return
 	}
-	dir := s.sessionDir(id.TenantID, sess)
-	ctx, cancel := ctxTimeout(r, time.Minute)
+	ctx, cancel := ctxTimeout(r, 2*time.Minute)
 	defer cancel()
-	for _, args := range [][]string{{"reset", "-q", "--hard", "HEAD"}, {"clean", "-q", "-fd"}} {
-		if _, err := s.git.Run(ctx, dir, args...); err != nil {
-			writeErr(w, r, http.StatusInternalServerError, err)
-			return
-		}
+	if err := s.ws.Discard(ctx, id, sess.WorkspaceID); err != nil {
+		writeWorkspaceError(w, r, err, http.StatusInternalServerError)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// head 是工作区现在的提交；还没有提交或读不到时为空。
+func (s *Server) head(r *http.Request, id identity, ws string) string {
+	ctx, cancel := ctxTimeout(r, time.Minute)
+	defer cancel()
+	commits, err := s.ws.Log(ctx, id, ws, 1, "")
+	if err != nil || len(commits) == 0 {
+		return ""
+	}
+	return commits[0].Hash
 }

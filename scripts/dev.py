@@ -11,8 +11,10 @@
 - Runtime 的检出默认在本仓库旁边（../agent-runtime），--runtime 或 AR_RUNTIME_DIR 可改。dev_stack.py 在 Runtime 仓库里用
   uv run --no-sync 跑（Worker 用 Runtime 的虚拟环境）；PATH 上没有 uv 时用跑这个脚本的 Python。
 - 运行目录（--root，默认 ~/.agentruntime/coding-dev）是 Runtime 与 coding-web 共用的：coding-web 的数据在 <目录>/coding，
-  日志 logs/coding.log，状态 coding.json。coding-web 与 Worker 共用工作区（Runtime 报告里的 workspace_root），
-  也共用开发租户策略文件（沙箱等级 = Task 的 effect 上限，见 docs/plan/coding-agent-mvp.md 第 7.3 节）。
+  日志 logs/coding.log，状态 coding.json。工作区经 Runtime 的 Workspace API（CODING_WORKSPACES=runtime）：coding-web 不碰
+  工作区的文件；Runtime 用 --sandbox docker、host 时 Worker 直接在它的工作区目录里做，用 --sandbox local 时在沙箱里做
+  （再加 --workspace archive 是存档模式，与云上的 Cloudflare 后端一样）。共用开发租户策略文件（沙箱等级 = Task 的 effect
+  上限，见 docs/plan/coding-agent-mvp.md 第 7.3 节）。
 - 第三方登录：~/.agentruntime/oauth.env（或旧的 github-oauth.env）里配了哪几家就打开哪几家（格式 NAME = value；
   CODING_<平台>_CLIENT_ID 与 _CLIENT_SECRET，可选 _URL、_API_URL、_SCOPES、_NAME；平台是 GITHUB、GITEE、GITLAB、GITEA、
   BITBUCKET、GOOGLE）。OAuth 回调 http://127.0.0.1:<端口>/api/auth/<平台>/callback，所以端口默认固定 8095。
@@ -202,7 +204,8 @@ class Coding:
         env = {
             "CODING_ADDR": f"127.0.0.1:{self.port}",
             "CODING_TASK_API": report["task_api"],
-            "CODING_WORKSPACE_ROOT": report["workspace_root"],
+            # 工作区经 Runtime 的 Workspace API（与 Task API 同一个地址）；不再与 Worker 共用工作区目录。
+            "CODING_WORKSPACES": "runtime",
             "CODING_DATA_DIR": str(self.root / "coding"),
             "CODING_DEV_LOGIN": "1",
             "CODING_TENANT_POLICIES_FILE": report.get("policies_file") or str(root / "tenant_policies.json"),

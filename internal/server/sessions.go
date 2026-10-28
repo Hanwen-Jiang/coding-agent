@@ -2,8 +2,6 @@ package server
 
 import (
 	"net/http"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -11,8 +9,8 @@ import (
 )
 
 // 会话（docs/plan/coding-agent-mvp.md 第 8 节）：一个工作区可以开很多会话，每个会话一段对话（Runtime 的一个 Session）
-// 加一份自己的工作副本。工作副本从工作区的基线仓库本地克隆（对象用硬链接），目录与 Runtime 的 workspace id 都是
-// <项目>--<会话>：Worker 的工具与 Docker 沙箱看到的是一个完整的仓库，会话之间可以同时跑、互不干扰。
+// 加一份自己的工作副本。工作副本从工作区的基线仓库复制（Runtime 的 Workspace API 的 from_workspace_id），Runtime 的
+// workspace id 是 <项目>--<会话>：Worker 的工具与沙箱看到的是一个完整的仓库，会话之间可以同时跑、互不干扰。
 
 // legacySession 是会话出现之前的项目迁移成的会话：直接用项目自己的目录。
 const legacySession = "main"
@@ -96,10 +94,6 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, id identity) (P
 	return p, sessions[i], true
 }
 
-func (s *Server) sessionDir(tenant string, sess Session) string {
-	return s.workspace(tenant, sess.WorkspaceID)
-}
-
 // updateSession 在锁里改一个会话的记录，返回改后的值。
 func (s *Server) updateSession(tenant string, sess Session, fn func(*Session)) (Session, error) {
 	var out Session
@@ -152,33 +146,26 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 	writeJSON(w, http.StatusCreated, sess)
 }
 
-// createSession 从工作区的基线仓库复制出会话的工作副本（检出基线分支），Git 平台的工作区再把远端换回平台、尽量拉到基线分支的最新提交。
+// createSession 从工作区的基线仓库复制出会话的工作副本（Workspaces.Create 的 From），Git 平台的工作区再尽量切到基线分支
+// 在远端的最新提交（拉不到时照用复制来的）。
 func (s *Server) createSession(r *http.Request, id identity, p Project, title string) (Session, error) {
 	now := time.Now().UTC()
 	sess := Session{ID: newSessionID(), ProjectID: p.ID, Title: title, CreatedAt: now, CreatedBy: id.UserID, UpdatedAt: now}
 	sess.WorkspaceID = p.ID + "--" + sess.ID
-	base := s.workspace(id.TenantID, p.ID)
-	dir := s.sessionDir(id.TenantID, sess)
-	ctx, cancel := ctxTimeout(r, 3*time.Minute)
+	ctx, cancel := ctxTimeout(r, 10*time.Minute)
 	defer cancel()
-	if _, err := s.git.CloneLocal(ctx, base, dir, p.BaseBranch); err != nil {
-		_ = os.RemoveAll(dir)
+	info, err := s.ws.Create(ctx, id, sess.WorkspaceID, CreateSpec{From: p.ID})
+	if err != nil {
 		return Session{}, err
 	}
-	if p.Repo != "" && strings.HasPrefix(p.Source, "https://") && s.providers[p.Provider] != nil {
-		if _, err := s.git.Run(ctx, dir, "remote", "set-url", "origin", p.Source); err != nil {
-			_ = os.RemoveAll(dir)
-			return Session{}, err
-		}
-		if host, user, pass := s.gitCredentials(r, id, p); p.BaseBranch != "" {
-			if _, err := s.git.RunWithAuth(ctx, dir, host, user, pass, "fetch", "-q", "--depth", "50", "origin", p.BaseBranch); err == nil {
-				_, _ = s.git.Run(ctx, dir, "reset", "-q", "--hard", "FETCH_HEAD")
-			}
+	sess.BaseCommit = info.Head
+	if p.Repo != "" && strings.HasPrefix(p.Source, "https://") && s.providers[p.Provider] != nil && p.BaseBranch != "" {
+		if head, err := s.ws.Sync(ctx, id, sess.WorkspaceID, p.BaseBranch, s.gitCredentials(r, id, p)); err == nil {
+			sess.BaseCommit = head
 		}
 	}
-	sess.BaseCommit = s.git.Head(ctx, dir)
 	if err := s.store.UpdateSessions(id.TenantID, func(all []Session) ([]Session, error) { return append(all, sess), nil }); err != nil {
-		_ = os.RemoveAll(dir)
+		_ = s.ws.Delete(ctx, id, sess.WorkspaceID)
 		return Session{}, err
 	}
 	return sess, nil
@@ -219,8 +206,10 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	if sess.WorkspaceID != p.ID {
-		if err := os.RemoveAll(s.sessionDir(id.TenantID, sess)); err != nil {
-			writeErr(w, r, http.StatusInternalServerError, err)
+		ctx, cancel := ctxTimeout(r, 5*time.Minute)
+		defer cancel()
+		if err := s.ws.Delete(ctx, id, sess.WorkspaceID); err != nil {
+			writeWorkspaceError(w, r, err, http.StatusInternalServerError)
 			return
 		}
 	}
@@ -240,13 +229,13 @@ func (s *Server) projectSessions(tenant, project string) ([]Session, error) {
 	return slices.DeleteFunc(sessions, func(x Session) bool { return x.ProjectID != project }), nil
 }
 
-// sessionDirs 是工作区下所有会话自己的工作副本目录（不含基线仓库）。
-func (s *Server) sessionDirs(tenant string, p Project, sessions []Session) []string {
-	var dirs []string
+// sessionWorkspaces 是工作区下所有会话自己的工作副本（不含基线仓库）。
+func sessionWorkspaces(p Project, sessions []Session) []string {
+	var out []string
 	for _, x := range sessions {
 		if x.WorkspaceID != p.ID {
-			dirs = append(dirs, filepath.Clean(s.sessionDir(tenant, x)))
+			out = append(out, x.WorkspaceID)
 		}
 	}
-	return dirs
+	return out
 }

@@ -71,16 +71,13 @@ func (s *Server) handleEnv(w http.ResponseWriter, r *http.Request, id identity) 
 	if !ok {
 		return
 	}
-	dir := s.sessionDir(id.TenantID, sess)
-	ctx, cancel := ctxTimeout(r, 10*time.Second)
+	ctx, cancel := ctxTimeout(r, time.Minute)
 	defer cancel()
-	subject, _ := s.git.Run(ctx, dir, "log", "-1", "--format=%s")
-	status, _ := s.git.Run(ctx, dir, "status", "--porcelain")
-	dirty := 0
-	for _, line := range strings.Split(status, "\n") {
-		if strings.TrimSpace(line) != "" {
-			dirty++
-		}
+	// 读不到（Runtime 那边一时不可用）时照样回其余的部分：分支、HEAD 为空。
+	changes, _ := s.ws.Changes(ctx, id, sess.WorkspaceID)
+	subject := ""
+	if commits, err := s.ws.Log(ctx, id, sess.WorkspaceID, 1, ""); err == nil && len(commits) > 0 {
+		subject = commits[0].Subject
 	}
 	sandbox := map[string]any{"mode": s.cfg.Sandbox}
 	if s.cfg.Sandbox == "docker" {
@@ -91,8 +88,8 @@ func (s *Server) handleEnv(w http.ResponseWriter, r *http.Request, id identity) 
 		"runtime": map[string]any{"ok": s.api.Healthy(ctx)},
 		"sandbox": sandbox,
 		"git": map[string]any{
-			"branch": s.git.Branch(ctx, dir), "head": s.git.Head(ctx, dir), "subject": strings.TrimSpace(subject),
-			"dirty": dirty, "base_branch": p.BaseBranch,
+			"branch": changes.Branch, "head": changes.Head, "subject": strings.TrimSpace(subject),
+			"dirty": len(changes.Files), "base_branch": p.BaseBranch,
 		},
 		"project": map[string]any{"source": p.Source, "git_provider": p.Provider, "repo": p.Repo, "created_at": p.CreatedAt},
 		"session": map[string]any{"workspace_id": sess.WorkspaceID, "runtime_session_id": sess.RuntimeSessionID, "base_commit": sess.BaseCommit, "own_copy": sess.WorkspaceID != p.ID},

@@ -1,6 +1,6 @@
 # coding-web 上云（单节点，与 Runtime 的 docs/plan/cloud-deploy.md 第 7 节对应）：
-# - 装在 agent-runtime 命名空间：要挂 Worker 用的同一个工作区卷（PVC workspaces，Runtime 的 deploy/cluster/workspaces.yaml）。
-#   工作区跟着沙箱走（Runtime 的 D-06）之后改用 Workspace API，不再挂卷。
+# - 装在 agent-runtime 命名空间。工作区经 Runtime 的 Workspace API（CODING_WORKSPACES=runtime，与 Task API 同一个地址；
+#   Runtime 的 D-06）：不挂 Worker 的工作区卷，换节点、换成存档模式的沙箱后端都不用改这里。
 # - 令牌：Runtime 第一期仍是开发 Ingress，coding-web 用同一把开发签名密钥签 Task API 的令牌（Secret agent-runtime-secrets）。
 # - 开发登录关掉（CODING_DEV_LOGIN 不设）：线上只用第三方登录，OAuth 的 Client ID 与 Secret 在 Secret coding-oauth
 #   （键 CODING_GITHUB_CLIENT_ID、CODING_GITHUB_CLIENT_SECRET 等，见 cmd/coding-web 的说明）。
@@ -47,7 +47,7 @@ spec:
           env:
             - {name: CODING_ADDR, value: "0.0.0.0:8095"}
             - {name: CODING_TASK_API, value: "http://ar-agent-runtime-task-service:8080"}
-            - {name: CODING_WORKSPACE_ROOT, value: /workspaces}
+            - {name: CODING_WORKSPACES, value: runtime}
             - {name: CODING_DATA_DIR, value: /data}
             - {name: CODING_PUBLIC_URL, value: "https://<coding 的域名>"}
             - {name: CODING_SECURE_COOKIE, value: "1"}
@@ -68,12 +68,9 @@ spec:
             requests: {cpu: 100m, memory: 128Mi}
             limits: {cpu: "1", memory: 512Mi}
           volumeMounts:
-            - {name: workspaces, mountPath: /workspaces}
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
       volumes:
-        - name: workspaces
-          persistentVolumeClaim: {claimName: workspaces}
         - name: data
           persistentVolumeClaim: {claimName: coding-data}
         - name: tmp

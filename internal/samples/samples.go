@@ -61,6 +61,33 @@ func Find(id string) (Sample, bool) {
 	return Sample{}, false
 }
 
+// File 是示例里的一个文件（相对仓库根的路径，/ 分隔）。
+type File struct {
+	Path    string
+	Content string
+}
+
+// Files 列出示例的全部文件（建工作区时经 Runtime 的 Workspace API 写入）。
+func Files(id string) ([]File, error) {
+	root, err := fs.Sub(files, id)
+	if err != nil {
+		return nil, err
+	}
+	var out []File
+	err = fs.WalkDir(root, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := fs.ReadFile(root, path)
+		if err != nil {
+			return err
+		}
+		out = append(out, File{Path: path, Content: string(data)})
+		return nil
+	})
+	return out, err
+}
+
 // Write 把示例的文件写进 dir。
 func Write(id, dir string) error {
 	root, err := fs.Sub(files, id)

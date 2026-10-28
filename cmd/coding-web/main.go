@@ -4,8 +4,10 @@
 // 环境变量：
 //
 //	CODING_ADDR                 监听地址，默认 127.0.0.1:8095
-//	CODING_TASK_API             task-service 的地址，例如 http://127.0.0.1:8080（必填）
-//	CODING_WORKSPACE_ROOT       工作区根，与 Worker 的 AR_TOOL_WORKSPACE_ROOT 相同（必填）
+//	CODING_TASK_API             task-service 的地址，例如 http://127.0.0.1:8080（必填）；Workspace API 在同一个地址
+//	CODING_WORKSPACES           工作区在哪里：runtime（默认，经 Runtime 的 Workspace API，coding-web 不碰工作区的文件）
+//	                            或 local（自己在 CODING_WORKSPACE_ROOT 里跑 git，要与 Worker 共用这块盘）
+//	CODING_WORKSPACE_ROOT       local 时的工作区根，与 Worker 的 AR_TOOL_WORKSPACE_ROOT 相同
 //	CODING_DATA_DIR             项目与任务的元数据目录（必填）
 //	CODING_DEV_LOGIN=1          打开开发登录（租户 + 用户名换令牌，仅供测试）；要同时给 AR_DEV_SIGNING_KEY
 //	AR_DEV_SIGNING_KEY          与 task-service 相同的开发签名密钥
@@ -44,6 +46,7 @@ import (
 func main() {
 	cfg := server.Config{
 		TaskAPI:       os.Getenv("CODING_TASK_API"),
+		Workspaces:    os.Getenv("CODING_WORKSPACES"),
 		WorkspaceRoot: os.Getenv("CODING_WORKSPACE_ROOT"),
 		DataDir:       os.Getenv("CODING_DATA_DIR"),
 		DevLogin:      os.Getenv("CODING_DEV_LOGIN") == "1",

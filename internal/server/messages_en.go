@@ -65,6 +65,9 @@ var english = map[string]string{
 	"路径不在工作区里":  "The path is outside the workspace",
 	"目录不存在":     "Folder not found",
 	"文件不存在":     "File not found",
+	// 本机模式（CODING_WORKSPACES=local）的工作区目录；Runtime 的 Workspace API 自己写说明。
+	"工作区不存在":  "Workspace files not found",
+	"工作区已经存在": "Workspace files already exist",
 
 	// 任务
 	"任务不存在": "Task not found",
