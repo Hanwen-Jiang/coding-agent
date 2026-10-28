@@ -1540,7 +1540,8 @@ function stepInfo(ev) {
         title = state === "failed" ? t("tool.failed", { what: toolText(v, false) }) : toolText(v, true);
         const parts = [];
         if (v.duration_ms != null) parts.push(t("tool.took", { dur: fmtMs(num(v.duration_ms)) }));
-        if (v.sandbox_startup_ms != null) parts.push(t("tool.sandboxStarted", { dur: fmtMs(num(v.sandbox_startup_ms)) }));
+        // 本机后端几乎不花时间：不到 0.3 秒的不提，免得满屏“启动沙箱用了 0 秒”。
+        if (num(v.sandbox_startup_ms) >= 300) parts.push(t("tool.sandboxStarted", { dur: fmtMs(num(v.sandbox_startup_ms)) }));
         detail = [parts.join(" · "), state === "failed" ? v.error || "" : ""].filter(Boolean).join("\n");
         now = t("step.thinkingNow");
       }
