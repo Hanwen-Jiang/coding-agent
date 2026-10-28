@@ -65,6 +65,9 @@ const state = {
   open: new Set(), // 展开的工作过程
   closed: new Set(), // 用户手动收起的
   replied: new Set(),
+  rawOpen: new Set(), // 展开了“原始事件”的步骤（taskId:eventId）：重画时保持展开
+  shownSteps: new Map(), // taskId → 已经画过的步骤（eventId）：只给新来的步骤进场动画
+  pending: null, // 正在提交的任务：{ message, phase: "session" | "submit", started, shown }
   changes: null,
   env: null,
   active: [],
@@ -1237,8 +1240,7 @@ function liveInfo(task) {
   let round = 0;
   for (const e of events) if (e.type === "round_started") round = num(pick(e.value, "round_seq")) || round;
   const steps = workSteps(events);
-  const last = steps[steps.length - 1];
-  const now = last ? stepInfo(last).now : task.status === "TASK_STATUS_QUEUED" ? t("status.queued") : t("run.connecting");
+  const now = steps.length ? phaseNow(task, events).text : task.status === "TASK_STATUS_QUEUED" ? t("status.queued") : t("run.connecting");
   const elapsed = events.length ? Date.now() - new Date(events[0].time) : 0;
   return { round, now, elapsed, steps: steps.length };
 }
@@ -1251,8 +1253,8 @@ function renderThread(stick = false) {
   const nearBottom = stick || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
   let content;
   if (!state.project) content = welcome();
-  else if (!state.tasks.length) content = projectEmpty();
-  else content = state.tasks.map(turn);
+  else if (!state.tasks.length && !pendingTurnShown()) content = projectEmpty();
+  else content = [state.tasks.map(turn), pendingTurn()];
   thread.replaceChildren(h("div", { class: "thread" }, content));
   if (nearBottom) thread.scrollTop = thread.scrollHeight;
 }
@@ -1331,6 +1333,7 @@ function turn(task) {
   if (finished) tail = result(task, finished.value);
   else if (running) tail = waitingLine(task);
   else if (!run) tail = h("div", { class: "result-foot" }, statusChip(status), h("button", { class: "btn ghost sm", onclick: () => loadRun(task, true) }, t("turn.load")));
+  // 每来一个事件整轮重画：这里不带进场动画（只有刚发出的那一轮在“提交中”时升上来一次）。
   return h("section", { class: "turn", id: "turn-" + task.id },
     h("div", { class: "msg-user" },
       h("div", { class: "bubble" }, task.message),
@@ -1354,7 +1357,39 @@ function waitingLine(task) {
   }
   const run = state.runs.get(task.id);
   if (run && run.events.length) return null; // 进度在工作过程与输入框上方
-  return h("div", { class: "waiting-line" }, h("span", { class: "spinner" }), run ? t("run.starting") : t("run.connecting"));
+  return h("div", { class: "waiting-line" }, h("span", { class: "spinner" }), run ? t("run.starting") : t("run.connecting"),
+    h("span", { class: "since", "data-since": task.created_at }, fmtSince(task.created_at)));
+}
+
+// pendingTurn 是正在提交的那一轮：消息先出现，下面说明在做什么、等了多久（开会话要复制工作副本，借沙箱要几秒到十几秒）。
+function pendingTurn() {
+  const p = pendingTurnShown();
+  if (!p) return null;
+  const enter = p.shown ? "" : " enter";
+  p.shown = true;
+  return h("section", { class: "turn pending" + enter },
+    h("div", { class: "msg-user" }, h("div", { class: "bubble" }, p.message)),
+    h("div", { class: "msg-agent" },
+      h("div", { class: "agent-mark live" }, logo()),
+      h("div", { class: "agent-body" },
+        h("div", { class: "waiting-line" }, h("span", { class: "spinner" }), h("span", {}, t(p.phase === "session" ? "pending.session" : "pending.submit")),
+          h("span", { class: "since", "data-since": p.started }, fmtSince(p.started))),
+        p.phase === "session" ? h("div", { class: "indeterminate" }) : null)),
+  );
+}
+
+// pendingTurnShown 是这里该显示的“提交中”：只在发出它的那个工作区（与会话）里，提交途中切到别处不跟过去。
+function pendingTurnShown() {
+  const p = state.pending;
+  if (!p || !state.project || p.project !== state.project.id) return null;
+  if (p.session !== (state.session ? state.session.id : null)) return null;
+  return p;
+}
+
+// fmtSince 是“已经等了多久”（不到 2 秒不显示，免得一闪而过）。
+function fmtSince(since) {
+  const ms = Date.now() - new Date(since).getTime();
+  return ms >= 2000 ? fmtDuration(ms) : "";
 }
 
 function asks(events) {
@@ -1378,13 +1413,43 @@ function worklog(task, events, running, finished) {
   const head = running
     ? [h("span", { class: "spinner" }), h("span", { class: "grow", id: "wl-" + task.id }, workingText(steps.length, elapsed))]
     : [icon(finished && finished.value.status === "TASK_STATUS_DONE" ? "check" : "clock", "sm lead"), h("span", { class: "grow" }, t("work.done", { dur: fmtDuration(elapsed), n: steps.length }))];
-  return h("div", { class: "worklog" + (isOpen ? " open" : "") },
+  // 只有这次新来的步骤带进场动画：第一次画（打开会话、载入历史）时一个都不动。
+  const shown = state.shownSteps.get(task.id);
+  state.shownSteps.set(task.id, new Set(steps.map((e) => e.event_id)));
+  const live = running ? phaseNow(task, events) : null;
+  // 点开、收起的那一次重画带一次性的过渡；之后来事件重画时不重放。
+  const toggled = state.toggledLog && state.toggledLog.id === task.id ? (isOpen ? " opening" : " closing") : "";
+  if (toggled) state.toggledLog = null;
+  return h("div", { class: "worklog" + (isOpen ? " open" : "") + toggled },
     h("button", { class: "worklog-head", onclick: () => {
       if (isOpen) { state.open.delete(task.id); state.closed.add(task.id); } else { state.open.add(task.id); state.closed.delete(task.id); }
+      state.toggledLog = { id: task.id };
       renderTurn(task.id);
     } }, head, icon("chevron", "sm chev")),
-    h("div", { class: "worklog-steps" }, steps.map(step)),
+    h("div", { class: "worklog-steps" }, steps.map((ev) => step(ev, task.id, !!shown && !shown.has(ev.event_id))),
+      live ? h("div", { class: "step now" + (shown && live.lastId != null && !shown.has(live.lastId) ? " enter" : "") },
+        h("div", { class: "step-icon" }, h("span", { class: "spinner" })),
+        h("div", { class: "step-main" }, h("div", { class: "step-title" }, live.text)),
+        h("span", { class: "step-time since", "data-since": live.since }, fmtSince(live.since))) : null),
   );
+}
+
+// phaseNow 是进行中的任务此刻在做什么、从什么时候开始：按最后一个事件推（规划、执行、审查、下一轮）。
+function phaseNow(task, events) {
+  const steps = workSteps(events);
+  const last = steps[steps.length - 1];
+  if (!last) return { text: t("run.starting"), since: task.created_at, lastId: null };
+  let text = stepInfo(last).now;
+  if (last.type === "node_finished") {
+    // 这一轮的节点都结束了：Reviewer 在审查。
+    const stage = [...steps].reverse().find((e) => e.type === "stage_started");
+    const nodes = stage && Array.isArray(stage.value.nodes) ? stage.value.nodes.map((n) => (typeof n === "string" ? n : pick(n, "id"))) : [];
+    const done = new Set(steps.filter((e) => e.type === "node_finished" && e.event_id > (stage ? stage.event_id : 0)).map((e) => pick(e.value, "node_id")));
+    if (nodes.length && nodes.every((n) => done.has(n))) text = t("step.reviewNow");
+  } else if (last.type === "verdict") {
+    text = t("step.nextRoundNow");
+  }
+  return { text, since: last.time, lastId: last.event_id };
 }
 
 function workingText(steps, elapsed) {
@@ -1444,15 +1509,24 @@ function stepInfo(ev) {
   return { ic, kind, title, detail, chips, now: now || title };
 }
 
-function step(ev) {
+function step(ev, taskId, enter) {
   const s = stepInfo(ev);
-  return h("div", { class: `step ${s.kind}` },
+  // 展开了的“原始事件”记在 state 里：鼠标移开、来了新事件整轮重画，都保持展开。
+  const key = taskId + ":" + ev.event_id;
+  return h("div", { class: `step ${s.kind}` + (enter ? " enter" : "") },
     h("div", { class: "step-icon" }, icon(s.ic, "xs")),
     h("div", { class: "step-main" },
       h("div", { class: "step-title" }, s.title),
       s.detail ? h("div", { class: "step-detail" }, s.detail) : null,
       s.chips,
-      h("details", { class: "raw" }, h("summary", {}, t("step.raw")), h("pre", {}, JSON.stringify(ev.value || {}, null, 2))),
+      h("details", {
+        class: "raw", open: state.rawOpen.has(key),
+        ontoggle: (e) => {
+          const el = e.currentTarget;
+          if (el.open) state.rawOpen.add(key); else state.rawOpen.delete(key);
+          el.classList.toggle("just-opened", el.open); // 展开那一下的淡入；重画出的新元素不带它，不重放
+        },
+      }, h("summary", {}, t("step.raw")), h("pre", {}, JSON.stringify(ev.value || {}, null, 2))),
     ),
     h("span", { class: "step-time" }, fmtClock(ev.time)),
   );
@@ -1914,12 +1988,17 @@ async function submit(text) {
   if (!message || state.sending || !state.project) return;
   state.sending = true;
   refreshSend();
+  // 消息先出现在对话里，下面说明在做什么：草稿要先开会话（复制工作副本，借沙箱），再提交。界面不等请求回来。
+  state.pending = { message, phase: state.session ? "submit" : "session", started: new Date().toISOString(), project: state.project.id, session: state.session ? state.session.id : null };
+  if (text === undefined && ui.input) { ui.input.value = ""; autosize(); }
+  renderThread(true);
   try {
     if (!state.session) {
       const p = state.project;
       const sess = await api("POST", `/api/projects/${p.id}/sessions`, { title: message });
       state.sessions.unshift(sess);
       state.session = sess;
+      state.pending = { ...state.pending, phase: "submit", session: sess.id };
       setHash(`#/w/${p.id}/s/${sess.id}`);
       renderApp();
       loadEnv();
@@ -1927,21 +2006,24 @@ async function submit(text) {
     const base = sbase();
     const t = await api("POST", `${base}/tasks`, { message, sandbox: state.settings.sandbox, model: state.settings.model });
     if (sbase() !== base) return;
+    state.pending = null;
     state.tasks.push(t);
     // 这个会话成了最近活动的：排到最前。
     const touched = { ...state.session, updated_at: t.created_at };
     state.sessions = [touched, ...state.sessions.filter((x) => !(x.project_id === touched.project_id && x.id === touched.id))];
     state.session = touched;
-    if (text === undefined && ui.input) { ui.input.value = ""; autosize(); }
     renderThread(true);
     renderTopbar();
     loadRun(t);
     loadActive();
     scheduleChrome();
   } catch (ex) {
+    state.pending = null;
+    renderThread();
     report(ex);
     if (text === undefined && ui.input && !ui.input.value) setComposer(message);
   } finally {
+    state.pending = null;
     state.sending = false;
     refreshSend();
     if (ui.input) ui.input.focus();
@@ -2567,6 +2649,8 @@ setInterval(() => {
     if (!run || !el || !run.events.length) continue;
     el.textContent = workingText(workSteps(run.events).length, Date.now() - new Date(run.events[0].time));
   }
+  // “已经等了多久”（提交中、正在规划、Reviewer 在审查……）：只改文字。
+  for (const el of document.querySelectorAll("[data-since]")) el.textContent = fmtSince(el.dataset.since);
   const cur = inSession() && currentTask();
   const timer = document.getElementById("c-elapsed");
   if (timer && cur) {

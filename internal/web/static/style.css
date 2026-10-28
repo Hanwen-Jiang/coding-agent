@@ -184,6 +184,18 @@ code, pre, .mono { font-family: var(--font-mono); }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slide { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+/* 过渡只动 opacity 与 transform（合成层上完成，不触发重排）；只挂在真正新出现的东西上，整轮重画时不重放。 */
+@keyframes reveal { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes chev-open { from { transform: rotate(0deg); } to { transform: rotate(90deg); } }
+@keyframes chev-close { from { transform: rotate(90deg); } to { transform: rotate(0deg); } }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+/* 悬停、选中时颜色与阴影渐变，不再一下跳过去 */
+.side-item, .nav-item, .pick, .pop-item, .tree-item, .link-row, .suggestion, .pv-tab, .seg button, .worklog-head, .item-more, .ws-card {
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, opacity 0.14s ease;
+}
 
 /* ------------------------------------------------------------------ 按钮、标签、表单 */
 
@@ -249,7 +261,7 @@ textarea.field { height: auto; padding: 8px 11px; resize: vertical; line-height:
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
   z-index: 100; padding: 9px 16px; border-radius: 999px;
   background: var(--text); color: var(--bg); box-shadow: var(--shadow-lg);
-  font-size: 13px; animation: fade 0.16s ease-out;
+  font-size: 13px; animation: toast-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .toast.err { background: var(--err); color: #fff; }
 
@@ -460,7 +472,8 @@ textarea.field { height: auto; padding: 8px 11px; resize: vertical; line-height:
 
 /* ------------------------------------------------------------------ 对话 */
 
-.turn { margin-bottom: 30px; animation: rise 0.18s ease-out; }
+.turn { margin-bottom: 30px; }
+.turn.enter { animation: rise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .msg-user { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 16px; }
 .msg-user .bubble {
   max-width: 86%; padding: 10px 15px;
@@ -476,6 +489,10 @@ textarea.field { height: auto; padding: 8px 11px; resize: vertical; line-height:
 @keyframes blink { 50% { opacity: 0; } }
 .agent-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .waiting-line { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13.5px; min-height: 28px; }
+.since { color: var(--faint); font: 11.5px var(--font-mono); font-variant-numeric: tabular-nums; }
+/* 不知道还要多久的等待（开会话时复制工作副本）：一条来回扫的细条，只动 transform。 */
+.indeterminate { position: relative; height: 3px; max-width: 280px; border-radius: 999px; background: var(--sunken); overflow: hidden; }
+.indeterminate::after { content: ""; position: absolute; inset: 0; width: 40%; border-radius: inherit; background: var(--accent); opacity: 0.65; animation: sweep 1.3s ease-in-out infinite; }
 
 /* 工作过程 */
 .worklog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
@@ -487,10 +504,18 @@ textarea.field { height: auto; padding: 8px 11px; resize: vertical; line-height:
 .worklog-head:hover { background: var(--surface-2); }
 .worklog-head .chev { color: var(--faint); transition: transform 0.15s; }
 .worklog.open .worklog-head .chev { transform: rotate(90deg); }
+/* 点开、收起时整块重画：箭头与步骤用一次性的动画过渡（opening、closing 只在点击后的那一次画上）。 */
+.worklog.opening .worklog-head .chev { animation: chev-open 0.16s ease-out; }
+.worklog.closing .worklog-head .chev { animation: chev-close 0.16s ease-out; }
+.worklog.opening .worklog-steps { animation: reveal 0.18s ease-out; }
 .worklog-head .spinner, .worklog-head .icon.lead { color: var(--accent); }
 .worklog-steps { display: none; padding: 4px 12px 10px 14px; border-top: 1px solid var(--line); }
 .worklog.open .worklog-steps { display: block; }
 .step { position: relative; display: flex; gap: 10px; padding: 7px 0; }
+.step.enter { animation: rise 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.step.now .step-icon { background: var(--accent-soft); color: var(--accent); }
+.step.now .step-icon .spinner { width: 10px; height: 10px; }
+.step.now .step-title { color: var(--muted); }
 .step::before { content: ""; position: absolute; left: 10px; top: 28px; bottom: -6px; width: 1px; background: var(--line); }
 .step:last-child::before { display: none; }
 .step-icon { flex: none; width: 21px; height: 21px; border-radius: 50%; display: grid; place-items: center; background: var(--sunken); color: var(--muted); position: relative; z-index: 1; }
@@ -503,9 +528,13 @@ textarea.field { height: auto; padding: 8px 11px; resize: vertical; line-height:
 .step-detail { margin-top: 1px; font-size: 12.5px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
 .step-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .step-time { flex: none; font: 11px/21px var(--font-mono); color: var(--faint); }
+/* 原始事件：悬停时淡入；展开了就一直显示（鼠标移开也在），展开那一下内容淡入。 */
 .step .raw { margin-top: 3px; display: none; }
-.step:hover .raw { display: block; }
-.step .raw summary { cursor: pointer; font-size: 11.5px; color: var(--faint); }
+.step:hover .raw, .step .raw[open] { display: block; }
+.step:hover .raw:not([open]) { animation: reveal 0.14s ease-out; }
+.step .raw.just-opened[open] pre { animation: reveal 0.16s ease-out; }
+.step .raw summary { cursor: pointer; font-size: 11.5px; color: var(--faint); transition: color 0.14s ease; }
+.step .raw summary:hover, .step .raw[open] summary { color: var(--muted); }
 .step .raw pre { margin: 4px 0 0; padding: 8px; max-height: 220px; overflow: auto; border-radius: 6px; background: var(--sunken); font-size: 11.5px; }
 
 /* 回答（衬线体） */
@@ -796,6 +825,16 @@ dialog.palette { width: min(620px, calc(100vw - 32px)); margin-top: 12vh; paddin
 
 dialog { width: min(560px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--bg); color: var(--text); box-shadow: var(--shadow-lg); }
 dialog::backdrop { background: rgba(20, 19, 18, 0.35); }
+dialog[open] { animation: pop-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
+dialog[open]::backdrop { animation: fade 0.18s ease-out; }
+
+/* 系统设了“减少动态效果”：去掉进场与过渡动画（加载用的转圈保留，它表示还在进行）。 */
+@media (prefers-reduced-motion: reduce) {
+  .turn.enter, .step.enter, .step:hover .raw:not([open]), .step .raw.just-opened[open] pre, .worklog.opening .worklog-steps,
+  .worklog.opening .worklog-head .chev, .worklog.closing .worklog-head .chev, dialog[open], dialog[open]::backdrop, .toast,
+  .hero-empty, .page, .next-steps, .other-providers, .drawer, .scrim, .pop, .indeterminate::after { animation: none !important; }
+  * { transition-duration: 0s !important; }
+}
 .d-head { padding: 18px 20px 4px; }
 .d-head h2 { margin: 0; font: 400 22px/1.2 var(--font-serif); }
 .d-body { padding: 14px 20px; display: flex; flex-direction: column; gap: 14px; max-height: 64vh; overflow: auto; }

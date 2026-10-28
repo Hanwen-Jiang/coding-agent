@@ -181,6 +181,8 @@ const ZH = {
   "queue.cancel": "取消排队",
   "run.starting": "正在开始…",
   "run.connecting": "正在连接…",
+  "pending.session": "正在准备工作副本：分配沙箱、复制文件…",
+  "pending.submit": "正在提交…",
 
   "ask.default": "Agent 请求确认后再继续。",
   "ask.short": "确认",
@@ -210,6 +212,8 @@ const ZH = {
   "step.tool": "工具 {name}",
   "step.verdict": "Reviewer 判定：{label}（{key}）",
   "step.verdictNow": "Reviewer 判定：{label}",
+  "step.reviewNow": "Reviewer 正在审查这一轮的结果",
+  "step.nextRoundNow": "正在规划下一轮",
   "step.raw": "原始事件",
 
   "rounds": "{n} 轮",
@@ -557,6 +561,8 @@ const EN = {
   "queue.cancel": "Remove from queue",
   "run.starting": "Starting…",
   "run.connecting": "Connecting…",
+  "pending.session": "Preparing your working copy: allocating a sandbox and copying files…",
+  "pending.submit": "Submitting…",
 
   "ask.default": "The agent needs your confirmation to continue.",
   "ask.short": "Confirm",
@@ -586,6 +592,8 @@ const EN = {
   "step.tool": "Tool {name}",
   "step.verdict": "Reviewer verdict: {label} ({key})",
   "step.verdictNow": "Reviewer verdict: {label}",
+  "step.reviewNow": "Reviewer is checking this round's result",
+  "step.nextRoundNow": "Planning the next round",
   "step.raw": "Raw event",
 
   "rounds": ({ n }) => `${n} ${plural(n, "round", "rounds")}`,

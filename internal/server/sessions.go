@@ -208,7 +208,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request, id 
 	if sess.WorkspaceID != p.ID {
 		ctx, cancel := ctxTimeout(r, 5*time.Minute)
 		defer cancel()
-		if err := s.ws.Delete(ctx, id, sess.WorkspaceID); err != nil {
+		if err := s.deleteWorkspace(ctx, id, sess.WorkspaceID); err != nil {
 			writeWorkspaceError(w, r, err, http.StatusInternalServerError)
 			return
 		}

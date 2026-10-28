@@ -165,7 +165,7 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request, id 
 	ctx, cancel := ctxTimeout(r, 5*time.Minute)
 	defer cancel()
 	for _, ws := range append(sessionWorkspaces(p, sessions), p.ID) {
-		if err := s.ws.Delete(ctx, id, ws); err != nil {
+		if err := s.deleteWorkspace(ctx, id, ws); err != nil {
 			writeWorkspaceError(w, r, err, http.StatusInternalServerError)
 			return
 		}
@@ -377,15 +377,4 @@ func (s *Server) handleDiscard(w http.ResponseWriter, r *http.Request, id identi
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-// head 是工作区现在的提交；还没有提交或读不到时为空。
-func (s *Server) head(r *http.Request, id identity, ws string) string {
-	ctx, cancel := ctxTimeout(r, time.Minute)
-	defer cancel()
-	commits, err := s.ws.Log(ctx, id, ws, 1, "")
-	if err != nil || len(commits) == 0 {
-		return ""
-	}
-	return commits[0].Hash
 }

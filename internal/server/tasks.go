@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -113,7 +115,6 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		writeMsg(w, r, http.StatusBadRequest, "模型倾向只能是 economy、balanced 或 best")
 		return
 	}
-	base := s.head(r, id, sess.WorkspaceID)
 	submit := map[string]any{
 		"workspaceId":     sess.WorkspaceID,
 		"clientRequestId": randomHex(16),
@@ -144,7 +145,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		}
 		x.UpdatedAt = now
 	})
-	record := TaskRecord{ID: resp.TaskID, Message: msg, CreatedAt: now, CreatedBy: id.UserID, BaseCommit: base, Status: "TASK_STATUS_QUEUED", Sandbox: sandbox, Model: model}
+	record := TaskRecord{ID: resp.TaskID, Message: msg, CreatedAt: now, CreatedBy: id.UserID, Status: "TASK_STATUS_QUEUED", Sandbox: sandbox, Model: model}
 	if err := s.store.UpdateTasks(id.TenantID, sess.WorkspaceID, func(ts []TaskRecord) []TaskRecord {
 		if slices.ContainsFunc(ts, func(t TaskRecord) bool { return t.ID == record.ID }) {
 			return ts
@@ -154,7 +155,44 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
+	// 任务开始时的提交记在后台补上：经 Workspace API 读 HEAD 要借一个沙箱环境（冷启动几秒到十几秒），不让提交等它。
+	// Task 自己不提交（提交由用户点按钮），所以晚一点读到的 HEAD 与提交那一刻相同。
+	go s.recordBaseCommit(id, sess.WorkspaceID, record.ID)
 	writeJSON(w, http.StatusCreated, record)
+}
+
+// recordBaseCommit 读工作区当前的提交，补进任务记录（读不到时留空，与以前相同）。
+func (s *Server) recordBaseCommit(id identity, workspaceID, taskID string) {
+	lock := s.workspaceLock(workspaceID)
+	lock.Lock()
+	defer lock.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	commits, err := s.ws.Log(ctx, id, workspaceID, 1, "")
+	if err != nil || len(commits) == 0 {
+		return
+	}
+	_ = s.store.UpdateTasks(id.TenantID, workspaceID, func(ts []TaskRecord) []TaskRecord {
+		for i := range ts {
+			if ts[i].ID == taskID && ts[i].BaseCommit == "" {
+				ts[i].BaseCommit = commits[0].Hash
+			}
+		}
+		return ts
+	})
+}
+
+// workspaceLock 让后台读提交与删工作区互斥：删的时候不撞上还在工作区里跑的 git（Windows 上删不掉正被打开的目录）。
+func (s *Server) workspaceLock(workspaceID string) *sync.Mutex {
+	m, _ := s.wsLocks.LoadOrStore(workspaceID, &sync.Mutex{})
+	return m.(*sync.Mutex)
+}
+
+func (s *Server) deleteWorkspace(ctx context.Context, id identity, workspaceID string) error {
+	lock := s.workspaceLock(workspaceID)
+	lock.Lock()
+	defer lock.Unlock()
+	return s.ws.Delete(ctx, id, workspaceID)
 }
 
 // task 取出请求路径里的任务，确认它属于这个租户的这个会话。

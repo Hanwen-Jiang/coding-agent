@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/agentruntime/agent-runtime/libs/go-core/dev/localingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/providers/ingress"
@@ -28,6 +29,8 @@ type fakeWorkspaceAPI struct {
 	mu      sync.Mutex
 	calls   []map[string]any
 	methods []string
+	// logGate 不为空时 GetLog 等它关上再回（模拟借沙箱环境的冷启动）。
+	logGate chan struct{}
 }
 
 func (f *fakeWorkspaceAPI) record(method string, body map[string]any) {
@@ -109,6 +112,15 @@ func (f *fakeWorkspaceAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			out = map[string]any{"size": strconv.FormatInt(c.Size, 10), "tooLarge": c.TooLarge, "binary": c.Binary, "content": c.Content}
 		}
 	case "GetLog":
+		f.mu.Lock()
+		gate := f.logGate
+		f.mu.Unlock()
+		if gate != nil {
+			select {
+			case <-gate:
+			case <-ctx.Done():
+			}
+		}
 		limit, _ := body["limit"].(float64)
 		var commits []CommitInfo
 		if commits, err = f.ws.Log(ctx, id, str("workspaceId"), int(limit), str("base")); err == nil {
@@ -189,6 +201,40 @@ func newRuntimeServer(t *testing.T) (*httptest.Server, *fakeWorkspaceAPI, string
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, fakeWS, root
+}
+
+// 下任务不等 Workspace API：读 HEAD 要借沙箱环境（冷启动几秒到十几秒），任务开始时的提交在后台补进记录。
+func TestSubmittingATaskDoesNotWaitForTheWorkspace(t *testing.T) {
+	ts, fake, _ := newRuntimeServer(t)
+	c := newClient(t, ts.URL)
+	pid := sampleProject(t, c)
+	_, sess, _ := c.do("POST", "/api/projects/"+pid+"/sessions", map[string]string{"title": "快"})
+	api := "/api/projects/" + pid + "/sessions/" + sess["id"].(string)
+
+	gate := make(chan struct{})
+	fake.mu.Lock()
+	fake.logGate = gate
+	fake.mu.Unlock()
+	start := time.Now()
+	code, task, raw := c.do("POST", api+"/tasks", map[string]string{"message": "fix it"})
+	if code != http.StatusCreated || time.Since(start) > 3*time.Second {
+		t.Fatalf("下任务应立即回：%d %s（%v）", code, raw, time.Since(start))
+	}
+	if task["base_commit"] != nil {
+		t.Fatalf("开始时的提交还没读到：%v", task["base_commit"])
+	}
+	close(gate)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, list, _ := c.doList("GET", api+"/tasks", nil)
+		if len(list) == 1 && list[0]["base_commit"] != nil && list[0]["base_commit"] != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("开始时的提交应在后台补上：%v", list)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func TestWorkspacesGoThroughTheRuntimeWorkspaceAPI(t *testing.T) {

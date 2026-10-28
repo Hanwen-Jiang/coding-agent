@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/agentruntime/agent-runtime/libs/go-core/dev/localingress"
@@ -71,6 +72,7 @@ type Server struct {
 	api       *TaskAPI
 	git       Git
 	ws        Workspaces
+	wsLocks   sync.Map // 工作区 id → *sync.Mutex（workspaceLock）
 	providers map[string]*Provider
 	allowed   map[string]bool
 }
