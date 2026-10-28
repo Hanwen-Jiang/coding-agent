@@ -67,6 +67,7 @@ const state = {
   replied: new Set(),
   rawOpen: new Set(), // 展开了“原始事件”的步骤（taskId:eventId）：重画时保持展开
   shownSteps: new Map(), // taskId → 已经画过的步骤（eventId）：只给新来的步骤进场动画
+  shownNow: new Map(), // taskId → “此刻”那一行对应的事件：换了才给它进场动画
   pending: null, // 正在提交的任务：{ message, phase: "session" | "submit", started, shown }
   changes: null,
   env: null,
@@ -238,6 +239,12 @@ function fmtDuration(ms) {
   if (s < 60) return t("dur.s", { s });
   const m = Math.floor(s / 60);
   return s % 60 ? t("dur.ms", { m, s: s % 60 }) : t("dur.m", { m });
+}
+
+// fmtMs 是一次工具调用、沙箱启动这类短时间：不到一分钟时带一位小数（0.1 秒、8.1 秒）。
+function fmtMs(ms) {
+  if (ms >= 60000) return fmtDuration(ms);
+  return t("dur.s", { s: (Math.max(0, ms) / 1000).toFixed(1).replace(/\.0$/, "") });
 }
 
 function fmtTimer(ms) {
@@ -1417,6 +1424,10 @@ function worklog(task, events, running, finished) {
   const shown = state.shownSteps.get(task.id);
   state.shownSteps.set(task.id, new Set(steps.map((e) => e.event_id)));
   const live = running ? phaseNow(task, events) : null;
+  // “此刻”那一行换了内容（新的阶段、新的一次调用）才带进场动画。
+  const nowBefore = state.shownNow.get(task.id);
+  state.shownNow.set(task.id, live ? live.lastId : null);
+  const nowEnter = !!shown && !!live && live.lastId !== nowBefore;
   // 点开、收起的那一次重画带一次性的过渡；之后来事件重画时不重放。
   const toggled = state.toggledLog && state.toggledLog.id === task.id ? (isOpen ? " opening" : " closing") : "";
   if (toggled) state.toggledLog = null;
@@ -1427,7 +1438,7 @@ function worklog(task, events, running, finished) {
       renderTurn(task.id);
     } }, head, icon("chevron", "sm chev")),
     h("div", { class: "worklog-steps" }, steps.map((ev) => step(ev, task.id, !!shown && !shown.has(ev.event_id))),
-      live ? h("div", { class: "step now" + (shown && live.lastId != null && !shown.has(live.lastId) ? " enter" : "") },
+      live ? h("div", { class: "step now" + (nowEnter ? " enter" : "") },
         h("div", { class: "step-icon" }, h("span", { class: "spinner" })),
         h("div", { class: "step-main" }, h("div", { class: "step-title" }, live.text)),
         h("span", { class: "step-time since", "data-since": live.since }, fmtSince(live.since))) : null),
@@ -1436,10 +1447,15 @@ function worklog(task, events, running, finished) {
 
 // phaseNow 是进行中的任务此刻在做什么、从什么时候开始：按最后一个事件推（规划、执行、审查、下一轮）。
 function phaseNow(task, events) {
-  const steps = workSteps(events);
+  const steps = timeline(events);
   const last = steps[steps.length - 1];
   if (!last) return { text: t("run.starting"), since: task.created_at, lastId: null };
   let text = stepInfo(last).now;
+  if (last.type === "tool_status" && last.value.state === "running" && last.value.tool === "shell_run"
+    && !steps.some((e) => e.type === "tool_status" && e.value.tool === "shell_run" && e.value.state !== "running")) {
+    // 这个任务里第一次跑命令：可能要先借一个沙箱环境（冷启动几秒到十几秒），先说一声。
+    text += " · " + t("tool.sandboxMaybe");
+  }
   if (last.type === "node_finished") {
     // 这一轮的节点都结束了：Reviewer 在审查。
     const stage = [...steps].reverse().find((e) => e.type === "stage_started");
@@ -1456,8 +1472,25 @@ function workingText(steps, elapsed) {
   return t("work.live", { n: steps }) + (elapsed ? " · " + fmtDuration(elapsed) : "");
 }
 
-function workSteps(events) {
+// timeline 是进度事件（不含心跳、问题与结局）；workSteps 是画成步骤的那些：一次工具调用有两个 tool_status（running，然后
+// succeeded 或 failed），步骤里只有有了结果的那个，正在跑的那次显示在“此刻”那一行（phaseNow）。
+function timeline(events) {
   return events.filter((e) => !QUIET.has(e.type) && e.type !== "task_finished" && e.type !== "human_input_required");
+}
+
+function workSteps(events) {
+  return timeline(events).filter((e) => !(e.type === "tool_status" && e.value && e.value.state === "running"));
+}
+
+// toolText 是一次工具调用给人看的说法：常用的工具各有说法（正在读、读了……），其余的写工具名。
+const KNOWN_TOOLS = new Set(["repo_read", "repo_list", "repo_grep", "repo_edit", "shell_run", "web_fetch"]);
+function toolText(v, done) {
+  const tool = String(v.tool || "");
+  const target = String(v.target || "");
+  const text = KNOWN_TOOLS.has(tool)
+    ? t(`tool.${done ? "done" : "run"}.${tool}`, { target })
+    : t(done ? "tool.done" : "tool.run", { tool, target });
+  return text.trim();
 }
 
 function stepInfo(ev) {
@@ -1495,7 +1528,24 @@ function stepInfo(ev) {
       detail = [pick(v, "role"), st && st !== "succeeded" ? st : ""].filter(Boolean).join(" · ");
       break;
     }
-    case "tool_status": ic = "terminal"; title = t("step.tool", { name: pick(v, "tool", "name") || "" }); detail = pick(v, "status", "message") || ""; break;
+    case "tool_status": {
+      const state = String(v.state || "");
+      ic = v.tool === "shell_run" ? "terminal" : v.tool === "repo_edit" ? "compose" : "eye";
+      if (state === "running") {
+        kind = "run";
+        title = toolText(v, false);
+        now = title;
+      } else {
+        kind = state === "failed" ? "err" : "ok";
+        title = state === "failed" ? t("tool.failed", { what: toolText(v, false) }) : toolText(v, true);
+        const parts = [];
+        if (v.duration_ms != null) parts.push(t("tool.took", { dur: fmtMs(num(v.duration_ms)) }));
+        if (v.sandbox_startup_ms != null) parts.push(t("tool.sandboxStarted", { dur: fmtMs(num(v.sandbox_startup_ms)) }));
+        detail = [parts.join(" · "), state === "failed" ? v.error || "" : ""].filter(Boolean).join("\n");
+        now = t("step.thinkingNow");
+      }
+      break;
+    }
     case "verdict": {
       const key = String(pick(v, "verdict") || "").replace(/^VERDICT_/, "").toLowerCase();
       const [label, k] = VERDICTS[key] || [key || "—", ""];
