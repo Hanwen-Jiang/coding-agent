@@ -4,11 +4,12 @@
 // 输入框随阶段变化）、工作区一览或进行中的任务。右栏是当前会话的环境、上下文、输出、改动与后台任务；diff、文件与提交历史在宽抽屉里打开。
 // DOM 一律用 textContent 构造，不拼 HTML。界面文字一律经 i18n.js 的 t() 取（中文与英文）。
 
+import { errorText, exitWhenText, goalText, questionText, reasonText, retryDetail, retryTitle } from "./codes.js";
 import { LANGS, lang, locale, setLang, t } from "./i18n.js";
 
 const EVENT_TYPES = [
   "task_accepted", "round_started", "stage_started", "node_started", "node_finished",
-  "thinking_delta", "tool_status", "token_delta", "human_input_required", "verdict", "task_finished",
+  "thinking_delta", "tool_status", "token_delta", "human_input_required", "verdict", "decision_retry", "task_finished",
 ];
 const STATUS = {
   TASK_STATUS_QUEUED: [t("status.queued"), "run"],
@@ -1223,7 +1224,7 @@ function pendingAsk(task) {
     if (state.replied.has(qid) || events.slice(i + 1).some((e) => !QUIET.has(e.type))) return null;
     const raw = pick(v, "options", "choices") || ["approve", "reject"];
     const options = raw.map((o) => (typeof o === "string" ? { id: o, label: o } : { id: pick(o, "id", "value", "option"), label: pick(o, "label", "text", "id", "value") }));
-    return { qid, question: pick(v, "question", "prompt", "text", "summary", "message") || t("ask.default"), options };
+    return { qid, question: questionText(v) || pick(v, "question", "prompt", "summary", "message") || t("ask.default"), options };
   }
   return null;
 }
@@ -1403,7 +1404,7 @@ function asks(events) {
   return events.filter((e) => e.type === "human_input_required").map((ev) => {
     const v = ev.value || {};
     const qid = pick(v, "question_id", "questionId");
-    const q = pick(v, "question", "prompt", "text", "summary", "message") || t("ask.short");
+    const q = questionText(v) || pick(v, "question", "prompt", "summary", "message") || t("ask.short");
     const answered = state.replied.has(qid) || events.some((e) => e.event_id > ev.event_id && !QUIET.has(e.type));
     return answered
       ? h("div", { class: "ask-inline done" }, icon("check", "sm"), h("span", {}, t("ask.replied", { q })))
@@ -1504,10 +1505,11 @@ function stepInfo(ev) {
       break;
     case "stage_started": {
       ic = "layers"; kind = "run";
-      const goal = pick(v, "goal") || t("step.execute");
+      const goal = goalText(v) || t("step.execute");
       title = t("step.plan", { goal });
       now = t("step.planNow", { goal });
-      detail = pick(v, "exit_when") ? t("step.exitWhen", { x: v.exit_when }) : "";
+      const exitWhen = exitWhenText(v);
+      detail = exitWhen ? t("step.exitWhen", { x: exitWhen }) : "";
       if (v.triage_level) detail = (detail ? detail + "\n" : "") + "Triage: " + v.triage_level;
       const nodes = Array.isArray(v.nodes) ? v.nodes : [];
       chips = nodes.length ? h("div", { class: "step-chips" }, nodes.map((n) => h("span", { class: "chip mono" }, typeof n === "string" ? n : pick(n, "id") || t("step.node")))) : null;
@@ -1521,11 +1523,12 @@ function stepInfo(ev) {
     case "node_finished": {
       const st = String(pick(v, "status") || "");
       const failed = /fail|denied|error/i.test(st);
+      const skipped = st === "skipped"; // 上游没成功而跳过（upstream_failed）：既不是失败，也不算完成
       const id = pick(v, "node_id") || t("step.node");
-      ic = failed ? "x" : "check"; kind = failed ? "err" : "ok";
-      title = t(failed ? "step.nodeFailed" : "step.nodeDone", { id });
-      now = t(failed ? "step.nodeFailedNow" : "step.nodeDoneNow", { id });
-      detail = [pick(v, "role"), st && st !== "succeeded" ? st : ""].filter(Boolean).join(" · ");
+      ic = failed ? "x" : skipped ? "alert" : "check"; kind = failed ? "err" : skipped ? "warn" : "ok";
+      title = t(failed ? "step.nodeFailed" : skipped ? "step.nodeSkipped" : "step.nodeDone", { id });
+      now = skipped ? title : t(failed ? "step.nodeFailedNow" : "step.nodeDoneNow", { id });
+      detail = [[pick(v, "role"), st && st !== "succeeded" ? st : ""].filter(Boolean).join(" · "), errorText(v)].filter(Boolean).join("\n");
       break;
     }
     case "tool_status": {
@@ -1542,7 +1545,7 @@ function stepInfo(ev) {
         if (v.duration_ms != null) parts.push(t("tool.took", { dur: fmtMs(num(v.duration_ms)) }));
         // 本机后端几乎不花时间：不到 0.3 秒的不提，免得满屏“启动沙箱用了 0 秒”。
         if (num(v.sandbox_startup_ms) >= 300) parts.push(t("tool.sandboxStarted", { dur: fmtMs(num(v.sandbox_startup_ms)) }));
-        detail = [parts.join(" · "), state === "failed" ? v.error || "" : ""].filter(Boolean).join("\n");
+        detail = [parts.join(" · "), state === "failed" ? errorText(v) : ""].filter(Boolean).join("\n");
         now = t("step.thinkingNow");
       }
       break;
@@ -1553,9 +1556,14 @@ function stepInfo(ev) {
       ic = "shield"; kind = k === "info" ? "run" : k;
       title = t("step.verdict", { label, key });
       now = t("step.verdictNow", { label });
-      detail = pick(v, "reason") || "";
+      detail = reasonText(v);
       break;
     }
+    case "decision_retry":
+      ic = "refresh"; kind = "warn";
+      title = retryTitle(v);
+      detail = retryDetail(v);
+      break;
   }
   return { ic, kind, title, detail, chips, now: now || title };
 }

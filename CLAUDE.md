@@ -29,7 +29,7 @@
 
 | 做什么 | 命令 |
 | --- | --- |
-| 测试 | `go build ./...`、`go vet ./...`、`go test ./...`（要 PATH 上有 git） |
+| 测试 | `go build ./...`、`go vet ./...`、`go test ./...`（要 PATH 上有 git；网页的 JS 在 headless 的 Chrome 或 Edge 里跑，找不到时那条测试跳过，可用 `CODING_TEST_BROWSER` 指定） |
 | 本机拉起整套 | `python scripts/dev.py up --sandbox docker`（离线加 `--provider mock --decisions stub`；Runtime 不在旁边时加 `--runtime <目录>`） |
 | 改了代码后重启 coding-web | `python scripts/dev.py kill`，再 `python scripts/dev.py start`（会重新编译） |
 | 状态、停掉 | `python scripts/dev.py status`、`python scripts/dev.py down` |
