@@ -1,0 +1,148 @@
+# GitHub App 接入计划
+
+> 状态：2026-10-30 设计稿，待人确认。来源：人给的六块设计建议，逐条对照本仓库与 Runtime 仓库的代码；GitHub 的行为查了官方文档（第 7 节）。
+> 现在 GitHub 走的是 OAuth App（`repo read:user`）：令牌能碰用户名下的所有仓库，也不过期。接 GitHub App 就是为了按仓库授权、用短期令牌。
+
+## 1. 已有与缺失
+
+| 块 | 已有 | 缺 |
+| --- | --- | --- |
+| 1 密钥与配置 | Secret `coding-oauth`（在服务器的 SOPS 文件里，含 `CODING_GITHUB_CLIENT_ID`、`_SECRET`）；“凭据不进日志、错误、浏览器”的规定 | App ID、Slug、私钥、Webhook secret 与轮换；令牌的加密密钥由开发签名密钥派生（`tokenKey`，注释写着“生产应换成 SecretStore”），不能单独轮换 |
+| 2 Webhook 接收 | 无 | 路由、验签、收件、去重、后台处理、死信、重放、对账。存储只有 PVC 上的 JSON 文件，没有数据库；Deployment 是 1 副本、`Recreate` |
+| 3 身份与令牌 | OAuth 与 `state` 校验；`identities.json` 按平台不变的编号认人；令牌按（租户、用户、平台）AES-256-GCM 加密；到期前续期（`connToken`）。凭据经 Workspace API 逐次传，Runtime 不保存，只对远端主机生效，错误信息脱敏；Workspace 操作用单独的环境（`reuse=False`），不与 Agent 的命令共用 | App JWT、安装令牌、安装与仓库的记录、操作前的权限核对；`Project` 只有 `owner/repo` 字符串，没有不变的仓库 ID；Git 用户名按 OAuth 写死（`x-oauth-basic`）；续期有并发竞争（第 2 节第 5 条） |
+| 4 事件到动作 | 动作的一半已有：`SyncWorkspace`、`Session` 上的分支与 PR 字段 | 事件处理、按仓库 ID 更新、PR 与 CI 状态的显示 |
+| 5 防失控 | 只推 `agent/*`、不强推、由人点按钮（CLAUDE.md）；Runtime 的 `workspace.push_branches` | 现在没有自动触发，所以还没有循环的问题；要做自动触发时这一块全部要做 |
+| 6 运维与体验 | “账号与平台”页、连接与断开、`CODING_ALLOWED_LOGINS` | coding-web 没有任何指标；对账；安装状态与权限不足的界面；卸载清理；测试用的 App |
+
+## 2. 与原建议不同的地方
+
+1. **安装不能挂在一个租户下。** 建议写的是“installations 关联租户、核对租户拥有这个 installation”。这里的租户是个人（`gh-<登录名>`，计划 coding-agent-mvp.md），一个组织的安装会被很多租户用，“拥有”的说法不成立。
+   改成：安装是全局记录；每次操作用**这个用户的令牌**问 GitHub 他能不能访问（`GET /user/installations/{id}/repositories`，只返回他有权限的仓库，并带权限级别）。这一步防的是：用户借一个覆盖面更大的安装，碰到他自己没权限的仓库。
+2. **按 `X-GitHub-Delivery` 去重要看状态。** GitHub 重新投递时这个值不变。只要见过就丢弃的话，处理失败的那一条永远修不回来。已处理完或正在处理的才忽略；死信再次投递时重新入队。
+3. **断线恢复必须在上线前做，不能放到后面。** GitHub **不会自动重投**失败的投递，只保留 3 天；而 coding-web 是 `Recreate` 部署，每次发版都有一段时间收不到。所以对账与收件箱放在同一个工作项（G-02）。
+4. **Setup URL 的 `installation_id` 不可信。** GitHub 明确说可能被伪造。回调里只把它当线索，用用户令牌确认这个用户确实能访问这个安装，才关联。
+5. **令牌会过期之后，续期的并发竞争就成了真问题。** 用户令牌 8 小时过期，续期令牌用一次就失效，旧的访问令牌也同时失效。`connToken` 现在读、续、写之间没有锁：两个并发请求同时续，后一个会失败，用户被要求重新授权。另外 `gitCredentials` 吞掉错误、返回空凭据，续不上时变成无凭据克隆，报的是别的错。
+6. **令牌的加密密钥要先分出来。** 用户令牌多了续期令牌，放在开发签名密钥派生的密钥下面不合适，而且换签名密钥会让所有令牌解不开。
+7. **“三张表”先用 JSON 文件。** 本仓库没有数据库，规定也不加依赖。1 副本时一个投递一个文件（`O_EXCL` 创建即去重，改名换状态）够用；要多副本时再换 Postgres。接口隔开。
+8. **事件只当提示。** GitHub 不保证顺序。收到 `pull_request`、`workflow_run` 后按 API 取当前状态，不用负载里的状态覆盖，否则迟到的旧事件会把状态改回去。
+9. **建议里没提、要加的：** `github_app_authorization`（用户撤销授权，要删他的令牌）；校验 `X-GitHub-Hook-Installation-Target-ID` 等于本 App（防测试与生产配错）；`code.cgent.link` 在 Cloudflare 后面，第一次投递要确认 Hookshot 没被 Browser Integrity Check 或 WAF 拦下，被拦就给这个路径加跳过规则；改 `.github/workflows/` 的推送要 `workflows` 权限，没有就会被拒，要给明确的提示。
+
+建议里其余的（表结构以外的令牌分工、事件表、防注入、监控、卸载、测试 App）都采用。顺序也采用，只把对账提前。
+
+## 3. 设计
+
+**配置**
+
+| 变量 | 内容 | 放哪儿 |
+| --- | --- | --- |
+| `CODING_GITHUB_CLIENT_ID`、`_SECRET` | App 的 Client ID 与 Secret（切换时替换 OAuth App 的值） | `coding-oauth` |
+| `CODING_GITHUB_APP_ID`、`CODING_GITHUB_APP_SLUG` | App ID、Slug | `coding-github-app` |
+| `CODING_GITHUB_WEBHOOK_SECRET`、`_PREVIOUS` | Webhook secret；`_PREVIOUS` 只在轮换期间有 | `coding-github-app` |
+| `CODING_GITHUB_APP_PRIVATE_KEY_FILE` | 私钥文件的路径；Secret 以文件挂载，模式 0400 | `coding-github-app` |
+| `CODING_TOKEN_KEY`、`_PREVIOUS` | 令牌加密密钥（32 字节）；旧格式读得出，下次写入时换新 | `coding-github-app` |
+
+都在服务器的 SOPS 文件里（`deploy/cluster/secrets/secrets.enc.yaml`，`coding-oauth` 就在那儿），只注入 coding-web。全不配时功能关闭、行为不变；配了一部分时启动失败，错误里只写变量名。
+
+**收件箱**：`<数据目录>/github/inbox/<delivery>.json`。状态 `received → processing → done`，失败 `retry`（退避，5 次），之后 `dead`。流程：边读边算 HMAC 并写临时文件 → 校验 → 改名入箱 → fsync → 2xx（GitHub 要求 10 秒内）→ 后台处理。上限 25 MiB（GitHub 不投更大的）。原始负载留 7 天，磁盘超上限时回 503 并告警。日志只有 delivery、event、action、installation id。
+
+**记录**：`github/installations/<id>.json`（账号 ID 与登录名、是否暂停、仓库范围、权限）、`github/repos/<repo_id>.json`（当前全名、安装 ID）。`Project` 加 `RepoID`、`InstallationID`；旧工作区第一次用到时按 `GET /repos/{owner}/{repo}/installation` 补上。
+
+**一次操作的授权（`authorizeRepo`）**：工作区属于这个租户（已有）→ 取用户令牌（按用户串行续期）→ 安装没被暂停 → 用用户令牌确认他对这个仓库有所需的权限（读：克隆；写：推送、开 PR；不可达一律拒绝，结果缓存不超过 60 秒）→ 签安装令牌（`repository_ids` 只有这个仓库，`permissions` 只给这次要的）→ 经 Workspace API 传入（用户名 `x-access-token`）→ 操作结束调 `DELETE /installation/token`，失败不影响结果。令牌不落盘。
+
+**JWT**：RS256，`iat` 提前 60 秒，`exp` 不超过 10 分钟，`iss` 用 Client ID。只用标准库，不加依赖。
+
+## 4. 工作项与验收
+
+顺序：G-01 → G-02 → G-03 → G-04 → G-05；G-06 单独确认。上线前必须有 G-01～G-03，G-02 含对账。都先写测试（替身 GitHub，本仓库已有这种做法）。
+
+### G-01 密钥与配置
+
+1. 全不配时行为与现在相同；只配一部分时启动失败，错误写变量名不写值。
+2. 用带标记的假密钥跑完登录、签令牌、Webhook、失败路径，日志、错误信息、`/api/config`、`/api/me` 与计量里都找不到它们（断言，不靠人看）。
+3. 配了 `_PREVIOUS` 时新旧 Webhook secret 都能过验签；去掉后旧的被拒。
+4. 旧格式的令牌能读出，下次写入时换成新格式；换掉开发签名密钥不影响新格式的令牌。
+5. 静态检查：私钥只挂进 coding-web，Runtime 的 Chart 与沙箱都没有。
+
+### G-02 Webhook 收件与对账
+
+1. 签名错或缺：401，不落盘，不解析 JSON。只认 `X-Hub-Signature-256`，常量时间比较。
+2. 目标 App ID 不符：拒绝。
+3. 超过上限：413，不留临时文件；大请求不把内存吃满。
+4. 处理函数卡住时，接收仍在 1 秒内回 2xx。
+5. 同一个 delivery：`done`、`processing` 的回 2xx 不重复处理；`dead` 的重新入队。进程重启后去重仍生效。
+6. 处理失败按退避重试，5 次后进死信；`coding-web github-replay <delivery>` 能重放；进程崩溃时 `processing` 的重新入队；每个处理函数执行两次结果相同。
+7. **对账**：替身 GitHub 里有 3 个投递失败，启动与定时（每 10 分钟）调 `GET /app/hook/deliveries` 重投；窗口不超过 3 天，每轮有上限，不会重复重投同一条。
+8. 负载 7 天后清掉；磁盘到上限时回 503 并记告警指标。
+9. 线上第一次真实投递成功（确认没被 Cloudflare 拦）。
+
+### G-03 身份、安装与令牌
+
+1. 伪造 Setup URL 的 `installation_id`（用户看不到这个安装）：不关联。
+2. 安装覆盖了仓库、但用户本人没权限：拒绝，不调签发接口。
+3. 只有读权限的用户：能克隆，推送与开 PR 被拒，提示写清原因与去哪儿调整。
+4. 安装被暂停或删除：立刻不再签发。
+5. 签发请求体只有这个仓库的 ID 与最小权限；令牌不落盘、不进日志；结束时调了吊销，吊销失败不影响结果。
+6. JWT 的算法与时间符合第 3 节，过期前自动换。
+7. 10 个并发请求同时遇到用户令牌到期：只续一次，全部成功。续不上时报“要重新授权”，不再发空凭据。
+8. Workspace 操作的环境与 Agent 的命令不共用（已有，加回归）。
+9. **要核对（在 Runtime 仓库）**：Agent 能改工作副本的 `.git/config`，之后的推送会读它。验证 `core.fsmonitor`、`credential.helper`、`http.proxy` 这类配置拿不到令牌。这一条还没验证过；现在的 OAuth 令牌同样受影响，而且危害更大。
+10. 旧工作区第一次使用时补上仓库 ID；仓库改名后照常工作。
+11. 旧 OAuth 连接在切换期内可用；重新连接后旧令牌被删除。
+
+### G-04 事件到动作
+
+| 事件 | 动作 | 验收 |
+| --- | --- | --- |
+| `installation` deleted、suspend | 停用，取消相关 Task，不再签发 | 运行中的 Task 被取消；之后的操作提示清楚 |
+| `installation` unsuspend、created | 恢复或登记 | 恢复后能再签发 |
+| `installation_repositories` | 同步可访问的仓库 | 移除的仓库操作被拒，工作区保留 |
+| `repository` renamed、transferred、deleted | 按仓库 ID 更新 | 改名后推送到新名字；删除后工作区标记“远端已不存在” |
+| `push` | 标记“远端有更新”，不触发 Task | 只有基线分支会标记；界面可同步 |
+| `pull_request`、`workflow_run` | 按 API 取当前状态后更新 | 迟到的旧事件不覆盖新状态 |
+| `pull_request_review` | 记录并展示 | 不触发 Agent |
+| `github_app_authorization` revoked | 删这个用户的令牌 | 之后要重新授权，别的用户不受影响 |
+
+### G-05 运维与界面
+
+1. 指标（经 `libs/go-core` 的 Telemetry，不带负载）：投递数与结果、积压、死信数、签名失败、令牌续期失败、签发失败。Grafana 上死信、积压、签名失败突增会告警。
+2. 对账：每小时用 `GET /app/installations` 与仓库列表纠正记录，覆盖超过 3 天的停机。
+3. 界面：连接状态、已授权仓库、“去 GitHub 调整权限”的入口、没装时的安装入口、权限不足时的明确提示。两种语言（`i18n.js`、`messages_en.go`）。
+4. 卸载与删除账号：令牌立即清掉，负载与记录按第 5 节第 6 条处理。
+5. 单独注册一个测试 App，配置与生产不共用；本机与测试只用它。
+
+### G-06 自动触发（最后做，开工前单独确认）
+
+1. 过滤本 App 与其他 Bot 产生的事件（`sender.type`、本 App 的 `<slug>[bot]`）：测试里不会形成循环。
+2. 只有写权限的成员能触发，按 `GET /repos/{owner}/{repo}/collaborators/{username}/permission` 查，不信 `author_association`。
+3. Issue、评论、PR 与代码内容都作为数据传给 Task，不进系统提示；带注入样本的回归进评测集。
+4. 单独的预算与限流（每仓库、每小时），超了不启动并在 PR 上说明。
+5. fork 来的 PR 不用安装令牌跑它的代码。
+6. 推送仍只到 `agent/**`，默认分支推不了（Runtime 的租户策略）。
+
+## 5. 要人定的
+
+| # | 问题 | 建议 |
+| --- | --- | --- |
+| 1 | 人点按钮开 PR 用谁的令牌 | 用户令牌，PR 记在这个人名下；安装令牌留给克隆、推送与自动触发。原建议是全用安装令牌（PR 作者会是 Bot） |
+| 2 | App 可以装在哪些账号 | 测试 App 只限自己；生产选任何账号（code.cgent.link 已开放注册） |
+| 3 | 旧 OAuth 用户怎么切 | 并存 30 天：新连接走 App，旧连接照用并提示，到期后删除旧令牌与旧路径 |
+| 4 | 给不给 `workflows` 权限 | 不给。Agent 改工作流文件时明确提示，由人处理 |
+| 5 | 收件箱放哪儿 | 先用 JSON 文件；要多副本时换 Postgres |
+| 6 | 数据保留多久 | 原始负载 7 天；安装记录保留到卸载后 30 天；令牌立即删除 |
+| 7 | 自动触发与“推送由人点按钮”这条规定冲突 | G-06 开工前再定 |
+
+## 6. 注册 App 时的设置
+
+- 回调：`https://code.cgent.link/api/auth/github/callback`。打开 Expire user authorization tokens 与安装时请求用户授权。
+- Setup URL：`https://code.cgent.link/api/github/setup`，打开 Redirect on update。
+- Webhook：`https://code.cgent.link/api/webhooks/github`，配 secret（至少 32 字节的随机值）。
+- 仓库权限：Contents 读写、Metadata 只读、Pull requests 读写、Actions 只读、Commit statuses 只读。Issues 与评论等 G-06 再加（改权限要用户重新同意）。
+- 订阅事件：`repository`、`push`、`pull_request`、`pull_request_review`、`workflow_run`（`installation`、`installation_repositories` 不用选）。
+
+密钥只进 SOPS 文件。`$env:WEBHOOK_SECRET` 这类环境变量只在当前终端有效，线上读不到；Client secret 与私钥也不要贴进聊天或工单。
+
+## 7. 依据
+
+查过官方文档的（2026-10-30）：响应 10 秒、不自动重投、重投时 delivery 不变、保留 3 天、负载上限 25 MB；用户令牌 8 小时、续期令牌 6 个月且一次性；安装令牌 1 小时、最多指定 500 个仓库、`DELETE /installation/token`；JWT 的要求；Setup URL 的 `installation_id` 可能被伪造；`/user/installations` 系列只返回用户有权限的内容。
+
+没有逐条查、实现时要核对的：`github_app_authorization` 事件、`workflows` 权限的报错、`installation` 与 `installation_repositories` 是否默认投递、各权限的准确名字。
