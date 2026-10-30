@@ -2210,6 +2210,12 @@ function contextBody() {
       items.length > max ? h("div", { class: "empty-line" }, t("ctx.older", { n: items.length - max })) : null];
   };
   const rounds = Array.isArray(s.rounds) ? s.rounds : [];
+  // stage_goal 是 Runtime 写的文字；翻译要用的代码在同一轮的 stage_started 事件里。
+  const stages = (state.runs.get(task.id)?.events || []).filter((e) => e.type === "stage_started");
+  const roundGoal = (r) => {
+    const stage = stages.find((e) => pick(e.value, "round_seq") === r.seq);
+    return (stage && goalText(stage.value)) || r.stage_goal || "—";
+  };
   return [
     h("div", { class: "goal" }, s.goal || task.message),
     h("div", { class: "sp-sub" }, t("ctx.doneWhen")),
@@ -2220,7 +2226,7 @@ function contextBody() {
     list(t("ctx.assumptions"), s.assumptions),
     list(t("ctx.questions"), s.open_questions),
     rounds.length ? [h("div", { class: "sp-sub" }, t("ctx.rounds")), h("div", { class: "rounds" }, rounds.map((r) => h("div", { class: "round-row" },
-      h("span", { class: "n" }, r.seq), h("span", { class: "g ellipsis", title: r.stage_goal }, r.stage_goal || "—"),
+      h("span", { class: "n" }, r.seq), h("span", { class: "g ellipsis", title: roundGoal(r) }, roundGoal(r)),
       r.verdict ? verdictChip(r.verdict) : r.status && r.status !== "completed" ? h("span", { class: "spinner" }) : null,
       r.cost_usd ? h("span", { class: "c" }, fmtUSD(num(r.cost_usd))) : null)))] : null,
   ];

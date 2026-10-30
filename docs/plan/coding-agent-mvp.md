@@ -109,7 +109,7 @@ task-service（Task API、Session 与 Task 工作流）→ Worker（Planner、to
   - 网页：界面文字都在 `internal/web/static/i18n.js`，两份同样键的字典（缺的键回落到中文，英文按单复数取词）。
   - 服务端：错误说明、OAuth 回调带回的错误、发 PR 的默认正文按请求的语言写（gettext 的做法：代码里写中文，`internal/server/messages_en.go` 按中文原文给英文）。语言取 `cw_lang` Cookie（OAuth 回调这类整页跳转也带着），没有时看 Accept-Language，再没有用中文。`TestEveryMessageHasEnglish` 按源码核对每一句都有英文、参数对得上。
   - 示例仓库的名字、说明与起手的任务按语言给（`internal/samples`）；仓库里的文件只有一份。
-  - Runtime 进度事件里的代码：`internal/web/static/codes.js` 按 `reason_code`、`question_code`、`error_code`、`goal_code` 与 `params` 翻译，并把 `decision_retry` 写成“规划调用超时，正在重试（2/5）”；不认识的代码、少了参数时用事件自己的文字，所以 Runtime 新增代码不必先改这里。代码表在 Runtime 的 `docs/plan/eval-observability-and-runtime-fixes.md` 第 11.5、11.8 节。规则改写的理由翻译后只留规则的说法，模型原来的理由在“原始事件”里看。`internal/web/codes_test.go` 核对字典，并在 headless 的 Chrome 或 Edge 里跑真正的页面。
+  - Runtime 进度事件里的代码：`internal/web/static/codes.js` 按 `reason_code`、`question_code`、`error_code`、`goal_code`、`exit_when_code` 与 `params` 翻译，并把 `decision_retry` 写成“规划调用超时，正在重试（2/5）”；不认识的代码、少了参数时用事件自己的文字，所以 Runtime 新增代码不必先改这里。代码表在 Runtime 的 `docs/plan/eval-observability-and-runtime-fixes.md` 第 11.5、11.8 节。规则改写的理由翻译后只留规则的说法，模型原来的理由在“原始事件”里看。`internal/web/codes_test.go` 核对字典，并在 headless 的 Chrome 或 Edge 里跑真正的页面。
   - 不翻译：Git 平台、git 与 task-service 自己给的说明（原样转出），日志与启动配置的错误。Runtime 没有给代码的文字原样显示（模型写的目标与理由、保守规划与 Recipe 规划的目标和退出条件、abort 交付里的说明）。
 
 ### 7.3 这些开关落到 Runtime 的哪里

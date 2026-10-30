@@ -1,5 +1,5 @@
 // Runtime 进度事件里的代码翻成界面的语言：verdict 的 reason_code、问题的 question_code、node_finished 与 tool_status 的 error_code、
-// stage_started 的 goal_code、decision_retry。代码表见 Runtime 的 docs/plan/eval-observability-and-runtime-fixes.md 第 11.5、11.8 节。
+// stage_started 的 goal_code、exit_when_code、decision_retry。代码表见 Runtime 的 docs/plan/eval-observability-and-runtime-fixes.md 第 11.5、11.8 节。
 // 不认识的代码、少了参数时一律用事件自己的文字（Runtime 新增代码不必先改这里）。文字都在 i18n.js；这个模块不碰 DOM。
 
 import { t, tCode } from "./i18n.js";
@@ -43,12 +43,11 @@ export function errorText(v) {
 }
 
 export function goalText(v) {
-  return tCode(`goal.${v.goal_code}`) ?? v.goal ?? "";
+  return tCode(`goal.${v.goal_code}`, messageParams(v.params)) ?? v.goal ?? "";
 }
 
-// exitWhenText：goal_code 表示固定的规划，退出条件也是代码写的固定文字（Runtime 没有给它单独的代码）。
 export function exitWhenText(v) {
-  return tCode(`exitWhen.${v.goal_code}`) ?? v.exit_when ?? "";
+  return tCode(`exitWhen.${v.exit_when_code}`, messageParams(v.params)) ?? v.exit_when ?? "";
 }
 
 // 上次失败的代码归成三种说法；其余的都算“没有成功”，详情里给事件的文字。

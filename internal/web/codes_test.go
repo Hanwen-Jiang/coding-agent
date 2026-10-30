@@ -112,7 +112,11 @@ func codeCases() []codeCase {
 		nodeError("mcp_session_lost", nil),
 
 		codeCase{"goal.reply_to_message", "goalText", params{"goal_code": "reply_to_message", "goal": fallbackText}, nil},
-		codeCase{"exitWhen.reply_to_message", "exitWhenText", params{"goal_code": "reply_to_message", "exit_when": fallbackText}, nil},
+		codeCase{"goal.run_recipe", "goalText", params{"goal_code": "run_recipe", "params": params{"recipe": "ci_fix@v2"}, "goal": fallbackText}, []string{"ci_fix@v2"}},
+		codeCase{"goal.explore_task", "goalText", params{"goal_code": "explore_task", "goal": fallbackText}, nil},
+		codeCase{"exitWhen.reply_given", "exitWhenText", params{"exit_when_code": "reply_given", "exit_when": fallbackText}, nil},
+		codeCase{"exitWhen.recipe_delivered", "exitWhenText", params{"exit_when_code": "recipe_delivered", "exit_when": fallbackText}, nil},
+		codeCase{"exitWhen.node_result", "exitWhenText", params{"exit_when_code": "node_result", "params": params{"node": "explore"}, "exit_when": fallbackText}, []string{"explore"}},
 	)
 	return out
 }
@@ -203,8 +207,21 @@ var exactCases = []struct {
 	{"errorText", params{"error_code": "brand_new"}, "", ""},
 	{"goalText", params{"goal_code": "brand_new", "goal": fallbackText}, fallbackText, fallbackText},
 	{"goalText", params{"goal": fallbackText}, fallbackText, fallbackText},
-	{"exitWhenText", params{"goal_code": "brand_new", "exit_when": fallbackText}, fallbackText, fallbackText},
+	{"goalText", params{"goal_code": "run_recipe", "goal": fallbackText}, fallbackText, fallbackText},
+	{"exitWhenText", params{"exit_when_code": "brand_new", "exit_when": fallbackText}, fallbackText, fallbackText},
 	{"exitWhenText", params{"exit_when": fallbackText}, fallbackText, fallbackText},
+	{"exitWhenText", params{"exit_when_code": "node_result", "exit_when": fallbackText}, fallbackText, fallbackText},
+	// goal_code 不再顶替 exit_when_code：Runtime 没有给退出条件的代码时用事件的文字。
+	{"exitWhenText", params{"goal_code": "reply_to_message", "exit_when": fallbackText}, fallbackText, fallbackText},
+
+	// 代码写的固定规划。
+	{"goalText", params{"goal_code": "reply_to_message", "goal": fallbackText}, "回复这条消息", "Reply to this message"},
+	{"goalText", params{"goal_code": "run_recipe", "params": params{"recipe": "ci_fix@v2"}, "goal": fallbackText},
+		"按 ci_fix@v2 完成这个任务", "Complete this task with ci_fix@v2"},
+	{"goalText", params{"goal_code": "explore_task", "goal": fallbackText}, "探索并推进这个任务", "Explore and move this task forward"},
+	{"exitWhenText", params{"exit_when_code": "reply_given", "exit_when": fallbackText}, "给出回复", "a reply is given"},
+	{"exitWhenText", params{"exit_when_code": "recipe_delivered", "exit_when": fallbackText}, "Recipe 跑完，结果已交付", "the recipe finishes and the result is delivered"},
+	{"exitWhenText", params{"exit_when_code": "node_result", "params": params{"node": "explore"}, "exit_when": fallbackText}, "explore 给出结果", "explore returns a result"},
 }
 
 // --- 字典（总是跑） ---
@@ -380,10 +397,14 @@ var replies = []string{"continue_as_is", "replan_with_guidance", "stop_and_wrap_
 var pageEvents = []pageEvent{
 	{"task_accepted", params{}, stepOf("任务已受理", ""), stepOf("Task accepted", "")},
 	{"round_started", params{"round_seq": 1, "rerun": false}, stepOf("开始第 1 轮", ""), stepOf("Round 1 started", "")},
-	{"stage_started", params{"round_seq": 1, "goal": "回复用户这条消息", "goal_code": "reply_to_message", "exit_when": "answer 给出回复", "nodes": []any{}},
+	{"stage_started", params{"round_seq": 1, "goal": "回复用户这条消息", "goal_code": "reply_to_message", "exit_when": "answer 给出回复", "exit_when_code": "reply_given", "nodes": []any{}},
 		stepOf("计划：回复这条消息", "完成标准：给出回复"), stepOf("Plan: Reply to this message", "Done when: a reply is given")},
-	{"stage_started", params{"round_seq": 1, "goal": "RAW_GOAL", "exit_when": "RAW_EXIT", "nodes": []any{}},
+	{"stage_started", params{"round_seq": 2, "goal": "RAW_GOAL", "exit_when": "RAW_EXIT", "nodes": []any{}},
 		stepOf("计划：RAW_GOAL", "完成标准：RAW_EXIT"), stepOf("Plan: RAW_GOAL", "Done when: RAW_EXIT")},
+	{"stage_started", params{"round_seq": 3, "goal": "按 ci_fix@v2 完成：修一下 CI", "goal_code": "run_recipe", "exit_when": "Recipe 的子图完成，结果已交付", "exit_when_code": "recipe_delivered", "params": params{"recipe": "ci_fix@v2"}, "nodes": []any{}},
+		stepOf("计划：按 ci_fix@v2 完成这个任务", "完成标准：Recipe 跑完，结果已交付"), stepOf("Plan: Complete this task with ci_fix@v2", "Done when: the recipe finishes and the result is delivered")},
+	{"stage_started", params{"round_seq": 4, "goal": "探索并推进这个任务", "goal_code": "explore_task", "exit_when": "explore 给出结果", "exit_when_code": "node_result", "params": params{"node": "explore"}, "nodes": []any{}},
+		stepOf("计划：探索并推进这个任务", "完成标准：explore 给出结果"), stepOf("Plan: Explore and move this task forward", "Done when: explore returns a result")},
 	{"tool_status", params{"node_id": "n1", "step": 1, "tool": "repo_read", "state": "failed", "target": "a.py", "error": "file_not_found：工作区里没有文件 a.py", "error_code": "file_not_found"},
 		stepOf("没成功：正在读 a.py", "工作区里没有这个文件"), stepOf("Didn't work: Reading a.py", "That file isn't in the workspace")},
 	{"tool_status", params{"node_id": "n1", "step": 2, "tool": "repo_grep", "state": "failed", "target": "x", "error": "RAW_TOOL_ERROR", "error_code": "brand_new"},
@@ -411,6 +432,15 @@ var pageEvents = []pageEvent{
 	{"human_input_required", params{"question_id": "_budget", "kind": "escalation", "text": "中文的问题", "question_code": "budget_exhausted", "params": params{"budget": "wall_clock", "limit": 30, "used": 31.5}, "options": replies}, nil, nil},
 }
 
+// taskRounds 是 Task State 里的 Round（右栏“上下文”的 Rounds）：stage_goal 是 Runtime 写的文字，每一轮的代码在同一轮的 stage_started 事件里。
+var taskRounds = []params{
+	{"seq": 1, "stage_goal": "回复用户这条消息", "status": "completed", "verdict": "continue"},
+	{"seq": 2, "stage_goal": "RAW_GOAL", "status": "completed", "verdict": "continue"},
+	{"seq": 3, "stage_goal": "按 ci_fix@v2 完成：修一下 CI", "status": "completed", "verdict": "continue"},
+	{"seq": 4, "stage_goal": "探索并推进这个任务", "status": "completed", "verdict": "continue"},
+	{"seq": 5, "stage_goal": "RAW_NO_EVENT", "status": "running"},
+}
+
 // probeJS 记下页面的错误，跑 codes.js 的全部用例，等真正的界面把事件画完，再把结果发回测试。
 const probeJS = `
 const out = { errors: [] };
@@ -422,9 +452,13 @@ try {
   const codes = await import("/assets/codes.js");
   out.results = plan.cases.map((c) => codes[c.fn](c.event));
   const steps = () => [...document.querySelectorAll(".worklog-steps > .step:not(.now)")];
-  for (let i = 0; i < 600 && (steps().length < plan.steps || !document.querySelector(".c-ask .q")); i++) {
+  const rounds = () => [...document.querySelectorAll(".round-row .g")].map(text);
+  // 第一轮换掉了 Task State 的文字，才算 Rounds 与事件都到了。
+  const roundsReady = () => rounds().length > 0 && rounds()[0] !== "回复用户这条消息";
+  for (let i = 0; i < 600 && (steps().length < plan.steps || !document.querySelector(".c-ask .q") || !roundsReady()); i++) {
     await new Promise((r) => setTimeout(r, 50));
   }
+  out.rounds = rounds();
   out.steps = steps().map((el) => ({ title: text(el.querySelector(".step-title")), detail: text(el.querySelector(".step-detail")) }));
   out.now = text(document.querySelector(".worklog-steps > .step.now .step-title"));
   out.ask = text(document.querySelector(".c-ask .q"));
@@ -438,6 +472,7 @@ await fetch("/__result", { method: "POST", body: JSON.stringify(out) });
 type probeResult struct {
 	Errors  []string   `json:"errors"`
 	Results []string   `json:"results"`
+	Rounds  []string   `json:"rounds"`
 	Steps   []pageStep `json:"steps"`
 	Now     string     `json:"now"`
 	Ask     string     `json:"ask"`
@@ -457,7 +492,7 @@ func fakeSite(t *testing.T, lang string, cases []probeCase, done <-chan struct{}
 		"/api/sessions":     []params{{"id": "s1", "project_id": "p1", "title": "demo"}},
 		"/api/tasks/active": []any{},
 		base + "/tasks":     []params{task},
-		base + "/tasks/t1":  params{"task": task},
+		base + "/tasks/t1":  params{"task": task, "runtime": params{"taskState": params{"value": params{"goal": "hello", "done_when": "x", "rounds": taskRounds}}}},
 		base + "/env":       params{},
 		base + "/changes":   params{"files": []any{}},
 	}
@@ -543,7 +578,8 @@ func runProbe(t *testing.T, browser, lang string, cases []probeCase) probeResult
 
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, browser, "--headless=new", "--disable-gpu", "--no-sandbox", "--no-first-run", "--no-default-browser-check",
+	// 窗口够宽，右栏才默认打开（Rounds 在那里）。
+	cmd := exec.CommandContext(ctx, browser, "--headless=new", "--disable-gpu", "--no-sandbox", "--no-first-run", "--no-default-browser-check", "--window-size=1400,900",
 		"--user-data-dir="+dir, srv.URL+"/#/w/p1/s/s1")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("拉不起浏览器 %s：%v", browser, err)
@@ -654,6 +690,14 @@ func TestRuntimeCodesInBrowser(t *testing.T) {
 			}[lang]
 			if r.Now != now {
 				t.Errorf("此刻那一行\n得到 %q\n应是 %q", r.Now, now)
+			}
+			// 右栏的 Rounds：有代码的按同一轮的事件翻译；没有代码、没有事件的用 Task State 的文字。
+			rounds := map[string][]string{
+				"zh": {"回复这条消息", "RAW_GOAL", "按 ci_fix@v2 完成这个任务", "探索并推进这个任务", "RAW_NO_EVENT"},
+				"en": {"Reply to this message", "RAW_GOAL", "Complete this task with ci_fix@v2", "Explore and move this task forward", "RAW_NO_EVENT"},
+			}[lang]
+			if !slices.Equal(r.Rounds, rounds) {
+				t.Errorf("右栏的 Rounds\n得到 %q\n应是 %q", r.Rounds, rounds)
 			}
 			if r.Ask != ask {
 				t.Errorf("输入框上方的问题\n得到 %q\n应是 %q", r.Ask, ask)
