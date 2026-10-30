@@ -4,7 +4,7 @@
 // 输入框随阶段变化）、工作区一览或进行中的任务。右栏是当前会话的环境、上下文、输出、改动与后台任务；diff、文件与提交历史在宽抽屉里打开。
 // DOM 一律用 textContent 构造，不拼 HTML。界面文字一律经 i18n.js 的 t() 取（中文与英文）。
 
-import { errorText, exitWhenText, goalText, questionText, reasonText, retryDetail, retryTitle } from "./codes.js";
+import { abortMarkdown, doneWhenText, errorText, exitWhenText, goalText, questionText, reasonText, retryDetail, retryTitle } from "./codes.js";
 import { LANGS, lang, locale, setLang, t } from "./i18n.js";
 
 const EVENT_TYPES = [
@@ -1595,6 +1595,7 @@ function deliverableText(result) {
   const d = result.deliverable && result.deliverable.value !== undefined ? result.deliverable.value : result.deliverable;
   if (typeof d === "string") return d;
   if (!d || typeof d !== "object") return "";
+  if (result.status === "TASK_STATUS_ABORTED" && Array.isArray(d.not_completed)) return abortText(d);
   const t = pick(d, "answer", "summary", "text", "content", "result", "report", "message");
   if (typeof t === "string") {
     const trimmed = t.trim();
@@ -1608,6 +1609,12 @@ function deliverableText(result) {
     return t;
   }
   return objectMarkdown(d);
+}
+
+// abort 的交付：部分结果（最近一个成功的交付节点的结果）放在说明后面。
+function abortText(d) {
+  const partial = d.partial === undefined ? "" : deliverableText({ deliverable: d.partial });
+  return abortMarkdown(d) + (partial ? `\n\n### ${t("abort.partial")}\n${partial}` : "");
 }
 
 // 结构化的交付（没有 text、answer 这类字段）按字段排成小节，比原样的 JSON 好读。
@@ -2219,7 +2226,7 @@ function contextBody() {
   return [
     h("div", { class: "goal" }, s.goal || task.message),
     h("div", { class: "sp-sub" }, t("ctx.doneWhen")),
-    h("div", { class: "muted" }, s.done_when || "—"),
+    h("div", { class: "muted done-when" }, doneWhenText(s) || "—"),
     chips.length ? [h("div", { class: "sp-sub" }, t("ctx.constraints")), h("div", { class: "chip-row" }, chips)] : null,
     list(t("ctx.milestones"), s.milestones),
     list(t("ctx.facts"), s.facts),

@@ -1,5 +1,5 @@
 // Runtime 进度事件里的代码翻成界面的语言：verdict 的 reason_code、问题的 question_code、node_finished 与 tool_status 的 error_code、
-// stage_started 的 goal_code、exit_when_code、decision_retry。代码表见 Runtime 的 docs/plan/eval-observability-and-runtime-fixes.md 第 11.5、11.8 节。
+// stage_started 的 goal_code、exit_when_code、Task State 的 done_when_code、abort 交付的 codes、decision_retry。代码表见 Runtime 的 docs/plan/eval-observability-and-runtime-fixes.md 第 11.5、11.8 节。
 // 不认识的代码、少了参数时一律用事件自己的文字（Runtime 新增代码不必先改这里）。文字都在 i18n.js；这个模块不碰 DOM。
 
 import { t, tCode } from "./i18n.js";
@@ -48,6 +48,29 @@ export function goalText(v) {
 
 export function exitWhenText(v) {
   return tCode(`exitWhen.${v.exit_when_code}`, messageParams(v.params)) ?? v.exit_when ?? "";
+}
+
+export function doneWhenText(v) {
+  return tCode(`doneWhen.${v.done_when_code}`) ?? v.done_when ?? "";
+}
+
+// abortMarkdown 是 abort 的交付（Task 的结局，不是进度事件）：为什么停下、完成了什么、没完成什么。
+// 理由是代码给的时候 Runtime 带 codes，理由与各 Node 按代码翻译；模型自己写的没有 codes，用它的原文。
+export function abortMarkdown(d) {
+  const codes = d.codes || {};
+  const nodes = Array.isArray(codes.nodes) ? codes.nodes : null;
+  const completed = nodes ? nodes.filter((n) => n.status === "succeeded").map((n) => n.node_id) : d.completed || [];
+  let missing = d.not_completed || [];
+  if (nodes) {
+    missing = nodes.filter((n) => n.status !== "succeeded").map((n) => t("abort.nodeError", { id: n.node_id, why: errorText(n) || n.status }));
+    if (!missing.length) missing = [t("abort.noDelivery")];
+  }
+  const section = (title, items) => `### ${title}\n${items.map((x) => `- ${x}`).join("\n")}`;
+  return [
+    `### ${t("abort.why")}\n${reasonText({ ...codes, reason: d.reason })}`,
+    completed.length ? section(t("abort.completed"), completed) : "",
+    missing.length ? section(t("abort.notCompleted"), missing) : "",
+  ].filter(Boolean).join("\n\n");
 }
 
 // 上次失败的代码归成三种说法；其余的都算“没有成功”，详情里给事件的文字。

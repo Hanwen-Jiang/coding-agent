@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -71,6 +72,7 @@ var reasonCases = []codeCase{
 	reason("human_no_reply", nil),
 	reason("finish_rejected", params{"count": 2}, "2"),
 	reason("workspace_empty", params{"nodes": []string{"n1"}}),
+	reason("policy_refused", params{"detail": "RAW_DETAIL"}, "RAW_DETAIL"),
 }
 
 // codeCases 是要翻译的全部代码。规则生成的问题用 Verdict 的代码（11.8），所以每个理由也要能当问题问。
@@ -117,6 +119,7 @@ func codeCases() []codeCase {
 		codeCase{"exitWhen.reply_given", "exitWhenText", params{"exit_when_code": "reply_given", "exit_when": fallbackText}, nil},
 		codeCase{"exitWhen.recipe_delivered", "exitWhenText", params{"exit_when_code": "recipe_delivered", "exit_when": fallbackText}, nil},
 		codeCase{"exitWhen.node_result", "exitWhenText", params{"exit_when_code": "node_result", "params": params{"node": "explore"}, "exit_when": fallbackText}, []string{"explore"}},
+		codeCase{"doneWhen.answer_question", "doneWhenText", params{"done_when_code": "answer_question", "done_when": fallbackText}, nil},
 	)
 	return out
 }
@@ -150,6 +153,24 @@ var otherKeys = map[string][]string{
 	"retry.unavailable":           {"what", "attempt", "max"},
 	"retry.failed":                {"what", "attempt", "max"},
 	"step.nodeSkipped":            {"id"},
+	"abort.why":                   nil,
+	"abort.completed":             nil,
+	"abort.notCompleted":          nil,
+	"abort.partial":               nil,
+	"abort.noDelivery":            nil,
+	"abort.nodeError":             {"id", "why"},
+}
+
+// abortBody 是 Runtime 的 abort 交付：理由是代码给的时候带 codes，文字是后备（一律是中文，翻译了就不该看到）。
+var abortBody = params{
+	"reason": "中文的理由", "completed": []string{"answer 已完成"}, "not_completed": []string{"fix：中文的错误", "n3（上游没有成功）"},
+	"codes": params{"reason_code": "budget_stopped", "params": params{"budget": "tool_calls"}, "nodes": []params{
+		{"node_id": "answer", "role": "deliver", "status": "succeeded"},
+		{"node_id": "fix", "role": "act", "status": "failed", "error": "中文的错误", "error_code": "budget_exhausted", "params": params{"budget": "tool_calls", "limit": 5, "used": 5}},
+		{"node_id": "n3", "role": "deliver", "status": "skipped", "error": "中文的错误", "error_code": "upstream_failed", "params": params{"node": "fix"}},
+		{"node_id": "n4", "role": "act", "status": "failed", "error": "RAW_ERROR", "error_code": "brand_new"},
+		{"node_id": "n5", "role": "act", "status": "cancelled"},
+	}},
 }
 
 // exactCases 按两种语言核对整句：decision_retry、参数的换算，以及翻不了时回落到事件自己的文字。
@@ -222,6 +243,28 @@ var exactCases = []struct {
 	{"exitWhenText", params{"exit_when_code": "reply_given", "exit_when": fallbackText}, "给出回复", "a reply is given"},
 	{"exitWhenText", params{"exit_when_code": "recipe_delivered", "exit_when": fallbackText}, "Recipe 跑完，结果已交付", "the recipe finishes and the result is delivered"},
 	{"exitWhenText", params{"exit_when_code": "node_result", "params": params{"node": "explore"}, "exit_when": fallbackText}, "explore 给出结果", "explore returns a result"},
+
+	// 默认的完成条件。
+	{"doneWhenText", params{"done_when_code": "answer_question", "done_when": fallbackText}, "回答你的问题", "your question is answered"},
+	{"doneWhenText", params{"done_when_code": "brand_new", "done_when": fallbackText}, fallbackText, fallbackText},
+	{"doneWhenText", params{"done_when": fallbackText}, fallbackText, fallbackText},
+
+	// abort 的交付：代码写的按节点翻译，不认识的错误用它自己的文字，没有说明的写状态；模型写的是原文。
+	{"abortMarkdown", abortBody,
+		"### 为什么停下\n工具调用预算用完，你选择停止，用现有结果收尾\n\n### 已完成\n- answer\n\n### 没有完成\n- fix：工具调用预算 5 次已经用完（已用 5 次）\n- n3：上游 fix 没有成功\n- n4：RAW_ERROR\n- n5：cancelled",
+		"### Why it stopped\nThe tool-call budget ran out and you chose to stop; wrapping up with the results so far\n\n### Completed\n- answer\n\n### Not completed\n- fix: The tool-call budget (5) is used up (5 so far)\n- n3: Upstream fix didn't succeed\n- n4: RAW_ERROR\n- n5: cancelled"},
+	{"abortMarkdown", params{"reason": "RAW_REASON", "completed": []string{"RAW_DONE"}, "not_completed": []string{"RAW_TODO"}},
+		"### 为什么停下\nRAW_REASON\n\n### 已完成\n- RAW_DONE\n\n### 没有完成\n- RAW_TODO",
+		"### Why it stopped\nRAW_REASON\n\n### Completed\n- RAW_DONE\n\n### Not completed\n- RAW_TODO"},
+	{"abortMarkdown", params{"reason": "中文的理由", "completed": []string{"a 已完成"}, "not_completed": []string{"交付"}, "codes": params{"reason_code": "human_no_reply", "nodes": []params{{"node_id": "a", "status": "succeeded"}}}},
+		"### 为什么停下\n没有等到回复，按停止处理，用现有结果收尾\n\n### 已完成\n- a\n\n### 没有完成\n- 最终结果没有交付",
+		"### Why it stopped\nNo reply came; stopping and wrapping up with the results so far\n\n### Completed\n- a\n\n### Not completed\n- The final result wasn't delivered"},
+	{"abortMarkdown", params{"reason": "中文的理由", "completed": []string{}, "not_completed": []string{"整个 Task（被 Policy Engine 拒绝）"}, "codes": params{"reason_code": "policy_refused", "params": params{"detail": "RAW_DETAIL"}, "nodes": []params{}}},
+		"### 为什么停下\n租户策略拒绝了这个任务：RAW_DETAIL\n\n### 没有完成\n- 最终结果没有交付",
+		"### Why it stopped\nThe tenant policy refused this task: RAW_DETAIL\n\n### Not completed\n- The final result wasn't delivered"},
+	{"abortMarkdown", params{"reason": "RAW_REASON", "completed": []string{}, "not_completed": []string{}, "codes": params{"reason_code": "brand_new", "nodes": []params{}}},
+		"### 为什么停下\nRAW_REASON\n\n### 没有完成\n- 最终结果没有交付",
+		"### Why it stopped\nRAW_REASON\n\n### Not completed\n- The final result wasn't delivered"},
 }
 
 // --- 字典（总是跑） ---
@@ -455,10 +498,13 @@ try {
   const rounds = () => [...document.querySelectorAll(".round-row .g")].map(text);
   // 第一轮换掉了 Task State 的文字，才算 Rounds 与事件都到了。
   const roundsReady = () => rounds().length > 0 && rounds()[0] !== "回复用户这条消息";
-  for (let i = 0; i < 600 && (steps().length < plan.steps || !document.querySelector(".c-ask .q") || !roundsReady()); i++) {
+  const aborted = () => document.querySelector("#turn-t0 .answer");
+  for (let i = 0; i < 600 && (steps().length < plan.steps || !document.querySelector(".c-ask .q") || !roundsReady() || !aborted()); i++) {
     await new Promise((r) => setTimeout(r, 50));
   }
   out.rounds = rounds();
+  out.doneWhen = text(document.querySelector(".done-when"));
+  out.abort = text(aborted());
   out.steps = steps().map((el) => ({ title: text(el.querySelector(".step-title")), detail: text(el.querySelector(".step-detail")) }));
   out.now = text(document.querySelector(".worklog-steps > .step.now .step-title"));
   out.ask = text(document.querySelector(".c-ask .q"));
@@ -470,13 +516,15 @@ await fetch("/__result", { method: "POST", body: JSON.stringify(out) });
 `
 
 type probeResult struct {
-	Errors  []string   `json:"errors"`
-	Results []string   `json:"results"`
-	Rounds  []string   `json:"rounds"`
-	Steps   []pageStep `json:"steps"`
-	Now     string     `json:"now"`
-	Ask     string     `json:"ask"`
-	Inline  []string   `json:"inline"`
+	Errors   []string   `json:"errors"`
+	Results  []string   `json:"results"`
+	Rounds   []string   `json:"rounds"`
+	DoneWhen string     `json:"doneWhen"`
+	Abort    string     `json:"abort"`
+	Steps    []pageStep `json:"steps"`
+	Now      string     `json:"now"`
+	Ask      string     `json:"ask"`
+	Inline   []string   `json:"inline"`
 }
 
 // fakeSite 是真正的页面加上探针、假的 API 与事件流；事件流发完后一直开着（任务还在跑），直到 done。
@@ -484,6 +532,8 @@ func fakeSite(t *testing.T, lang string, cases []probeCase, done <-chan struct{}
 	t.Helper()
 	const base = "/api/projects/p1/sessions/s1"
 	task := params{"id": "t1", "status": "TASK_STATUS_RUNNING", "message": "hello", "created_at": "2026-10-28T08:00:00Z"}
+	// 更早的一轮已经 abort 了：看它的交付画成什么样。
+	aborted := params{"id": "t0", "status": "TASK_STATUS_ABORTED", "message": "earlier", "created_at": "2026-10-28T07:00:00Z"}
 	api := map[string]any{
 		"/api/config":       params{},
 		"/api/me":           params{"tenant": "t1", "user": "u1", "connections": []any{}},
@@ -491,8 +541,9 @@ func fakeSite(t *testing.T, lang string, cases []probeCase, done <-chan struct{}
 		"/api/samples":      []any{},
 		"/api/sessions":     []params{{"id": "s1", "project_id": "p1", "title": "demo"}},
 		"/api/tasks/active": []any{},
-		base + "/tasks":     []params{task},
-		base + "/tasks/t1":  params{"task": task, "runtime": params{"taskState": params{"value": params{"goal": "hello", "done_when": "x", "rounds": taskRounds}}}},
+		base + "/tasks":     []params{aborted, task},
+		base + "/tasks/t0":  params{"task": aborted},
+		base + "/tasks/t1":  params{"task": task, "runtime": params{"taskState": params{"value": params{"goal": "hello", "done_when": "回答用户的问题", "done_when_code": "answer_question", "rounds": taskRounds}}}},
 		base + "/env":       params{},
 		base + "/changes":   params{"files": []any{}},
 	}
@@ -537,6 +588,15 @@ func fakeSite(t *testing.T, lang string, cases []probeCase, done <-chan struct{}
 			_ = json.NewEncoder(w).Encode(body)
 		})
 	}
+	mux.HandleFunc("GET "+base+"/tasks/t0/events", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		body := maps.Clone(abortBody)
+		body["partial"] = params{"text": "RAW_PARTIAL"}
+		finished := params{"status": "TASK_STATUS_ABORTED", "deliverable": params{"value": body}, "rounds": 1}
+		data, _ := json.Marshal(params{"event_id": 1, "emitted_at": "2026-10-28T07:00:00Z", "payload": params{"value": finished}})
+		fmt.Fprintf(w, "id: 1\nevent: task_finished\ndata: %s\n\n", data)
+	})
 	mux.HandleFunc("GET "+base+"/tasks/t1/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -698,6 +758,27 @@ func TestRuntimeCodesInBrowser(t *testing.T) {
 			}[lang]
 			if !slices.Equal(r.Rounds, rounds) {
 				t.Errorf("右栏的 Rounds\n得到 %q\n应是 %q", r.Rounds, rounds)
+			}
+			// 右栏的完成条件是默认的那一句，按代码翻译。
+			if want := map[string]string{"zh": "回答你的问题", "en": "your question is answered"}[lang]; r.DoneWhen != want {
+				t.Errorf("右栏的完成条件\n得到 %q\n应是 %q", r.DoneWhen, want)
+			}
+			// abort 的交付：翻译了理由与节点，字段名不露出来，部分结果在最后，文字都不用后备。
+			for _, want := range map[string][]string{
+				"zh": {"为什么停下", "工具调用预算用完，你选择停止，用现有结果收尾", "已完成", "没有完成", "fix：工具调用预算 5 次已经用完（已用 5 次）", "部分结果", "RAW_PARTIAL"},
+				"en": {"Why it stopped", "The tool-call budget ran out and you chose to stop", "Completed", "Not completed", "fix: The tool-call budget (5) is used up (5 so far)", "Partial result", "RAW_PARTIAL"},
+			}[lang] {
+				if !strings.Contains(r.Abort, want) {
+					t.Errorf("abort 的交付少了 %q：%q", want, r.Abort)
+				}
+			}
+			for _, raw := range []string{"中文的理由", "中文的错误", "answer 已完成", "not completed", "reason", "codes"} {
+				if strings.Contains(r.Abort, raw) {
+					t.Errorf("abort 的交付里不该有 %q：%q", raw, r.Abort)
+				}
+			}
+			if lang == "en" && chinese.MatchString(r.Abort) {
+				t.Errorf("abort 交付的英文里有中文：%q", r.Abort)
 			}
 			if r.Ask != ask {
 				t.Errorf("输入框上方的问题\n得到 %q\n应是 %q", r.Ask, ask)
