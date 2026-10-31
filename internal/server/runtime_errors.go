@@ -5,6 +5,10 @@ package server
 // Runtime 的说明里带着 git 的输出，中文界面原样给更有用。
 func runtimeMsg(reason string) *Msg {
 	switch reason {
+	case "task_finished":
+		return msg("任务已经结束，可以作为新任务发送")
+	case "task_not_started":
+		return msg("任务还没开始，可以直接修改这条消息")
 	case "network_not_allowed":
 		return msg("账号的策略不允许沙箱联网")
 	case "host_not_allowed":

@@ -178,6 +178,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET "+sess+"/tasks/{task}", s.authed(s.handleQueryTask))
 	mux.HandleFunc("GET "+sess+"/tasks/{task}/events", s.authed(s.handleEvents))
 	mux.HandleFunc("POST "+sess+"/tasks/{task}/reply", s.authed(s.handleReply))
+	mux.HandleFunc("POST "+sess+"/tasks/{task}/guidance", s.authed(s.handleGuidance))
+	mux.HandleFunc("POST "+sess+"/tasks/{task}/guidance/{guidance}/edit", s.authed(s.handleGuidanceEdit))
+	mux.HandleFunc("POST "+sess+"/tasks/{task}/guidance/{guidance}/retract", s.authed(s.handleGuidanceRetract))
+	mux.HandleFunc("POST "+sess+"/tasks/{task}/message", s.authed(s.handleEditQueued))
+	mux.HandleFunc("POST "+sess+"/tasks/{task}/message/result", s.authed(s.handleQueuedResult))
 	mux.HandleFunc("POST "+sess+"/tasks/{task}/cancel", s.authed(s.handleCancel))
 	mux.HandleFunc("GET /api/tasks/active", s.authed(s.handleActiveTasks))
 

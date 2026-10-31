@@ -94,7 +94,12 @@ var english = map[string]string{
 	"拉取失败：%v": "Fetch failed: %v",
 
 	// Runtime 的错误：按错误码翻译（runtime_errors.go），没有翻译的给错误码
-	"Runtime 返回了错误（%s）":     "The runtime returned an error (%s)",
+	"Runtime 返回了错误（%s）":                                 "The runtime returned an error (%s)",
+	"任务已经结束，可以作为新任务发送":                                  "The task has finished. You can send this as a new task.",
+	"任务还没开始，可以直接修改这条消息":                                 "The task has not started. You can edit its message directly.",
+	"要给出 guidance_id、text，mode 是 next_step 或 interrupt": "guidance_id and text are required, and mode must be next_step or interrupt",
+	"要给出 text":              "text is required",
+	"消息不能是空的":               "The message cannot be empty",
 	"账号的策略不允许沙箱联网":          "Your account's policy doesn't allow the sandbox to use the network",
 	"账号的策略不允许连这个主机":         "Your account's policy doesn't allow connecting to this host",
 	"只读的任务不能联网":             "Read-only tasks can't use the network",

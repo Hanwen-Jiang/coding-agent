@@ -25,6 +25,9 @@ type fakeTaskAPI struct {
 	policies string
 	// 每次 SubmitTask 时策略文件的内容（task-service 在提交那一刻读它）。
 	seenPolicies []string
+	// 收到的 SignalTask；signalError 给了就按这个原因拒绝。
+	signals     []map[string]any
+	signalError string
 }
 
 func (f *fakeTaskAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -47,6 +50,17 @@ func (f *fakeTaskAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			session = "ses_" + n
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"taskId": "tsk_" + n, "sessionId": session, "eventsUrl": "http://x/v1/tasks/tsk_" + n + "/events"})
+	case strings.HasSuffix(r.URL.Path, "/SignalTask"):
+		if f.signalError != "" {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": "failed_precondition", "message": f.signalError,
+				"details": []any{map[string]any{"type": "google.rpc.ErrorInfo", "debug": map[string]any{"reason": f.signalError, "domain": errorInfoDomain}}},
+			})
+			return
+		}
+		f.signals = append(f.signals, body)
+		_, _ = io.WriteString(w, "{}")
 	case strings.HasSuffix(r.URL.Path, "/QueryTask"):
 		f.queries++
 		status := f.status

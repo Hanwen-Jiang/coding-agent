@@ -10,6 +10,7 @@ import { LANGS, lang, locale, setLang, t } from "./i18n.js";
 const EVENT_TYPES = [
   "task_accepted", "round_started", "stage_started", "node_started", "node_finished",
   "thinking_delta", "tool_status", "token_delta", "human_input_required", "verdict", "decision_retry", "task_finished",
+  "guidance_updated", "task_message_edited", "context_usage",
 ];
 const STATUS = {
   TASK_STATUS_QUEUED: [t("status.queued"), "run"],
@@ -20,7 +21,7 @@ const STATUS = {
   TASK_STATUS_FAILED: [t("status.failed"), "err"],
 };
 const TERMINAL = new Set(["TASK_STATUS_DONE", "TASK_STATUS_ABORTED", "TASK_STATUS_CANCELLED", "TASK_STATUS_FAILED"]);
-const QUIET = new Set(["heartbeat", "token_delta", "thinking_delta"]);
+const QUIET = new Set(["heartbeat", "token_delta", "thinking_delta", "guidance_updated", "task_message_edited", "context_usage"]);
 const REPLAY_LIMIT = 12;
 
 // 沙箱等级就是 Task 的 effect 上限；模型倾向交给 Planner 选 Tier（服务端见 runsettings.go）。
@@ -66,6 +67,10 @@ const state = {
   open: new Set(), // 展开的工作过程
   closed: new Set(), // 用户手动收起的
   replied: new Set(),
+  guidance: new Map(), // taskId → 这个任务的纠偏（发出的顺序）：{ id, text, mode, state, reason, editing, draft }
+  queuedEdit: null, // 正在修改的排队消息：{ taskId, draft }
+  ctxToolsOpen: false, // 右栏：展开了每个工具占多少
+  detailsOpen: false, // 右栏：展开了任务详情
   rawOpen: new Set(), // 展开了“原始事件”的步骤（taskId:eventId）：重画时保持展开
   shownSteps: new Map(), // taskId → 已经画过的步骤（eventId）：只给新来的步骤进场动画
   shownNow: new Map(), // taskId → “此刻”那一行对应的事件：换了才给它进场动画
@@ -753,6 +758,8 @@ function resetSessionState() {
   state.tasks = [];
   state.runs = new Map();
   state.detail = new Map();
+  state.guidance = new Map();
+  state.queuedEdit = null;
   state.changes = null;
   state.env = null;
   state.filesPath = "";
@@ -1221,12 +1228,17 @@ function pendingAsk(task) {
     if (ev.type !== "human_input_required") continue;
     const v = ev.value || {};
     const qid = pick(v, "question_id", "questionId");
-    if (state.replied.has(qid) || events.slice(i + 1).some((e) => !QUIET.has(e.type))) return null;
+    if (state.replied.has(qid) || events.slice(i + 1).some((e) => !QUIET.has(e.type) || interruptApplied(e))) return null;
     const raw = pick(v, "options", "choices") || ["approve", "reject"];
     const options = raw.map((o) => (typeof o === "string" ? { id: o, label: o } : { id: pick(o, "id", "value", "option"), label: pick(o, "label", "text", "id", "value") }));
     return { qid, question: questionText(v) || pick(v, "question", "prompt", "summary", "message") || t("ask.default"), options };
   }
   return null;
+}
+
+// 立刻打断生效了：问题已经撤回。
+function interruptApplied(e) {
+  return e.type === "guidance_updated" && e.value.state === "applied" && e.value.mode === "interrupt";
 }
 
 function phase() {
@@ -1342,16 +1354,19 @@ function turn(task) {
   else if (running) tail = waitingLine(task);
   else if (!run) tail = h("div", { class: "result-foot" }, statusChip(status), h("button", { class: "btn ghost sm", onclick: () => loadRun(task, true) }, t("turn.load")));
   // 每来一个事件整轮重画：这里不带进场动画（只有刚发出的那一轮在“提交中”时升上来一次）。
+  const queued = status === "TASK_STATUS_QUEUED";
+  const editing = state.queuedEdit && state.queuedEdit.taskId === task.id;
   return h("section", { class: "turn", id: "turn-" + task.id },
-    h("div", { class: "msg-user" },
-      h("div", { class: "bubble" }, task.message),
+    h("div", { class: "msg-user" + (queued ? " queued-item" : ""), "data-task-id": queued ? task.id : null },
+      editing ? queuedEditor(task) : h("div", { class: "bubble" }, task.pending_message || task.message),
       h("div", { class: "meta" }, fmtTime(task.created_at),
         task.sandbox === "read" ? h("span", { class: "chip info" }, icon("eye", "xs"), t("sandbox.read")) : null,
-        task.model && task.model !== "balanced" ? h("span", { class: "chip" }, modelLabel(task.model)) : null),
+        task.model && task.model !== "balanced" ? h("span", { class: "chip" }, modelLabel(task.model)) : null,
+        queued && !editing ? h("button", { class: "btn ghost xs queued-edit", onclick: () => startQueuedEdit(task) }, icon("edit", "xs"), t("queued.edit")) : null),
     ),
     h("div", { class: "msg-agent" },
       h("div", { class: "agent-mark" + (running ? " live" : ""), title: running ? t("turn.working") : null }, logo()),
-      h("div", { class: "agent-body" }, worklog(task, events, running, finished), asks(events), tail),
+      h("div", { class: "agent-body" }, worklog(task, events, running, finished), asks(events), guidanceList(task), tail),
     ),
   );
 }
@@ -1687,10 +1702,18 @@ function loadRun(t, force = false) {
       if (type === "task_finished") {
         t.status = ev.value.status || t.status;
         if (!state.closed.has(t.id)) state.open.delete(t.id);
+        guidanceTaskFinished(t);
         finish();
         if (!replaying) afterFinish(t);
       } else if (type === "node_finished" && !replaying) {
         throttledChanges();
+      } else if (type === "guidance_updated") {
+        guidanceEvent(t, ev.value);
+      } else if (type === "task_message_edited" && !replaying) {
+        queuedEdited(t, ev.value);
+      } else if ((type === "verdict" || type === "round_started") && !replaying) {
+        // 各轮的重要输出在 Task State 里（右栏“输出”）。
+        loadDetail(t);
       }
       scheduleTurn(t.id);
       scheduleChrome();
@@ -1796,6 +1819,16 @@ async function loadDetail(t) {
       roundSeq: rt.roundSeq || 0,
       cost: rounds.length ? rounds.reduce((s, r) => s + num(r.cost_usd), 0) : undefined,
     });
+    // 刷新页面后的纠偏：事件里没有文字，文字在 Task State。
+    for (const g of (ts && Array.isArray(ts.guidance) ? ts.guidance : [])) {
+      const list = guidanceOf(t.id);
+      const item = list.find((x) => x.id === g.guidance_id);
+      if (item) {
+        if (!item.text) item.text = g.text;
+      } else {
+        list.push({ id: g.guidance_id, text: g.text, mode: g.mode, state: g.state });
+      }
+    }
     const rec = state.tasks.find((x) => x.id === t.id);
     if (rec && data.task) Object.assign(rec, data.task, { status: TERMINAL.has(rec.status) ? rec.status : data.task.status });
     scheduleChrome();
@@ -1849,13 +1882,216 @@ function onComposerKey(e) {
   if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
   e.preventDefault();
   const ph = phase();
-  if (ph.mode === "waiting") {
-    // 等确认时 Enter 只在有补充说明、且有“带说明重新规划”这样的选项时生效。
+  const urgent = e.ctrlKey || e.metaKey;
+  if (ph.mode === "waiting" && !urgent) {
+    // 等确认时 Enter 在有补充说明、且有“带说明重新规划”这样的选项时是回答它；否则是纠偏（继续等，回复后带上）。
     const guided = ph.ask.options.find((o) => /guidance|replan/i.test(o.id));
     if (guided && ui.input.value.trim()) reply(ph.current, ph.ask, guided.id);
+    else steer(ph.current, "next_step");
+    return;
+  }
+  if (ph.mode === "running" || ph.mode === "waiting") {
+    // 运行中：Enter 纠偏（下一个检查点生效），Ctrl+Enter 立刻打断；排队（下一个任务）在发送按钮旁的菜单里。
+    steer(ph.current, urgent ? "interrupt" : "next_step");
     return;
   }
   submit();
+}
+
+// ---------------------------------------------------------------- 纠偏、立刻打断、撤回与修改
+
+function guidanceId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return "g" + [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function guidanceOf(taskId) {
+  if (!state.guidance.has(taskId)) state.guidance.set(taskId, []);
+  return state.guidance.get(taskId);
+}
+
+function redrawGuidance(taskId) {
+  scheduleTurn(taskId);
+  scheduleChrome();
+}
+
+async function steer(task, mode) {
+  const text = ui.input.value.trim();
+  if (!text) return;
+  const item = { id: guidanceId(), text, mode, state: "sending" };
+  guidanceOf(task.id).push(item);
+  ui.input.value = "";
+  autosize();
+  refreshSend();
+  redrawGuidance(task.id);
+  try {
+    await api("POST", `${sbase()}/tasks/${task.id}/guidance`, { guidance_id: item.id, text, mode });
+  } catch (ex) {
+    // 任务刚好结束或还没开始：这条没有发出去，提示可以作为新任务发送。
+    item.state = "not_applied";
+    redrawGuidance(task.id);
+    report(ex);
+  }
+}
+
+// 事件里没有文字：刷新页面后的纠偏，文字从 Task State 补（loadDetail）。
+function guidanceEvent(task, v) {
+  const id = pick(v, "guidance_id");
+  const list = guidanceOf(task.id);
+  let item = list.find((g) => g.id === id);
+  if (!item) {
+    if (v.state === "rejected" || v.state === "retracted") return;
+    item = { id, text: "", mode: v.mode || "next_step", state: v.state };
+    list.push(item);
+  }
+  switch (v.state) {
+    case "pending":
+      if (item.state !== "applied") item.state = "pending";
+      item.reason = v.reason_code || "";
+      break;
+    case "applied":
+      item.state = "applied";
+      item.reason = "";
+      item.editing = false;
+      break;
+    case "retracted":
+      list.splice(list.indexOf(item), 1);
+      break;
+    case "rejected":
+      guidanceRejected(item, list, v.reason_code || "");
+      break;
+  }
+  redrawGuidance(task.id);
+}
+
+function guidanceRejected(item, list, reason) {
+  if (reason === "already_applied") {
+    item.state = "applied";
+    item.editing = false;
+    toast(t("guidance.rejected.already_applied"), true);
+  } else if (reason === "not_found") {
+    list.splice(list.indexOf(item), 1);
+    toast(t("guidance.rejected.not_found"), true);
+  } else if (reason === "task_finished") {
+    item.state = "not_applied";
+  } else {
+    item.state = "not_applied";
+    toast(t("guidance.rejected.too_many_pending"), true);
+  }
+}
+
+// 任务结束时还没生效的：提示可以作为新任务发送。
+function guidanceTaskFinished(task) {
+  for (const g of guidanceOf(task.id)) {
+    if (g.state === "sending" || g.state === "pending") {
+      g.state = "not_applied";
+      g.editing = false;
+    }
+  }
+}
+
+async function retractGuidance(task, item) {
+  try {
+    await api("POST", `${sbase()}/tasks/${task.id}/guidance/${item.id}/retract`);
+  } catch (ex) { report(ex); }
+}
+
+async function saveGuidanceEdit(task, item, text) {
+  if (!text || text === item.text) {
+    item.editing = false;
+    return redrawGuidance(task.id);
+  }
+  item.editing = false;
+  item.text = text;
+  redrawGuidance(task.id);
+  try {
+    await api("POST", `${sbase()}/tasks/${task.id}/guidance/${item.id}/edit`, { text });
+  } catch (ex) { report(ex); }
+}
+
+function inlineEditor(wrapClass, value, onInput, onSave, onCancel) {
+  const area = h("textarea", { class: "c-input", rows: 2, value });
+  area.addEventListener("input", () => onInput(area.value));
+  area.addEventListener("keydown", (e) => {
+    if (e.isComposing) return;
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      onSave(area.value.trim());
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      onCancel();
+    }
+  });
+  requestAnimationFrame(() => { if (area.isConnected) area.focus(); });
+  return h("div", { class: wrapClass }, area);
+}
+
+function guidanceList(task) {
+  const items = (state.guidance.get(task.id) || []).filter((g) => g.text);
+  if (!items.length) return null;
+  return h("div", { class: "guidance-list" }, items.map((g) => guidanceItem(task, g)));
+}
+
+function guidanceItem(task, g) {
+  const open = g.state === "sending" || g.state === "pending";
+  const changeable = open && g.mode === "next_step";
+  const label = g.mode === "interrupt" ? t("composer.interrupt") : t("composer.steer");
+  return h("div", { class: "guidance-item" + (g.state === "applied" ? " applied" : "") + (g.state === "not_applied" ? " missed" : ""), "data-guidance-id": g.id, "data-mode": g.mode },
+    h("div", { class: "guidance-head" },
+      h("span", { class: "chip" + (g.mode === "interrupt" ? " warn" : "") }, label),
+      g.state === "applied" ? h("span", { class: "guidance-state" }, icon("check", "xs"), t("guidance.applied")) : null,
+      open ? h("span", { class: "guidance-state muted" }, g.reason === "irreversible_in_flight" ? t("guidance.waitIrreversible") : t("guidance.pending")) : null,
+      g.state === "not_applied" ? h("span", { class: "guidance-state muted" }, t("guidance.notApplied")) : null,
+      h("span", { class: "grow" }),
+      changeable && !g.editing ? h("button", { class: "btn ghost xs guidance-edit", onclick: () => { g.editing = true; g.draft = g.text; redrawGuidance(task.id); } }, icon("edit", "xs"), t("guidance.edit")) : null,
+      changeable ? h("button", { class: "btn ghost xs guidance-retract", onclick: () => retractGuidance(task, g) }, icon("x", "xs"), t("guidance.retract")) : null,
+      g.state === "not_applied" ? h("button", { class: "btn xs guidance-send-as-task", onclick: () => {
+        const list = guidanceOf(task.id);
+        list.splice(list.indexOf(g), 1);
+        setComposer(g.text);
+        redrawGuidance(task.id);
+      } }, icon("queue", "xs"), t("guidance.sendAsTask")) : null,
+    ),
+    g.editing
+      ? inlineEditor("guidance-editor", g.draft ?? g.text, (v) => { g.draft = v; }, (v) => saveGuidanceEdit(task, g, v), () => { g.editing = false; redrawGuidance(task.id); })
+      : h("div", { class: "guidance-text" }, g.text),
+  );
+}
+
+// 修改排队中的消息：改不改由 Runtime 定（任务可能刚好开始了），结果靠事件 task_message_edited。
+
+function startQueuedEdit(task) {
+  state.queuedEdit = { taskId: task.id, draft: task.pending_message || task.message };
+  scheduleTurn(task.id);
+}
+
+function queuedEditor(task) {
+  return inlineEditor("queued-editor", state.queuedEdit.draft, (v) => { state.queuedEdit.draft = v; }, (v) => saveQueuedEdit(task, v), () => { state.queuedEdit = null; scheduleTurn(task.id); });
+}
+
+async function saveQueuedEdit(task, message) {
+  state.queuedEdit = null;
+  scheduleTurn(task.id);
+  if (!message || message === task.message) return;
+  const before = task.pending_message;
+  task.pending_message = message;
+  scheduleTurn(task.id);
+  try {
+    await api("POST", `${sbase()}/tasks/${task.id}/message`, { message });
+  } catch (ex) {
+    task.pending_message = before;
+    scheduleTurn(task.id);
+    report(ex);
+  }
+}
+
+function queuedEdited(task, v) {
+  const applied = v.state === "applied";
+  if (applied && task.pending_message) task.message = task.pending_message;
+  task.pending_message = "";
+  if (!applied) toast(t("queued.editTooLate"), true);
+  scheduleTurn(task.id);
+  api("POST", `${sbase()}/tasks/${task.id}/message/result`, { applied }).catch(() => { /* 只影响这里记的消息，下次再说 */ });
 }
 
 function updateComposer(force = false) {
@@ -1918,15 +2154,31 @@ function updateComposer(force = false) {
 }
 
 function sendButton(ph) {
-  const queue = ph.mode === "running";
-  ui.send = h("button", { class: "send" + (queue ? " queue" : ""), title: queue ? t("composer.queueTitle") : t("composer.sendTitle"), onclick: () => submit() },
-    icon(queue ? "queue" : "send", "sm"), queue ? t("composer.queue") : null);
-  return ui.send;
+  if (ph.mode !== "running") {
+    ui.send = h("button", { class: "send", title: t("composer.sendTitle"), onclick: () => submit() }, icon("send", "sm"));
+    return ui.send;
+  }
+  // 运行中：发送是纠偏，别的选择（立刻打断、下一个任务）在旁边的菜单里。
+  ui.send = h("button", { class: "send", title: t("hint.steer"), onclick: () => steer(ph.current, "next_step") }, icon("send", "sm"));
+  const toggle = h("button", { class: "btn ghost xs send-menu-toggle", title: t("composer.queueTitle"), onclick: () => openPop(toggle, (close) => sendMenu(ph, close)) }, icon("chevron", "xs"));
+  return h("div", { class: "send-group" }, toggle, ui.send);
+}
+
+function sendMenu(ph, close) {
+  const item = (action, ic, title, desc, run) => {
+    const el = popItem(ic, title, desc, false, () => { close(); run(); });
+    el.dataset.action = action;
+    return el;
+  };
+  return h("div", { class: "send-menu" },
+    item("steer", "send", t("composer.steer"), t("hint.steer"), () => steer(ph.current, "next_step")),
+    item("interrupt", "stop", t("composer.interrupt"), t("hint.interrupt"), () => steer(ph.current, "interrupt")),
+    item("queue", "queue", t("composer.queueNext"), t("composer.queueTitle"), () => submit()));
 }
 
 function hint(ph) {
   const k = (key, text) => h("span", {}, h("span", { class: "kbd" }, key), " ", text);
-  if (ph.mode === "running") return [k("Esc", t("hint.stop")), k("Enter", t("hint.queue")), k("Shift+Enter", t("hint.newline"))];
+  if (ph.mode === "running") return [k("Enter", t("composer.steer")), k("Ctrl+Enter", t("composer.interrupt")), k("Esc", t("hint.stop")), k("Shift+Enter", t("hint.newline"))];
   if (ph.mode === "waiting") return [];
   return [k("Enter", t("hint.send")), k("Shift+Enter", t("hint.newline"))];
 }
@@ -2190,12 +2442,77 @@ function contextSummary() {
   const d = state.detail.get(task.id);
   const rounds = d && d.state && Array.isArray(d.state.rounds) ? d.state.rounds.length : task.rounds || 0;
   const cost = taskCost(task);
-  return [rounds ? t("rounds", { n: rounds }) : null, cost ? fmtUSD(cost) : null].filter(Boolean).join(" · ") || "—";
+  const usage = latestUsage(task);
+  return [usage ? ctxPercent(num(usage.total_tokens), num(usage.window_tokens)) : null, rounds ? t("rounds", { n: rounds }) : null, cost ? fmtUSD(cost) : null].filter(Boolean).join(" · ") || "—";
+}
+
+// 上下文占比（Runtime 的 docs/plan/running-task-interaction.md 第 3 节，参考 Claude Code 的 /context）：这次模型调用的上下文里各类内容占多少。
+const CTX_CATEGORIES = ["system_prompt", "system_tools", "mcp_tools", "memory", "task_brief", "messages"];
+
+// 这个任务最近一次模型调用的占比；它还没调用过模型（排队中、刚开始）时看上一个任务的。
+function latestUsage(task) {
+  const at = state.tasks.indexOf(task);
+  for (let k = at; k >= 0; k--) {
+    const events = state.runs.get(state.tasks[k].id)?.events || [];
+    for (let i = events.length - 1; i >= 0; i--) if (events[i].type === "context_usage") return events[i].value;
+  }
+  return null;
+}
+
+function ctxTokens(n) {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+function ctxPercent(tokens, total) {
+  return `${(total > 0 ? (tokens / total) * 100 : 0).toFixed(1)}%`;
+}
+
+function ctxUsage(usage) {
+  const windowTokens = num(usage.window_tokens);
+  const total = num(usage.total_tokens);
+  const line = num(usage.effective_tokens);
+  const byName = new Map((usage.categories || []).map((c) => [c.name, num(c.tokens)]));
+  const rows = [...CTX_CATEGORIES.map((name) => [name, byName.get(name) || 0, t(`ctx.cat.${name}`)]), ["free", Math.max(0, windowTokens - total), t("ctx.free")]];
+  const tools = usage.tools || [];
+  return h("div", { class: "ctx-usage" },
+    h("div", { class: "ctx-bar" }, rows.map(([name, tokens]) => {
+      const seg = h("span", { class: "seg", "data-cat": name, title: `${t(name === "free" ? "ctx.free" : `ctx.cat.${name}`)} ${ctxTokens(tokens)}` });
+      seg.style.width = ctxPercent(tokens, windowTokens);
+      return seg;
+    }), line < windowTokens ? (() => {
+      const mark = h("span", { class: "ctx-mark" });
+      mark.style.left = ctxPercent(line, windowTokens);
+      return mark;
+    })() : null),
+    h("div", { class: "ctx-rows" }, rows.map(([name, tokens, label]) => h("div", { class: "ctx-row", "data-cat": name },
+      h("span", { class: "ctx-dot", "data-cat": name }),
+      h("span", { class: "ctx-label" }, label),
+      h("span", { class: "ctx-num" }, ctxTokens(tokens)),
+      h("span", { class: "ctx-pct" }, ctxPercent(tokens, windowTokens))))),
+    h("div", { class: "ctx-line muted small" }, t("ctx.compactionLine", { n: ctxTokens(line) }), (usage.applied || []).length ? ` · ${t("ctx.applied", { steps: usage.applied.join(t("list.sep")) })}` : ""),
+    tools.length ? toggled("ctx-tools", state.ctxToolsOpen, (v) => { state.ctxToolsOpen = v; }, t("ctx.tools"),
+      tools.map((x) => h("div", { class: "ctx-tool" }, h("span", { class: "mono small" }, x.name), x.mcp ? h("span", { class: "chip" }, "MCP") : null, h("span", { class: "grow" }), h("span", { class: "ctx-num" }, ctxTokens(num(x.tokens)))))) : null,
+  );
+}
+
+// details 重画时保持展开。
+function toggled(cls, open, remember, title, body) {
+  const el = h("details", { class: cls, open: open || null }, h("summary", {}, title), body);
+  el.addEventListener("toggle", () => remember(el.open));
+  return el;
 }
 
 function contextBody() {
   const task = focusTask();
   if (!task) return h("div", { class: "empty-line" }, t("ctx.empty"));
+  const usage = latestUsage(task);
+  return [
+    usage ? ctxUsage(usage) : h("div", { class: "empty-line" }, t("ctx.noUsage")),
+    toggled("task-details", state.detailsOpen, (v) => { state.detailsOpen = v; }, t("ctx.details"), taskDetails(task)),
+  ];
+}
+
+function taskDetails(task) {
   const d = state.detail.get(task.id);
   const s = d && d.state;
   if (!s) return [h("div", { class: "goal" }, task.message), h("div", { class: "empty-line" }, t("ctx.loading"))];
@@ -2239,25 +2556,49 @@ function contextBody() {
   ];
 }
 
+// 各轮的重要输出（Runtime 的 docs/plan/running-task-interaction.md 第 4 节）：按任务、Round 分组的重要文件与重要答案；全文在对话里。
+function outputRounds() {
+  const out = [];
+  for (const task of state.tasks) {
+    const s = state.detail.get(task.id)?.state;
+    for (const r of (s && Array.isArray(s.rounds) ? s.rounds : [])) {
+      const hl = r.highlights;
+      if (hl && ((hl.files || []).length || (hl.answers || []).length)) out.push({ task, seq: r.seq, files: hl.files || [], answers: hl.answers || [] });
+    }
+  }
+  return out;
+}
+
+// 已结束的任务的 Task State 平时不取；右栏要汇总时才取。
+const detailAsked = new Set();
+function askDetails() {
+  for (const task of state.tasks) {
+    const key = `${sbase()}/${task.id}`;
+    if (!state.detail.has(task.id) && !detailAsked.has(key)) {
+      detailAsked.add(key);
+      loadDetail(task);
+    }
+  }
+}
+
 function outputSummary() {
-  const f = lastFinished();
-  return f ? statusChip(f.result.status) : "—";
+  const n = outputRounds().length;
+  return n ? t("rounds", { n }) : "—";
 }
 
 function outputBody() {
-  const f = lastFinished();
-  if (!f) return h("div", { class: "empty-line" }, t("output.empty"));
-  const text = deliverableText(f.result);
-  const d = state.detail.get(f.task.id);
-  const artifacts = d && d.state && Array.isArray(d.state.artifacts) ? d.state.artifacts : [];
-  return [
-    h("div", { class: "muted small ellipsis" }, f.task.message),
-    text ? h("div", { class: "output-preview" }, h("div", { class: "answer" }, md(text))) : h("div", { class: "empty-line" }, t("output.noText")),
-    artifacts.length ? [h("div", { class: "sp-sub" }, t("output.artifacts", { n: artifacts.length })), h("ul", { class: "sp-list" }, artifacts.map((a) => h("li", { class: "mono small" }, a)))] : null,
-    h("div", { class: "sp-actions" },
-      h("button", { class: "btn xs", onclick: () => scrollToTurn(f.task.id) }, icon("chevron", "xs"), t("output.inThread")),
-      text ? h("button", { class: "btn ghost xs", onclick: () => copy(text) }, icon("copy", "xs"), t("common.copy")) : null),
-  ];
+  askDetails();
+  const rounds = outputRounds();
+  if (!rounds.length) return h("div", { class: "empty-line" }, t("output.empty"));
+  return rounds.map((r) => h("div", { class: "out-round", "data-task": r.task.id, "data-round": r.seq },
+    h("div", { class: "out-round-h" },
+      h("span", { class: "grow ellipsis", title: r.task.message }, t("output.round", { n: r.seq }), " · ", r.task.message),
+      h("button", { class: "btn ghost xs out-goto", title: t("output.inThread"), onclick: () => scrollToTurn(r.task.id) }, icon("chevron", "xs"))),
+    r.files.length ? [h("div", { class: "sp-sub" }, t("output.files")), r.files.map((f) => h("div", { class: "out-file" },
+      h("button", { class: "mono small out-path", title: t("env.browse"), onclick: () => { state.filesPath = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : ""; openDrawer("files"); } }, f.path),
+      f.why ? h("div", { class: "out-why muted small" }, f.why) : null))] : null,
+    r.answers.length ? [h("div", { class: "sp-sub" }, t("output.answers")), r.answers.map((a) => h("div", { class: "out-answer" }, h("div", { class: "out-text" }, a)))] : null,
+  ));
 }
 
 function changeStats() {

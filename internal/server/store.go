@@ -59,12 +59,14 @@ type Session struct {
 
 // TaskRecord 是在项目里下过的一个任务（状态以 Runtime 为准，这里只缓存最后一次看到的）。
 type TaskRecord struct {
-	ID         string    `json:"id"`
-	Message    string    `json:"message"`
-	CreatedAt  time.Time `json:"created_at"`
-	CreatedBy  string    `json:"created_by"`
-	BaseCommit string    `json:"base_commit,omitempty"`
-	Status     string    `json:"status"`
+	ID      string `json:"id"`
+	Message string `json:"message"`
+	// 修改排队中的消息时先记在这里，Runtime 确认改好了才换掉 Message。
+	PendingMessage string    `json:"pending_message,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	CreatedBy      string    `json:"created_by"`
+	BaseCommit     string    `json:"base_commit,omitempty"`
+	Status         string    `json:"status"`
 	// 提交时选的沙箱等级（effect 上限：read 或 write_reversible）与模型倾向（economy、balanced、best）。
 	Sandbox string `json:"sandbox,omitempty"`
 	Model   string `json:"model,omitempty"`
