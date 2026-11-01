@@ -62,6 +62,8 @@ var reasonCases = []codeCase{
 	reason("rule_cap_reached", params{"step": "replan", "used": 2, "cap": 2, "next": "replan_change_shape"}, "2/2"),
 	reason("rule_criteria_not_met", nil),
 	reason("rule_no_deliver", nil),
+	reason("rule_done_unverified", nil),
+	reason("rule_done_without_changes", nil),
 	reason("rule_no_checkpoint", params{"checkpoint": "cp1"}, "cp1"),
 	reason("rule_unknown_recipe", params{"recipe": "r1"}, "r1"),
 	reason("rule_recipe_over_ceiling", params{"recipe": "r1", "risk": "write_irreversible", "ceiling": "read"}, "r1"),
