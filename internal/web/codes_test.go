@@ -39,6 +39,15 @@ func reason(code string, p params, values ...string) codeCase {
 	return codeCase{"reason." + code, "reasonText", params{"reason_code": code, "params": p, "reason": fallbackText}, values}
 }
 
+// fallbackCause 是没有模型评审时按原因给的说法（reason_code 仍是 rule_fallback，原因在参数 cause 里）。
+func fallbackCause(cause string, p params, values ...string) codeCase {
+	all := params{"cause": cause}
+	for k, v := range p {
+		all[k] = v
+	}
+	return codeCase{"reason.rule_fallback." + cause, "reasonText", params{"reason_code": "rule_fallback", "params": all, "reason": fallbackText}, values}
+}
+
 func question(code string, p params, values ...string) codeCase {
 	return codeCase{"question." + code, "questionText", params{"question_code": code, "params": p, "text": fallbackText}, values}
 }
@@ -64,6 +73,8 @@ var reasonCases = []codeCase{
 	reason("rule_no_deliver", nil),
 	reason("rule_done_unverified", nil),
 	reason("rule_done_without_changes", nil),
+	reason("rule_deliverable_empty", nil),
+	reason("rule_deliverable_unresolved", params{"references": []string{"$a.result"}}, "$a.result"),
 	reason("rule_no_checkpoint", params{"checkpoint": "cp1"}, "cp1"),
 	reason("rule_unknown_recipe", params{"recipe": "r1"}, "r1"),
 	reason("rule_recipe_over_ceiling", params{"recipe": "r1", "risk": "write_irreversible", "ceiling": "read"}, "r1"),
@@ -114,6 +125,11 @@ func codeCases() []codeCase {
 		nodeError("network_needs_admin", nil),
 		nodeError("sandbox_unavailable", nil),
 		nodeError("mcp_session_lost", nil),
+
+		fallbackCause("fast_reply", nil),
+		fallbackCause("model_call_failed", params{"error": "runtime_error"}, "runtime_error"),
+		fallbackCause("invalid_answer", params{"problems": 2}),
+		fallbackCause("decision_retries_exhausted", nil),
 
 		codeCase{"goal.reply_to_message", "goalText", params{"goal_code": "reply_to_message", "goal": fallbackText}, nil},
 		codeCase{"goal.run_recipe", "goalText", params{"goal_code": "run_recipe", "params": params{"recipe": "ci_fix@v2"}, "goal": fallbackText}, []string{"ci_fix@v2"}},

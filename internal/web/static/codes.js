@@ -26,7 +26,11 @@ function messageParams(params) {
 }
 
 export function reasonText(v) {
-  return tCode(`reason.${v.reason_code}`, messageParams(v.params)) ?? v.reason ?? "";
+  const params = messageParams(v.params);
+  // 规则判定时说明为什么没有模型评审（Runtime 的 docs/plan/feedback-2026-11-01.md N-02）；不认识的原因用通用的说法。
+  const cause = v.reason_code === "rule_fallback" && v.params && v.params.cause;
+  const why = cause ? tCode(`reason.rule_fallback.${cause}`, params) : undefined;
+  return why ?? tCode(`reason.${v.reason_code}`, params) ?? v.reason ?? "";
 }
 
 // questionText 规则生成的问题用 Verdict 的代码：理由加上固定的三选一。翻不了时是事件的 text。
