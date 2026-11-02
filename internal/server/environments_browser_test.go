@@ -1,0 +1,180 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// Runs the embedded app against the actual coding-web handlers and file store.
+// Runtime execution uses the same fakeTaskAPI as the other server tests.
+func TestEnvironmentConfigurationInBrowser(t *testing.T) {
+	browser := environmentTestBrowser()
+	if browser == "" {
+		t.Skip("Chrome/Edge not found; set CODING_TEST_BROWSER")
+	}
+	ts, _, _, app := newServerWith(t, nil)
+	c := newClient(t, ts.URL)
+	first := sampleProject(t, c)
+	code, second, raw := c.do("POST", "/api/projects", map[string]string{"name": "Second", "source": "empty"})
+	if code != http.StatusCreated {
+		t.Fatalf("second project: %d %s", code, raw)
+	}
+	projects, _ := json.Marshal([]string{first, second["id"].(string)})
+	result := make(chan string, 1)
+	handler := app.Handler()
+	probe := "const projects = " + string(projects) + ";\n" + environmentBrowserProbe
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/__environment_probe.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = io.WriteString(w, probe)
+		case "/__environment_result":
+			data, _ := io.ReadAll(r.Body)
+			select {
+			case result <- string(data):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/":
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, r)
+			for k, values := range rec.Header() {
+				w.Header()[k] = values
+			}
+			http.SetCookie(w, &http.Cookie{Name: cookieName, Value: app.ingress.IssueToken("acme", "alice", time.Hour), Path: "/", HttpOnly: true})
+			http.SetCookie(w, &http.Cookie{Name: langCookie, Value: "en", Path: "/"})
+			_, _ = io.WriteString(w, strings.Replace(rec.Body.String(), "</body>", `<script type="module" src="/__environment_probe.js"></script></body>`, 1))
+		default:
+			handler.ServeHTTP(w, r)
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, browser, "--headless=new", "--disable-gpu", "--no-sandbox", "--no-first-run", "--no-default-browser-check", "--window-size=1440,1000", "--user-data-dir="+t.TempDir(), server.URL+"/#/environments")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cancel(); _ = cmd.Wait() }()
+	select {
+	case got := <-result:
+		if got != "ok" {
+			t.Fatal(got)
+		}
+	case <-ctx.Done():
+		t.Fatal("environment UI timed out")
+	}
+	sessions, err := app.store.Sessions("acme")
+	if err != nil || len(sessions) != 3 {
+		t.Fatalf("sessions = %#v, err = %v", sessions, err)
+	}
+	bound := map[string]string{}
+	for _, s := range sessions {
+		bound[s.Title] = s.EnvironmentID
+	}
+	if bound["configured one"] == "" || bound["configured one"] != bound["configured two"] || bound["deployment default"] != "" {
+		t.Fatalf("repo-independent/default bindings = %#v", bound)
+	}
+}
+
+func environmentTestBrowser() string {
+	if p := os.Getenv("CODING_TEST_BROWSER"); p != "" {
+		return p
+	}
+	for _, name := range []string{"google-chrome", "chromium", "chromium-browser", "chrome", "msedge", "microsoft-edge"} {
+		if p, err := exec.LookPath(name); err == nil {
+			return p
+		}
+	}
+	for _, root := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")} {
+		if root == "" {
+			continue
+		}
+		for _, rel := range []string{`Google\Chrome\Application\chrome.exe`, `Microsoft\Edge\Application\msedge.exe`} {
+			if p := filepath.Join(root, rel); p != "" {
+				if _, err := os.Stat(p); err == nil {
+					return p
+				}
+			}
+		}
+	}
+	return ""
+}
+
+const environmentBrowserProbe = `
+const $ = s => document.querySelector(s);
+const wait = async (test, label) => {
+  const end = Date.now() + 8000;
+  while (Date.now() < end) { const value = test(); if (value) return value; await new Promise(r => setTimeout(r, 25)); }
+  throw new Error('Timed out: ' + label + '\n' + document.body.innerText);
+};
+const check = (ok, text) => { if (!ok) throw new Error(text); };
+const field = (name, value) => {
+  const el = $('.environment-editor [name="' + name + '"]');
+  check(el, 'Missing field ' + name);
+  if (value !== undefined) { el.value = value; el.dispatchEvent(new Event('input', {bubbles:true})); }
+  return el;
+};
+const save = () => $('.environment-editor form').requestSubmit();
+try {
+  (await wait(() => $('[data-environment-create]'), 'configuration list')).click();
+  await wait(() => $('.environment-editor'), 'editor');
+  field('name', '跨仓库 Python');
+  field('description', 'Shared tooling');
+  field('setup_script', '中'.repeat(21846));
+  save();
+  await wait(() => $('.environment-editor [role="alert"]').textContent.includes('65536'), 'UTF-8 size error');
+  check((await (await fetch('/api/environments')).json()).length === 0, 'oversize script saved');
+  field('setup_script', 'python --version');
+  field('start_command', 'python -m app');
+  field('env', 'BAD-NAME=value');
+  save();
+  await wait(() => $('.environment-editor [role="alert"]').textContent.includes('line 1 must be KEY=value'), 'localized server validation');
+  check(field('setup_script').value === 'python --version', 'failed save discarded edits');
+  field('env', 'MODE=dev\nPORT=8080');
+  save();
+  const card = await wait(() => $('[data-environment-id]'), 'saved card');
+  const id = card.dataset.environmentId;
+  check(!$('.environment-editor'), 'editor did not close');
+  card.querySelector('[data-environment-edit]').click();
+  check(field('env').value === 'MODE=dev\nPORT=8080', 'edit did not restore ordinary .env');
+  field('description', 'Updated shared tooling');
+  save();
+  await wait(() => !$('.environment-editor') && document.body.innerText.includes('Updated shared tooling'), 'edit save');
+  const stored = await (await fetch('/api/environments/' + id)).json();
+  check(stored.privacy === 'only_me' && stored.start_command === 'python -m app', 'configuration lost fields');
+  check(Object.values(localStorage).every(v => !String(v).includes('MODE=dev')), '.env leaked into localStorage');
+  for (let i=0; i<3; i++) {
+    location.hash = '#/w/' + projects[i % 2] + '/new';
+    const select = await wait(() => $('[data-environment-select]:not(:disabled)'), 'draft selector');
+    select.click();
+    const option = await wait(() => $('[data-environment-option="' + (i===2 ? '' : id) + '"]'), 'environment option');
+    option.click();
+    const input = $('.composer textarea');
+    check(input, 'composer input');
+    input.value = ['configured one','configured two','deployment default'][i];
+    input.dispatchEvent(new Event('input', {bubbles:true}));
+    $('.send').click();
+    await wait(() => /\/s\//.test(location.hash) && $('[data-environment-select]').disabled, 'session binding');
+    await wait(() => !$('.send').disabled, 'session submission');
+  }
+  location.hash = '#/environments';
+  await wait(() => $('[data-environment-id="' + id + '"]'), 'list after sessions');
+  window.confirm = () => true;
+  $('[data-environment-delete]').click();
+  await wait(() => !$('[data-environment-id]'), 'delete');
+  check((await fetch('/api/environments/' + id)).status === 404, 'deleted environment still available');
+  await fetch('/__environment_result', {method:'POST',body:'ok'});
+} catch (err) {
+  await fetch('/__environment_result', {method:'POST',body:String(err.stack || err)});
+}
+`
