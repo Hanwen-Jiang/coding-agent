@@ -4,6 +4,9 @@
   color-scheme: light;
   /* 页面本身的底色（只给 body，不给组件）：白天纯白、夜间纯黑（2026-11-02 人定）。组件的底色仍是下面的 --bg、--surface 等。 */
   --page: #ffffff;
+  /* 叠加滚动条的滑块（scrollbars.js） */
+  --scroll-thumb: rgba(31, 30, 29, 0.26);
+  --scroll-thumb-hot: rgba(31, 30, 29, 0.46);
   --bg: #faf9f5;
   --bg-side: #f3f1ea;
   --surface: #ffffff;
@@ -52,6 +55,8 @@
   :root:not([data-theme="light"]) {
     color-scheme: dark;
     --page: #000000;
+    --scroll-thumb: rgba(250, 249, 245, 0.24);
+    --scroll-thumb-hot: rgba(250, 249, 245, 0.44);
     --bg: #262624;
     --bg-side: #1f1e1d;
     --surface: #30302e;
@@ -90,6 +95,8 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
   --page: #000000;
+  --scroll-thumb: rgba(250, 249, 245, 0.24);
+  --scroll-thumb-hot: rgba(250, 249, 245, 0.44);
   --bg: #262624;
   --bg-side: #1f1e1d;
   --surface: #30302e;
@@ -531,15 +538,21 @@ textarea.field { height: auto; padding: 8px 11px; resize: vertical; line-height:
 .step-title { font-size: 13.5px; color: var(--text); }
 .step-detail { margin-top: 1px; font-size: 12.5px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
 .step-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-.step-time { flex: none; font: 11px/21px var(--font-mono); color: var(--faint); }
-/* 原始事件：悬停时淡入；展开了就一直显示（鼠标移开也在），展开那一下内容淡入。 */
-.step .raw { margin-top: 3px; display: none; }
-.step:hover .raw, .step .raw[open] { display: block; }
-.step:hover .raw:not([open]) { animation: reveal 0.14s ease-out; }
+.step-time { flex: none; font: 11px/21px var(--font-mono); color: var(--faint); transition: opacity 0.14s ease; }
+/* 原始事件：入口叠在时间那一格上（绝对定位，不占行），悬停时时间淡出、入口淡入，步骤的高度不变，不会一悬停就把下面的步骤挤下去；
+   展开了入口一直显示，内容在步骤里展开（点了才改变布局），展开那一下内容淡入。 */
+.step .raw { margin: 0; }
+.step .raw summary {
+  position: absolute; top: 7px; right: 0; padding-left: 6px; list-style: none; white-space: nowrap;
+  cursor: pointer; font-size: 11.5px; line-height: 21px; color: var(--faint);
+  opacity: 0; transition: opacity 0.14s ease, color 0.14s ease;
+}
+.step .raw summary::-webkit-details-marker { display: none; }
+.step:hover .raw summary, .step .raw[open] summary, .step .raw summary:focus-visible { opacity: 1; }
+.step:hover .step-time, .step:has(.raw[open]) .step-time, .step:has(.raw summary:focus-visible) .step-time { opacity: 0; }
 .step .raw.just-opened[open] pre { animation: reveal 0.16s ease-out; }
-.step .raw summary { cursor: pointer; font-size: 11.5px; color: var(--faint); transition: color 0.14s ease; }
 .step .raw summary:hover, .step .raw[open] summary { color: var(--muted); }
-.step .raw pre { margin: 4px 0 0; padding: 8px; max-height: 220px; overflow: auto; border-radius: 6px; background: var(--sunken); font-size: 11.5px; }
+.step .raw pre { margin: 6px 0 0; padding: 8px; max-height: 220px; overflow: auto; border-radius: 6px; background: var(--sunken); font-size: 11.5px; }
 
 /* 回答（衬线体） */
 .answer { font: 16px/1.72 var(--font-serif); color: var(--text); word-break: break-word; }
@@ -926,3 +939,22 @@ dialog[open]::backdrop { animation: fade 0.18s ease-out; }
   .msg-agent { gap: 8px; }
   .agent-mark { width: 22px; }
 }
+
+/* ------------------------------------------------------------------ 叠加滚动条（scrollbars.js） */
+/* 主要指针不是手指的设备上把原生滚动条藏起来（Windows 上它占 15～17px，把内容挤开、各栏宽度跟着变），改画一根叠在内容上的细滑块：
+   指针在哪个可滚动的区域上就画哪个的；进入区域、滚动、靠近边缘时出现，停一会儿淡出；能拖。触屏设备的原生滚动条本来就是叠加的，不动。 */
+.osb-on, .osb-on * { scrollbar-width: none; }
+.osb-on ::-webkit-scrollbar { width: 0; height: 0; }
+.osb { position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none; opacity: 0; transition: opacity 0.3s ease; }
+.osb.show { opacity: 1; transition-duration: 0.12s; }
+.osb-thumb { position: absolute; pointer-events: none; touch-action: none; }
+.osb.show .osb-thumb { pointer-events: auto; }
+.osb-thumb::before { content: ""; position: absolute; border-radius: 999px; background: var(--scroll-thumb); transition: background 0.15s ease, width 0.12s ease, height 0.12s ease; }
+.osb.y .osb-thumb { right: 0; width: 12px; }
+.osb.y .osb-thumb::before { top: 2px; bottom: 2px; right: 3px; width: 6px; }
+.osb.x .osb-thumb { bottom: 0; height: 12px; }
+.osb.x .osb-thumb::before { left: 2px; right: 2px; bottom: 3px; height: 6px; }
+.osb.hot .osb-thumb::before, .osb.drag .osb-thumb::before { background: var(--scroll-thumb-hot); }
+.osb.y.hot .osb-thumb::before, .osb.y.drag .osb-thumb::before { width: 8px; }
+.osb.x.hot .osb-thumb::before, .osb.x.drag .osb-thumb::before { height: 8px; }
+.osb-dragging, .osb-dragging * { user-select: none !important; cursor: default !important; }

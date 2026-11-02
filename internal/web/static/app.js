@@ -6,6 +6,7 @@
 
 import { abortMarkdown, doneWhenText, errorText, exitWhenText, goalText, questionText, reasonText, retryDetail, retryTitle } from "./codes.js";
 import { LANGS, lang, locale, setLang, t } from "./i18n.js";
+import { installScrollbars } from "./scrollbars.js";
 
 const EVENT_TYPES = [
   "task_accepted", "round_started", "stage_started", "node_started", "node_finished",
@@ -119,6 +120,28 @@ function h(tag, attrs = {}, ...children) {
   }
   append(el, children);
   return el;
+}
+
+// 整块重画（replaceChildren）时保住滚动位置：先清空再放新内容，区域会一下子变空，滚动位置被夹回顶上，看起来就是“自己滚了一下”。
+// 区域本身与里面滚过的子区域（按在树里的位置对上，标签与 class 都一样才算同一个）都还原。
+function keepScroll(root, render) {
+  const top = root.scrollTop;
+  const left = root.scrollLeft;
+  const inner = [];
+  for (const el of root.querySelectorAll("*")) {
+    if (!el.scrollTop && !el.scrollLeft) continue;
+    const path = [];
+    for (let n = el; n && n !== root; n = n.parentElement) path.unshift(Array.prototype.indexOf.call(n.parentElement.children, n));
+    inner.push({ path, tag: el.tagName, cls: el.getAttribute("class"), top: el.scrollTop, left: el.scrollLeft });
+  }
+  render();
+  root.scrollTop = top;
+  root.scrollLeft = left;
+  for (const s of inner) {
+    let el = root;
+    for (const i of s.path) el = el && el.children[i];
+    if (el && el.tagName === s.tag && el.getAttribute("class") === s.cls) { el.scrollTop = s.top; el.scrollLeft = s.left; }
+  }
 }
 
 function append(el, children) {
@@ -1275,7 +1298,8 @@ function renderThread(stick = false) {
   if (!state.project) content = welcome();
   else if (!state.tasks.length && !pendingTurnShown()) content = projectEmpty();
   else content = [state.tasks.map(turn), pendingTurn()];
-  thread.replaceChildren(h("div", { class: "thread" }, content));
+  // 在底部附近就跟到底；往上翻着看的时候保住位置，不被新事件拽走。
+  keepScroll(thread, () => thread.replaceChildren(h("div", { class: "thread" }, content)));
   if (nearBottom) thread.scrollTop = thread.scrollHeight;
 }
 
@@ -2373,13 +2397,14 @@ function setComposer(text) {
 
 function renderStatus() {
   if (!ui.statusBody || !inSession() || !state.statusOpen) return;
-  ui.statusBody.replaceChildren(
+  // 右栏随事件整块重画：保住滚动位置，不再每来一个事件就跳回顶上。
+  keepScroll(ui.statusBody, () => ui.statusBody.replaceChildren(
     section("env", "server", t("sp.env"), envSummary(), envBody),
     section("context", "layers", t("sp.context"), contextSummary(), contextBody),
     section("output", "fileText", t("sp.output"), outputSummary(), outputBody),
     section("changes", "diff", t("sp.changes"), changesSummary(), changesBody),
     section("background", "activity", t("sp.background"), backgroundSummary(), backgroundBody),
-  );
+  ));
 }
 
 function section(key, ic, title, summary, body) {
@@ -3130,6 +3155,7 @@ window.addEventListener("hashchange", () => {
 async function boot() {
   document.documentElement.lang = locale;
   applyTheme();
+  installScrollbars();
   // OAuth 回调带回来的结果：连接成功（?linked=<平台>）或失败（?error=…）。进主界面会改地址，先记下来。
   const params = hashParams();
   const linked = params.get("linked");

@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -30,6 +31,22 @@ func TestAppListensForTheNewEvents(t *testing.T) {
 	for _, name := range []string{"guidance_updated", "task_message_edited", "context_usage"} {
 		if !strings.Contains(string(app), `"`+name+`"`) {
 			t.Errorf("app.js 没有接 %s", name)
+		}
+	}
+}
+
+// 悬停只改颜色、透明度这类不影响布局的样式：悬停时改 display、尺寸、内外边距会把下面的内容挤来挤去（2026-11-02 用户反馈
+// “展开的按钮每次 hover 都重计算空间”）。
+func TestHoverDoesNotChangeLayout(t *testing.T) {
+	_, css := getFrom(t, Handler(), "/assets/style.css")
+	rule := regexp.MustCompile(`([^{}]*:hover[^{}]*)\{([^}]*)\}`)
+	layout := regexp.MustCompile(`(^|[;\s])(display|width|height|min-height|max-height|padding[a-z-]*|margin[a-z-]*|font-size|border-width|line-height)\s*:`)
+	for _, m := range rule.FindAllStringSubmatch(string(css), -1) {
+		if strings.Contains(m[1], ".osb") {
+			continue // 叠加滚动条的滑块本身叠在内容上，变粗不挤别的
+		}
+		if layout.MatchString(m[2]) {
+			t.Errorf("悬停改变了布局：%s { %s }", strings.TrimSpace(m[1]), strings.TrimSpace(m[2]))
 		}
 	}
 }
@@ -280,6 +297,37 @@ try {
   const outputSection = $$(".sp").find((e) => $(".out-round", e));
   out.steps.outputHasFullAnswer = outputSection ? text(outputSection).includes("RAW_FULL_ANSWER") : null;
 
+  // 前端细节（2026-11-02）：右栏随事件重画时不跳回顶上；原生滚动条不占宽度，改成叠加的滑块；“原始事件”的入口不占行。
+  const sb = $(".status-body");
+  if (sb) {
+    sb.style.flex = "none";
+    sb.style.height = "160px";
+    await sleep(60);
+    out.steps.statusScrollable = sb.scrollHeight > sb.clientHeight + 40;
+    sb.scrollTop = 40;
+    const before = sb.scrollTop;
+    await push("context_usage", { event: "context_usage", round_seq: 2, node_id: "fix", step: 4, window_tokens: 200000, effective_tokens: 32000, total_tokens: 20000,
+      categories: [{ name: "system_prompt", tokens: 2000 }, { name: "system_tools", tokens: 4000 }, { name: "mcp_tools", tokens: 1000 }, { name: "memory", tokens: 500 }, { name: "task_brief", tokens: 1500 }, { name: "messages", tokens: 11000 }],
+      tools: [{ name: "repo_read", tokens: 1500 }, { name: "repo_edit", tokens: 2500 }, { name: "github.search", tokens: 1000, mcp: true }] });
+    await sleep(250);
+    out.steps.statusKeptScroll = before > 0 && sb.scrollTop === before;
+    out.steps.statusScroll = [before, sb.scrollTop];
+    out.steps.nativeBarWidth = sb.offsetWidth - sb.clientWidth;
+    dispatchEvent(new WheelEvent("wheel", { deltaY: 30, bubbles: true }));
+    sb.scrollTop = 10;
+    const bar = await wait(() => $(".osb.y.show"), 1500);
+    out.steps.overlayShown = !!bar;
+    if (bar) {
+      const r = bar.getBoundingClientRect();
+      const q = sb.getBoundingClientRect();
+      out.steps.overlayOnPanel = Math.abs(r.right - q.right) < 2 && r.top >= q.top - 1 && r.bottom <= q.bottom + 1 && r.width <= 12;
+    }
+    sb.style.flex = "";
+    sb.style.height = "";
+  }
+  const rawEntry = await wait(() => $(".step .raw summary"));
+  out.steps.rawEntryFloats = rawEntry ? getComputedStyle(rawEntry).position === "absolute" : null;
+
   // 第 2 节：Enter 是纠偏。
   press(type("不要改公共接口"));
   const first = await wait(() => $(".guidance-item"));
@@ -510,6 +558,16 @@ func TestInteractionInBrowser(t *testing.T) {
 	// --- 第 4 节 ---
 	checkOutputPanel(t, steps)
 	falsy("outputHasFullAnswer", "不显示全文")
+
+	// --- 前端细节 ---
+	truthy("statusScrollable", "测试把右栏压矮到能滚动")
+	truthy("statusKeptScroll", fmt.Sprintf("右栏随事件重画时保住滚动位置（重画前后 %v）", steps["statusScroll"]))
+	if w, _ := steps["nativeBarWidth"].(float64); w != 0 {
+		t.Errorf("原生滚动条不占宽度：占了 %vpx", steps["nativeBarWidth"])
+	}
+	truthy("overlayShown", "滚动时出现叠加的滑块")
+	truthy("overlayOnPanel", "滑块叠在右栏的右边缘上，不超过 12px 宽")
+	truthy("rawEntryFloats", "“原始事件”的入口叠在时间那一格上，悬停不改变步骤的高度")
 
 	// --- 第 2 节 ---
 	posts := site.postsTo("/guidance")
