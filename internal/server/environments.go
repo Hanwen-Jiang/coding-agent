@@ -38,19 +38,19 @@ func normalizeEnvironmentInput(in environmentInput) (environmentInput, error) {
 		in.Privacy = onlyMePrivacy
 	}
 	if in.Name == "" || len(in.Name) > maxEnvironmentNameBytes {
-		return environmentInput{}, fmt.Errorf("环境名不能为空且不超过 %d 个字节", maxEnvironmentNameBytes)
+		return environmentInput{}, msg("环境名不能为空且不超过 %d 个字节", maxEnvironmentNameBytes)
 	}
 	if len(in.Description) > maxEnvironmentDescriptionBytes {
-		return environmentInput{}, fmt.Errorf("环境描述不超过 %d 个字节", maxEnvironmentDescriptionBytes)
+		return environmentInput{}, msg("环境描述不超过 %d 个字节", maxEnvironmentDescriptionBytes)
 	}
 	if in.Privacy != onlyMePrivacy {
-		return environmentInput{}, fmt.Errorf("隐私目前只支持 %q", onlyMePrivacy)
+		return environmentInput{}, msg("隐私目前只支持 %q", onlyMePrivacy)
 	}
 	if len(in.SetupScript) > maxEnvironmentScriptBytes {
-		return environmentInput{}, fmt.Errorf("安装脚本不超过 %d 个字节", maxEnvironmentScriptBytes)
+		return environmentInput{}, msg("安装脚本不超过 %d 个字节", maxEnvironmentScriptBytes)
 	}
 	if len(in.StartCommand) > maxEnvironmentScriptBytes {
-		return environmentInput{}, fmt.Errorf("启动命令不超过 %d 个字节", maxEnvironmentScriptBytes)
+		return environmentInput{}, msg("启动命令不超过 %d 个字节", maxEnvironmentScriptBytes)
 	}
 	if err := validateDotEnv(in.Env); err != nil {
 		return environmentInput{}, err
@@ -64,7 +64,7 @@ func normalizeEnvironmentInput(in environmentInput) (environmentInput, error) {
 // users. Secret material must be provisioned through Runtime instead.
 func validateDotEnv(dotenv string) error {
 	if len(dotenv) > maxEnvironmentScriptBytes {
-		return fmt.Errorf("环境变量不超过 %d 个字节", maxEnvironmentScriptBytes)
+		return msg("环境变量不超过 %d 个字节", maxEnvironmentScriptBytes)
 	}
 	seen := map[string]bool{}
 	for lineNo, raw := range strings.Split(dotenv, "\n") {
@@ -74,17 +74,17 @@ func validateDotEnv(dotenv string) error {
 		}
 		key, value, ok := strings.Cut(line, "=")
 		if !ok || !environmentVarName.MatchString(key) {
-			return fmt.Errorf(".env 第 %d 行应为 KEY=value", lineNo+1)
+			return msg(".env 第 %d 行应为 KEY=value", lineNo+1)
 		}
 		if seen[key] {
-			return fmt.Errorf(".env 第 %d 行重复定义 %s", lineNo+1, key)
+			return msg(".env 第 %d 行重复定义 %s", lineNo+1, key)
 		}
 		seen[key] = true
 		if looksLikeSecretName(key) {
-			return fmt.Errorf(".env 第 %d 行的 %s 可能是机密，请使用 Runtime 网络密钥", lineNo+1, key)
+			return msg(".env 第 %d 行的 %s 可能是机密，请使用 Runtime 网络密钥", lineNo+1, key)
 		}
 		if strings.ContainsRune(value, '\x00') {
-			return fmt.Errorf(".env 第 %d 行包含非法字符", lineNo+1)
+			return msg(".env 第 %d 行包含非法字符", lineNo+1)
 		}
 	}
 	return nil

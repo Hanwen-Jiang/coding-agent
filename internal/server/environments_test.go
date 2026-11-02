@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,6 +39,22 @@ func TestNormalizeEnvironmentInput(t *testing.T) {
 	tooLong := environmentInput{Name: "x", Description: string(make([]byte, maxEnvironmentDescriptionBytes+1))}
 	if _, err := normalizeEnvironmentInput(tooLong); err == nil {
 		t.Fatal("expected description length validation")
+	}
+}
+
+func TestEnvironmentValidationMessagesInEnglish(t *testing.T) {
+	for _, tc := range []struct {
+		in   environmentInput
+		want string
+	}{
+		{environmentInput{Name: "x", Env: "BAD-NAME=value"}, "line 1 must be KEY=value"},
+		{environmentInput{Name: "x", Env: "API_TOKEN=private"}, "may contain a secret"},
+		{environmentInput{Name: "x", SetupScript: strings.Repeat("中", 21846)}, "65536 bytes"},
+	} {
+		_, err := normalizeEnvironmentInput(tc.in)
+		if err == nil || !strings.Contains(msg("环境配置不合法：%v", err).In(langEN), tc.want) {
+			t.Errorf("English validation: got %v, want %q", err, tc.want)
+		}
 	}
 }
 
