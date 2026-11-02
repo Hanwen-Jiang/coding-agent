@@ -1764,9 +1764,10 @@ function scheduleTurn(id) {
 async function replayTasks() {
   const base = sbase();
   const recent = state.tasks.slice(-REPLAY_LIMIT);
-  // 先接上进行中的（实时），再按顺序重放已结束的（浏览器对同一主机的连接数有限）。
+  // 先接上进行中的（实时），再从最新的往前一个一个重放已结束的（浏览器对同一主机的连接数有限）：打开会话先看到最后的对话，
+  // 更早的在上面陆续补上；停在底部时 renderTurn 一直跟到底。
   for (const t of recent) if (!TERMINAL.has(t.status)) loadRun(t);
-  for (const t of recent) {
+  for (const t of recent.slice().reverse()) {
     if (sbase() !== base) return;
     if (TERMINAL.has(t.status)) await loadRun(t);
   }

@@ -1,4 +1,4 @@
-/* Coding Agent 网页：暖色纸面、陶土色强调、衬线体的标题与回答（docs/plan/coding-agent-mvp.md 第 7 节）。 */
+/* Coding Agent 网页：中性灰的组件、陶土色强调、衬线体的标题与回答（docs/plan/coding-agent-mvp.md 第 7 节）。 */
 
 :root {
   color-scheme: light;
@@ -7,18 +7,19 @@
   /* 叠加滚动条的滑块（scrollbars.js） */
   --scroll-thumb: rgba(31, 30, 29, 0.26);
   --scroll-thumb-hot: rgba(31, 30, 29, 0.46);
-  --bg: #faf9f5;
-  --bg-side: #f3f1ea;
+  /* 组件的底色与分隔线是中性灰（2026-11-02 人定：原来的米黄在主区太显眼）；强调色仍是陶土色。 */
+  --bg: #f9f9f8;
+  --bg-side: #f5f5f4;
   --surface: #ffffff;
-  --surface-2: #f7f5ef;
-  --sunken: #efece3;
-  --user: #eeeae0;
+  --surface-2: #f6f6f5;
+  --sunken: #eeeeec;
+  --user: #f0f0ee;
   --text: #1f1e1d;
   --text-2: #45433f;
   --muted: #76736b;
   --faint: #a39f95;
-  --line: #e7e3d9;
-  --line-2: #d8d3c6;
+  --line: #e6e6e3;
+  --line-2: #d6d6d2;
   --accent: #c96442;
   --accent-2: #b2532f;
   --accent-soft: #f6e8e0;
