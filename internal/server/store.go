@@ -48,6 +48,8 @@ type Session struct {
 	// 新会话是 <项目>--<会话>，迁移来的 main 会话就是项目自己的目录。
 	WorkspaceID      string `json:"workspace_id"`
 	RuntimeSessionID string `json:"runtime_session_id,omitempty"`
+	// EnvironmentID 是独立于项目（基线仓库）的环境配置；运行时状态不存于 coding-web。
+	EnvironmentID string `json:"environment_id,omitempty"`
 	// 复制时基线仓库的提交。
 	BaseCommit string `json:"base_commit,omitempty"`
 	// Agent 的改动推到 Branch（agent/…），PR 记在 PRURL、PRNumber；PushedHead 是上次推送的提交。
@@ -55,6 +57,25 @@ type Session struct {
 	PRURL      string `json:"pr_url,omitempty"`
 	PRNumber   int    `json:"pr_number,omitempty"`
 	PushedHead string `json:"pushed_head,omitempty"`
+}
+
+// Environment 是一个可由会话选择的环境配置。它故意只保存普通配置：
+// setup/start 脚本与 .env 变量会随配置返回给创建者；网络密钥、令牌等机密由 Runtime
+// 的 SecretStore/代理管理，不进入这里的持久化记录。
+//
+// DeletedAt 是配置删除的墓碑时间。清理环境及其运行时资源由 Runtime 负责，coding-web
+// 不在这里伪造 ready、reused 或 expiry 状态。
+type Environment struct {
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	Description  string     `json:"description,omitempty"`
+	Privacy      string     `json:"privacy"`
+	SetupScript  string     `json:"setup_script,omitempty"`
+	StartCommand string     `json:"start_command,omitempty"`
+	Env          string     `json:"env,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	CreatedBy    string     `json:"created_by"`
+	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
 }
 
 // TaskRecord 是在项目里下过的一个任务（状态以 Runtime 为准，这里只缓存最后一次看到的）。
@@ -86,7 +107,8 @@ func terminal(status string) bool {
 	return false
 }
 
-// Store 把元数据存成 JSON 文件：<dir>/<租户>/projects.json、sessions.json 与 tasks-<会话的 WorkspaceID>.json。MVP 用，单进程。
+// Store 把元数据存成 JSON 文件：<dir>/<租户>/projects.json、sessions.json、environments.json
+// 与 tasks-<会话的 WorkspaceID>.json。MVP 用，单进程。
 type Store struct {
 	dir string
 	mu  sync.Mutex
@@ -100,6 +122,10 @@ func (s *Store) projectsFile(tenant string) string {
 
 func (s *Store) sessionsFile(tenant string) string {
 	return filepath.Join(s.dir, tenant, "sessions.json")
+}
+
+func (s *Store) environmentsFile(tenant string) string {
+	return filepath.Join(s.dir, tenant, "environments.json")
 }
 
 func (s *Store) tasksFile(tenant, workspaceID string) string {
@@ -125,6 +151,56 @@ func (s *Store) UpdateSessions(tenant string, fn func([]Session) ([]Session, err
 		return err
 	}
 	return writeFileAtomic(s.sessionsFile(tenant), sessions)
+}
+
+func (s *Store) Environments(tenant string) ([]Environment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return readJSONFile[[]Environment](s.environmentsFile(tenant))
+}
+
+func (s *Store) Environment(tenant, id string) (Environment, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	envs, err := readJSONFile[[]Environment](s.environmentsFile(tenant))
+	if err != nil {
+		return Environment{}, false, err
+	}
+	for _, env := range envs {
+		if env.ID == id {
+			return env, true, nil
+		}
+	}
+	return Environment{}, false, nil
+}
+
+// UpdateEnvironments 在锁里读出、修改、写回环境配置列表。
+func (s *Store) UpdateEnvironments(tenant string, fn func([]Environment) ([]Environment, error)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	envs, err := readJSONFile[[]Environment](s.environmentsFile(tenant))
+	if err != nil {
+		return err
+	}
+	envs, err = fn(envs)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(s.environmentsFile(tenant), envs)
+}
+
+// DeleteEnvironment 写入删除墓碑，保留记录供 Runtime 做异步资源清理和审计。
+func (s *Store) DeleteEnvironment(tenant, id string, at time.Time) error {
+	return s.UpdateEnvironments(tenant, func(envs []Environment) ([]Environment, error) {
+		for i := range envs {
+			if envs[i].ID == id && envs[i].DeletedAt == nil {
+				t := at
+				envs[i].DeletedAt = &t
+				break
+			}
+		}
+		return envs, nil
+	})
 }
 
 // HasTasks 判断某个工作副本有没有任务记录（迁移旧项目时用）。

@@ -153,6 +153,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/github/repos", s.authed(s.handleRepos))
 
 	mux.HandleFunc("GET /api/samples", s.authed(s.handleSamples))
+	// 环境配置与项目解耦；这里仅保存普通配置，不报告 Runtime 生命周期状态。
+	mux.HandleFunc("GET /api/environments", s.authed(s.handleListEnvironments))
+	mux.HandleFunc("POST /api/environments", s.authed(s.handleCreateEnvironment))
+	mux.HandleFunc("GET /api/environments/{environment}", s.authed(s.handleGetEnvironment))
+	mux.HandleFunc("PUT /api/environments/{environment}", s.authed(s.handleUpdateEnvironment))
+	mux.HandleFunc("PATCH /api/environments/{environment}", s.authed(s.handleUpdateEnvironment))
+	mux.HandleFunc("DELETE /api/environments/{environment}", s.authed(s.handleDeleteEnvironment))
 	// 工作区（项目）：基线仓库。
 	mux.HandleFunc("GET /api/projects", s.authed(s.handleListProjects))
 	mux.HandleFunc("POST /api/projects", s.authed(s.handleCreateProject))

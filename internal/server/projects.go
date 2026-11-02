@@ -42,6 +42,17 @@ func newProjectID(name string) string {
 	return base + "-" + randomHex(2)
 }
 
+func newEnvironmentID(name string) string {
+	base := strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(name), "-"), "-")
+	if len(base) > 40 {
+		base = strings.Trim(base[:40], "-")
+	}
+	if base == "" {
+		base = "environment"
+	}
+	return "env-" + base + "-" + randomHex(2)
+}
+
 // sampleView 是示例在网页上的样子：文字按请求的语言。
 type sampleView struct {
 	ID string `json:"id"`

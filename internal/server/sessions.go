@@ -129,7 +129,8 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	var req struct {
-		Title string `json:"title"`
+		Title         string `json:"title"`
+		EnvironmentID string `json:"environment_id"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -138,7 +139,16 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
-	sess, err := s.createSession(r, id, p, sessionTitle(req.Title))
+	if req.EnvironmentID != "" {
+		if _, ok, err := s.environmentForUser(id.TenantID, id.UserID, req.EnvironmentID); err != nil {
+			writeErr(w, r, http.StatusInternalServerError, err)
+			return
+		} else if !ok {
+			writeMsg(w, r, http.StatusBadRequest, "环境不存在或不属于当前用户")
+			return
+		}
+	}
+	sess, err := s.createSession(r, id, p, sessionTitle(req.Title), req.EnvironmentID)
 	if err != nil {
 		writeMsg(w, r, http.StatusInternalServerError, "开会话失败：%v", err)
 		return
@@ -148,9 +158,9 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 
 // createSession 从工作区的基线仓库复制出会话的工作副本（Workspaces.Create 的 From），Git 平台的工作区再尽量切到基线分支
 // 在远端的最新提交（拉不到时照用复制来的）。
-func (s *Server) createSession(r *http.Request, id identity, p Project, title string) (Session, error) {
+func (s *Server) createSession(r *http.Request, id identity, p Project, title, environmentID string) (Session, error) {
 	now := time.Now().UTC()
-	sess := Session{ID: newSessionID(), ProjectID: p.ID, Title: title, CreatedAt: now, CreatedBy: id.UserID, UpdatedAt: now}
+	sess := Session{ID: newSessionID(), ProjectID: p.ID, Title: title, CreatedAt: now, CreatedBy: id.UserID, UpdatedAt: now, EnvironmentID: environmentID}
 	sess.WorkspaceID = p.ID + "--" + sess.ID
 	ctx, cancel := ctxTimeout(r, 10*time.Minute)
 	defer cancel()
