@@ -157,7 +157,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 	}
 	// 任务开始时的提交记在后台补上：经 Workspace API 读 HEAD 要借一个沙箱环境（冷启动几秒到十几秒），不让提交等它。
 	// Task 自己不提交（提交由用户点按钮），所以晚一点读到的 HEAD 与提交那一刻相同。
-	go s.recordBaseCommit(id, sess.WorkspaceID, record.ID)
+	s.background.Go(func() { s.recordBaseCommit(id, sess.WorkspaceID, record.ID) })
 	writeJSON(w, http.StatusCreated, record)
 }
 

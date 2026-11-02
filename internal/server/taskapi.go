@@ -29,6 +29,12 @@ func (a *TaskAPI) CallWorkspace(ctx context.Context, token, method string, req, 
 	return a.call(ctx, a.slow, "/agentruntime.workspace.v1.WorkspaceService/"+method, token, req, resp)
 }
 
+// CallEnvironment 调 task-service 上只读的 EnvironmentService（同一个端口：POST /agentruntime.environment.v1.EnvironmentService/<方法>）：
+// Runtime 沙箱环境 ledger 的投影（人工验收 Q99–105）。查询不建、不删、不续期环境。
+func (a *TaskAPI) CallEnvironment(ctx context.Context, token, method string, req, resp any) error {
+	return a.call(ctx, a.client, "/agentruntime.environment.v1.EnvironmentService/"+method, token, req, resp)
+}
+
 // APIError 是 Task API 返回的错误：Message 是 task-service 给的说明（原样，中文）；Reason 是 Runtime 错误模型里稳定的
 // code（google.rpc.ErrorInfo，例如 network_not_allowed），界面按它翻译（runtimeMsg）。连不上这类我们这边的原因用 Note，按请求的语言写。
 type APIError struct {

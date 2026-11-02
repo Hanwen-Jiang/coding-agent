@@ -139,16 +139,19 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 		writeErr(w, r, http.StatusInternalServerError, err)
 		return
 	}
+	var env *Environment
 	if req.EnvironmentID != "" {
-		if _, ok, err := s.environmentForUser(id.TenantID, id.UserID, req.EnvironmentID); err != nil {
+		found, ok, err := s.environmentForUser(id.TenantID, id.UserID, req.EnvironmentID)
+		if err != nil {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		} else if !ok {
 			writeMsg(w, r, http.StatusBadRequest, "环境不存在或不属于当前用户")
 			return
 		}
+		env = &found
 	}
-	sess, err := s.createSession(r, id, p, sessionTitle(req.Title), req.EnvironmentID)
+	sess, err := s.createSession(r, id, p, sessionTitle(req.Title), env)
 	if err != nil {
 		writeMsg(w, r, http.StatusInternalServerError, "开会话失败：%v", err)
 		return
@@ -157,10 +160,10 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 }
 
 // createSession 从工作区的基线仓库复制出会话的工作副本（Workspaces.Create 的 From），Git 平台的工作区再尽量切到基线分支
-// 在远端的最新提交（拉不到时照用复制来的）。
-func (s *Server) createSession(r *http.Request, id identity, p Project, title, environmentID string) (Session, error) {
+// 在远端的最新提交（拉不到时照用复制来的）。选了环境配置时记在会话上，再经接缝交给 Runtime（envhandoff.go）。
+func (s *Server) createSession(r *http.Request, id identity, p Project, title string, env *Environment) (Session, error) {
 	now := time.Now().UTC()
-	sess := Session{ID: newSessionID(), ProjectID: p.ID, Title: title, CreatedAt: now, CreatedBy: id.UserID, UpdatedAt: now, EnvironmentID: environmentID}
+	sess := Session{ID: newSessionID(), ProjectID: p.ID, Title: title, CreatedAt: now, CreatedBy: id.UserID, UpdatedAt: now}
 	sess.WorkspaceID = p.ID + "--" + sess.ID
 	ctx, cancel := ctxTimeout(r, 10*time.Minute)
 	defer cancel()
@@ -172,6 +175,12 @@ func (s *Server) createSession(r *http.Request, id identity, p Project, title, e
 	if p.Repo != "" && strings.HasPrefix(p.Source, "https://") && s.providers[p.Provider] != nil && p.BaseBranch != "" {
 		if head, err := s.ws.Sync(ctx, id, sess.WorkspaceID, p.BaseBranch, s.gitCredentials(r, id, p)); err == nil {
 			sess.BaseCommit = head
+		}
+	}
+	if env != nil {
+		sess.EnvironmentID, sess.EnvironmentHandoff = env.ID, handoffPending
+		if state, err := s.handoff.Bind(ctx, id, sess, *env); err == nil && state != "" {
+			sess.EnvironmentHandoff = state
 		}
 	}
 	if err := s.store.UpdateSessions(id.TenantID, func(all []Session) ([]Session, error) { return append(all, sess), nil }); err != nil {

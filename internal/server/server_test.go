@@ -28,6 +28,11 @@ type fakeTaskAPI struct {
 	// 收到的 SignalTask；signalError 给了就按这个原因拒绝。
 	signals     []map[string]any
 	signalError string
+	// EnvironmentService（只读）：收到的 ListEnvironments 与要回的内容；envStatus 不为 0 时按它回错误（envBody 是错误体）。
+	envQueries []map[string]any
+	envReply   map[string]any
+	envStatus  int
+	envBody    map[string]any
 }
 
 func (f *fakeTaskAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +66,18 @@ func (f *fakeTaskAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.signals = append(f.signals, body)
 		_, _ = io.WriteString(w, "{}")
+	case r.URL.Path == "/agentruntime.environment.v1.EnvironmentService/ListEnvironments":
+		f.envQueries = append(f.envQueries, body)
+		if f.envStatus != 0 {
+			w.WriteHeader(f.envStatus)
+			_ = json.NewEncoder(w).Encode(f.envBody)
+			return
+		}
+		reply := f.envReply
+		if reply == nil {
+			reply = map[string]any{}
+		}
+		_ = json.NewEncoder(w).Encode(reply)
 	case strings.HasSuffix(r.URL.Path, "/QueryTask"):
 		f.queries++
 		status := f.status
@@ -133,6 +150,8 @@ func newServerWith(t *testing.T, edit func(*Config)) (*httptest.Server, *fakeTas
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 后台补记提交的 git 还在临时目录里跑时删不掉它：先等后台做完（清理按注册的倒序执行）。
+	t.Cleanup(srv.background.Wait)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, fake, cfg, srv

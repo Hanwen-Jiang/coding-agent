@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -39,6 +40,53 @@ func TestNormalizeEnvironmentInput(t *testing.T) {
 	tooLong := environmentInput{Name: "x", Description: string(make([]byte, maxEnvironmentDescriptionBytes+1))}
 	if _, err := normalizeEnvironmentInput(tooLong); err == nil {
 		t.Fatal("expected description length validation")
+	}
+}
+
+// 联网需求（人工验收 Q29、Q30）：三档模式，受限列表的域名可以用 *.example.com 匹配子域名；写法不对的整份拒绝，不静默丢掉。
+func TestEnvironmentNetworkIntent(t *testing.T) {
+	in, err := normalizeEnvironmentInput(environmentInput{Name: "x"})
+	if err != nil || in.Network.Mode != networkDeny || len(in.Network.AllowedHosts) != 0 {
+		t.Fatalf("默认禁止联网：%#v %v", in.Network, err)
+	}
+	in, err = normalizeEnvironmentInput(environmentInput{Name: "x", Network: EnvironmentNetwork{
+		Mode: "Allowlist", AllowedHosts: []string{" PyPI.org. ", "*.githubusercontent.com", "", "pypi.org"},
+	}})
+	if err != nil || in.Network.Mode != networkAllowlist || strings.Join(in.Network.AllowedHosts, ",") != "pypi.org,*.githubusercontent.com" {
+		t.Fatalf("受限列表：%#v %v", in.Network, err)
+	}
+	if in, err = normalizeEnvironmentInput(environmentInput{Name: "x", Network: EnvironmentNetwork{Mode: "open"}}); err != nil || in.Network.Mode != networkOpen {
+		t.Fatalf("完全开放只是需求，能不能用由 Runtime 按租户策略定：%#v %v", in.Network, err)
+	}
+	for _, tc := range []struct {
+		name    string
+		network EnvironmentNetwork
+		want    string
+	}{
+		{"unknown mode", EnvironmentNetwork{Mode: "proxy"}, "deny, allowlist or open"},
+		{"empty allowlist", EnvironmentNetwork{Mode: "allowlist"}, "at least one domain"},
+		{"hosts without allowlist", EnvironmentNetwork{Mode: "deny", AllowedHosts: []string{"pypi.org"}}, "only apply to the allowlist"},
+		{"bare wildcard", EnvironmentNetwork{Mode: "allowlist", AllowedHosts: []string{"*"}}, "without scheme, port, path or wildcard"},
+		{"url", EnvironmentNetwork{Mode: "allowlist", AllowedHosts: []string{"https://pypi.org/simple"}}, "without scheme"},
+		{"port", EnvironmentNetwork{Mode: "allowlist", AllowedHosts: []string{"pypi.org:443"}}, "without scheme"},
+		{"ip", EnvironmentNetwork{Mode: "allowlist", AllowedHosts: []string{"169.254.169.254"}}, "IP address"},
+		{"single label", EnvironmentNetwork{Mode: "allowlist", AllowedHosts: []string{"localhost"}}, "isn't a public domain"},
+		{"numeric tld", EnvironmentNetwork{Mode: "allowlist", AllowedHosts: []string{"10.0.0"}}, "isn't a public domain"},
+		{"bad label", EnvironmentNetwork{Mode: "allowlist", AllowedHosts: []string{"-bad.example.com"}}, "isn't a public domain"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := normalizeEnvironmentInput(environmentInput{Name: "x", Network: tc.network})
+			if err == nil || !strings.Contains(msg("环境配置不合法：%v", err).In(langEN), tc.want) {
+				t.Fatalf("got %v, want %q", err, tc.want)
+			}
+		})
+	}
+	many := make([]string, maxEnvironmentHosts+1)
+	for i := range many {
+		many[i] = fmt.Sprintf("h%d.example.com", i)
+	}
+	if _, err := normalizeEnvironmentInput(environmentInput{Name: "x", Network: EnvironmentNetwork{Mode: "allowlist", AllowedHosts: many}}); err == nil {
+		t.Fatal("域名太多要拒绝")
 	}
 }
 
@@ -121,8 +169,16 @@ func TestEnvironmentCRUDAndSessionBinding(t *testing.T) {
 	if code != http.StatusCreated || sess["environment_id"] != envID {
 		t.Fatalf("create session with environment: %d %s %#v", code, raw, sess)
 	}
-	if code, _, raw := c.do("PUT", "/api/environments/"+envID, map[string]string{"name": "Python 3", "env": "MODE=prod"}); code != http.StatusOK {
+	if env["network"].(map[string]any)["mode"] != networkDeny {
+		t.Fatalf("network defaults to deny: %#v", env["network"])
+	}
+	code, updated, raw := c.do("PUT", "/api/environments/"+envID, map[string]any{"name": "Python 3", "env": "MODE=prod",
+		"network": map[string]any{"mode": "allowlist", "allowed_hosts": []string{"pypi.org", "*.pythonhosted.org"}}})
+	if code != http.StatusOK {
 		t.Fatalf("update environment: %d %s", code, raw)
+	}
+	if n := updated["network"].(map[string]any); n["mode"] != networkAllowlist || len(n["allowed_hosts"].([]any)) != 2 {
+		t.Fatalf("network intent round-trip: %s", raw)
 	}
 	if code, _, raw := c.do("DELETE", "/api/environments/"+envID, nil); code != http.StatusOK {
 		t.Fatalf("delete environment: %d %s", code, raw)

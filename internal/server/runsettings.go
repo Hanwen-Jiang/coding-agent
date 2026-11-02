@@ -65,34 +65,36 @@ func sameRecord(a, b TaskRecord) bool {
 	return a.Status == b.Status && a.CostUSD == b.CostUSD && a.Rounds == b.Rounds && a.Settled == b.Settled && string(a.Usage) == string(b.Usage)
 }
 
-// handleEnv 是右栏“环境”：Runtime 是否连得上、沙箱、会话工作副本的分支与 HEAD、工作区来源与 Runtime 的 Session。
+// handleEnv 是右栏“环境”：Runtime 是否连得上、沙箱、会话选定的环境配置、Runtime 的环境记录、工作区来源与 Runtime 的 Session。
+// 它是只读的投影（人工验收 Q105）：不调 Workspace API（那会借沙箱、动环境的生命周期），分支、HEAD 与改动由网页从“改动”取；
+// 就绪、复用、到期只取 Runtime EnvironmentService 的记录（runtimeEnvironmentsOf），读不到时报 unknown 或 blocked_external。
 func (s *Server) handleEnv(w http.ResponseWriter, r *http.Request, id identity) {
 	p, sess, ok := s.session(w, r, id)
 	if !ok {
 		return
 	}
-	ctx, cancel := ctxTimeout(r, time.Minute)
+	ctx, cancel := ctxTimeout(r, 30*time.Second)
 	defer cancel()
-	// 读不到（Runtime 那边一时不可用）时照样回其余的部分：分支、HEAD 为空。
-	changes, _ := s.ws.Changes(ctx, id, sess.WorkspaceID)
-	subject := ""
-	if commits, err := s.ws.Log(ctx, id, sess.WorkspaceID, 1, ""); err == nil && len(commits) > 0 {
-		subject = commits[0].Subject
-	}
 	sandbox := map[string]any{"mode": s.cfg.Sandbox}
 	if s.cfg.Sandbox == "docker" {
 		sandbox["image"] = s.cfg.SandboxImage
 		sandbox["network"] = "none"
 	}
+	var config map[string]any
+	if sess.EnvironmentID != "" {
+		// 删掉的配置留着墓碑：会话仍显示它选的是哪一份。别人的配置（不该有）只给 id。
+		config = map[string]any{"id": sess.EnvironmentID, "handoff": sess.EnvironmentHandoff}
+		if env, found, err := s.store.Environment(id.TenantID, sess.EnvironmentID); err == nil && found && env.CreatedBy == id.UserID {
+			config["name"], config["deleted"] = env.Name, env.DeletedAt != nil
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"runtime": map[string]any{"ok": s.api.Healthy(ctx)},
-		"sandbox": sandbox,
-		"git": map[string]any{
-			"branch": changes.Branch, "head": changes.Head, "subject": strings.TrimSpace(subject),
-			"dirty": len(changes.Files), "base_branch": p.BaseBranch,
-		},
-		"project": map[string]any{"source": p.Source, "git_provider": p.Provider, "repo": p.Repo, "created_at": p.CreatedAt},
-		"session": map[string]any{"workspace_id": sess.WorkspaceID, "runtime_session_id": sess.RuntimeSessionID, "base_commit": sess.BaseCommit, "own_copy": sess.WorkspaceID != p.ID},
+		"runtime":              map[string]any{"ok": s.api.Healthy(ctx)},
+		"sandbox":              sandbox,
+		"environment":          config,
+		"runtime_environments": s.runtimeEnvironmentsOf(ctx, id, sess),
+		"project":              map[string]any{"source": p.Source, "git_provider": p.Provider, "repo": p.Repo, "base_branch": p.BaseBranch, "created_at": p.CreatedAt},
+		"session":              map[string]any{"workspace_id": sess.WorkspaceID, "runtime_session_id": sess.RuntimeSessionID, "base_commit": sess.BaseCommit, "own_copy": sess.WorkspaceID != p.ID},
 		// 租户策略里现在的上限；每个任务实际的上限在它的 Task State 里。
 		"effect_ceiling": s.tenantCeiling(id.TenantID),
 	})

@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"regexp"
 	"slices"
@@ -13,21 +14,34 @@ const (
 	maxEnvironmentNameBytes        = 80
 	maxEnvironmentDescriptionBytes = 4 << 10
 	maxEnvironmentScriptBytes      = 64 << 10
+	maxEnvironmentHosts            = 100
+	maxEnvironmentHostBytes        = 253
 )
 
 const onlyMePrivacy = "only_me"
 
+// 联网模式（人工验收 Q29）：禁止、受限列表、完全开放。默认禁止（同现在断网的沙箱）。
+const (
+	networkDeny      = "deny"
+	networkAllowlist = "allowlist"
+	networkOpen      = "open"
+)
+
 var environmentVarName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// hostLabel 是域名里的一段（只收 ASCII；国际化域名写成 punycode）。
+var hostLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // environmentInput is deliberately plain text. Secret references and runtime
 // lifecycle fields are not accepted by this API; they belong to Runtime.
 type environmentInput struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Privacy      string `json:"privacy"`
-	SetupScript  string `json:"setup_script"`
-	StartCommand string `json:"start_command"`
-	Env          string `json:"env"`
+	Name         string             `json:"name"`
+	Description  string             `json:"description"`
+	Privacy      string             `json:"privacy"`
+	SetupScript  string             `json:"setup_script"`
+	StartCommand string             `json:"start_command"`
+	Env          string             `json:"env"`
+	Network      EnvironmentNetwork `json:"network"`
 }
 
 func normalizeEnvironmentInput(in environmentInput) (environmentInput, error) {
@@ -55,7 +69,73 @@ func normalizeEnvironmentInput(in environmentInput) (environmentInput, error) {
 	if err := validateDotEnv(in.Env); err != nil {
 		return environmentInput{}, err
 	}
+	network, err := normalizeNetwork(in.Network)
+	if err != nil {
+		return environmentInput{}, err
+	}
+	in.Network = network
 	return in, nil
+}
+
+// normalizeNetwork 校验联网需求：模式只能是三档之一；受限列表要有域名，别的模式不能带域名（不静默丢掉用户填的东西）。
+// 这里只挡写法不对的；能不能用（open 要租户策略打开、域名不能落在内网）由 Runtime 在发授权时按租户策略核对。
+func normalizeNetwork(n EnvironmentNetwork) (EnvironmentNetwork, error) {
+	n.Mode = strings.ToLower(strings.TrimSpace(n.Mode))
+	if n.Mode == "" {
+		n.Mode = networkDeny
+	}
+	if !slices.Contains([]string{networkDeny, networkAllowlist, networkOpen}, n.Mode) {
+		return EnvironmentNetwork{}, msg("联网模式只能是 deny、allowlist 或 open")
+	}
+	var hosts []string
+	for _, raw := range n.AllowedHosts {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		host, err := normalizeHost(raw)
+		if err != nil {
+			return EnvironmentNetwork{}, err
+		}
+		if !slices.Contains(hosts, host) {
+			hosts = append(hosts, host)
+		}
+	}
+	switch {
+	case n.Mode != networkAllowlist && len(hosts) > 0:
+		return EnvironmentNetwork{}, msg("只有受限列表模式才填允许的域名")
+	case n.Mode == networkAllowlist && len(hosts) == 0:
+		return EnvironmentNetwork{}, msg("受限列表至少要有一个域名")
+	case len(hosts) > maxEnvironmentHosts:
+		return EnvironmentNetwork{}, msg("允许的域名最多 %d 个", maxEnvironmentHosts)
+	}
+	n.AllowedHosts = hosts
+	return n, nil
+}
+
+// normalizeHost 把一个允许的域名整理成小写、去掉末尾的点；*.example.com 匹配子域名（Q30）。只收主机名：不带协议、端口、路径，
+// 不收 IP 地址、裸的 * 与单段的名字（localhost 这类）。
+func normalizeHost(raw string) (string, error) {
+	host := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
+	name := strings.TrimPrefix(host, "*.")
+	if strings.ContainsAny(name, "/:@?# \t*") {
+		return "", msg("允许的域名 %s 只写主机名，不带协议、端口、路径或通配符（子域名写 *.example.com）", raw)
+	}
+	if net.ParseIP(name) != nil {
+		return "", msg("允许的域名不能是 IP 地址：%s", raw)
+	}
+	labels := strings.Split(name, ".")
+	if len(host) > maxEnvironmentHostBytes || len(labels) < 2 {
+		return "", msg("允许的域名 %s 不是公网域名", raw)
+	}
+	for _, label := range labels {
+		if !hostLabel.MatchString(label) {
+			return "", msg("允许的域名 %s 不是公网域名", raw)
+		}
+	}
+	if strings.Trim(labels[len(labels)-1], "0123456789") == "" {
+		return "", msg("允许的域名 %s 不是公网域名", raw)
+	}
+	return host, nil
 }
 
 // validateDotEnv checks the ordinary .env form without interpreting shell
@@ -103,6 +183,10 @@ func looksLikeSecretName(key string) bool {
 func environmentView(env Environment) Environment {
 	// Keep the response as configuration only; DeletedAt is omitted for active
 	// records by the handlers and no runtime status is inferred here.
+	// Records saved before network intent existed read as the default (deny).
+	if env.Network.Mode == "" {
+		env.Network.Mode = networkDeny
+	}
 	return env
 }
 
@@ -146,7 +230,7 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request,
 	now := time.Now().UTC()
 	env := Environment{
 		ID: newEnvironmentID(in.Name), Name: in.Name, Description: in.Description, Privacy: in.Privacy,
-		SetupScript: in.SetupScript, StartCommand: in.StartCommand, Env: in.Env,
+		SetupScript: in.SetupScript, StartCommand: in.StartCommand, Env: in.Env, Network: in.Network,
 		CreatedAt: now, CreatedBy: id.UserID,
 	}
 	err = s.store.UpdateEnvironments(id.TenantID, func(all []Environment) ([]Environment, error) {
@@ -211,7 +295,7 @@ func (s *Server) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request,
 				}
 			}
 			all[i].Name, all[i].Description, all[i].Privacy = in.Name, in.Description, in.Privacy
-			all[i].SetupScript, all[i].StartCommand, all[i].Env = in.SetupScript, in.StartCommand, in.Env
+			all[i].SetupScript, all[i].StartCommand, all[i].Env, all[i].Network = in.SetupScript, in.StartCommand, in.Env, in.Network
 			return all, nil
 		}
 		return nil, fmt.Errorf("环境不存在")

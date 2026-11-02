@@ -74,10 +74,15 @@ func argCount(format string) int {
 	return -1
 }
 
+// placeholder 按任何动词（%s、%d、%q、%v）都写成 <argN>：数字参数（字节上限、行号）也能核对。
+type placeholder int
+
+func (p placeholder) Format(f fmt.State, _ rune) { fmt.Fprintf(f, "<arg%d>", int(p)) }
+
 func placeholders(n int) []any {
 	out := make([]any, n)
 	for i := range out {
-		out[i] = fmt.Sprintf("<arg%d>", i+1)
+		out[i] = placeholder(i + 1)
 	}
 	return out
 }

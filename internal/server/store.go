@@ -50,6 +50,8 @@ type Session struct {
 	RuntimeSessionID string `json:"runtime_session_id,omitempty"`
 	// EnvironmentID 是独立于项目（基线仓库）的环境配置；运行时状态不存于 coding-web。
 	EnvironmentID string `json:"environment_id,omitempty"`
+	// EnvironmentHandoff 是这份配置交给 Runtime 了没有（见 envhandoff.go）：pending 表示只记在这里、Runtime 还不知道。
+	EnvironmentHandoff string `json:"environment_handoff,omitempty"`
 	// 复制时基线仓库的提交。
 	BaseCommit string `json:"base_commit,omitempty"`
 	// Agent 的改动推到 Branch（agent/…），PR 记在 PRURL、PRNumber；PushedHead 是上次推送的提交。
@@ -66,16 +68,26 @@ type Session struct {
 // DeletedAt 是配置删除的墓碑时间。清理环境及其运行时资源由 Runtime 负责，coding-web
 // 不在这里伪造 ready、reused 或 expiry 状态。
 type Environment struct {
-	ID           string     `json:"id"`
-	Name         string     `json:"name"`
-	Description  string     `json:"description,omitempty"`
-	Privacy      string     `json:"privacy"`
-	SetupScript  string     `json:"setup_script,omitempty"`
-	StartCommand string     `json:"start_command,omitempty"`
-	Env          string     `json:"env,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	CreatedBy    string     `json:"created_by"`
-	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	Privacy      string `json:"privacy"`
+	SetupScript  string `json:"setup_script,omitempty"`
+	StartCommand string `json:"start_command,omitempty"`
+	Env          string `json:"env,omitempty"`
+	// Network 是联网需求（禁止、受限列表、完全开放）；真正放行与否由 Runtime 按租户策略核对，只能收窄。
+	Network   EnvironmentNetwork `json:"network"`
+	CreatedAt time.Time          `json:"created_at"`
+	CreatedBy string             `json:"created_by"`
+	DeletedAt *time.Time         `json:"deleted_at,omitempty"`
+}
+
+// EnvironmentNetwork 是环境配置里的联网需求（人工验收 Q29、Q30）：mode 是 deny、allowlist 或 open；allowlist 时
+// AllowedHosts 是允许的域名，*.example.com 匹配子域名（与 Runtime 的 host_pattern 写法一致，不收裸的 *）。
+// 只是配置：不是授权，也没有状态；授权属于 Task，由 Runtime 发放与收回。
+type EnvironmentNetwork struct {
+	Mode         string   `json:"mode"`
+	AllowedHosts []string `json:"allowed_hosts,omitempty"`
 }
 
 // TaskRecord 是在项目里下过的一个任务（状态以 Runtime 为准，这里只缓存最后一次看到的）。

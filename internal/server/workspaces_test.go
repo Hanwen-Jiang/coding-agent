@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +39,18 @@ func (f *fakeWorkspaceAPI) record(method string, body map[string]any) {
 	defer f.mu.Unlock()
 	f.methods = append(f.methods, method)
 	f.calls = append(f.calls, body)
+}
+
+func (f *fakeWorkspaceAPI) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.methods)
+}
+
+func (f *fakeWorkspaceAPI) methodsSince(n int) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.methods[n:])
 }
 
 func (f *fakeWorkspaceAPI) last(method string) map[string]any {
@@ -198,6 +211,7 @@ func newRuntimeServer(t *testing.T) (*httptest.Server, *fakeWorkspaceAPI, string
 	if _, ok := srv.ws.(runtimeWorkspaces); !ok {
 		t.Fatal("默认经 Workspace API")
 	}
+	t.Cleanup(srv.background.Wait)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, fakeWS, root
@@ -301,13 +315,23 @@ func TestWorkspacesGoThroughTheRuntimeWorkspaceAPI(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(wsDir, "scratch.txt")); err == nil {
 		t.Fatal("丢弃之后未跟踪的文件没了")
 	}
+	before := fake.count()
 	code, _, _ = c.do("POST", api+"/tasks", map[string]string{"message": "fix it"})
 	if code != http.StatusCreated {
 		t.Fatalf("下任务：%d", code)
 	}
-	_, env, _ := c.do("GET", api+"/env", nil)
-	if git, _ := env["git"].(map[string]any); git["subject"] != "add new.txt" || git["dirty"].(float64) != 0 {
-		t.Fatalf("环境里的 git 信息：%v", env["git"])
+	// 任务开始时的提交在后台补记（GetLog）：等它做完，再看 /env 自己有没有调 Workspace API。
+	for end := time.Now().Add(5 * time.Second); fake.count() == before && time.Now().Before(end); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	before = fake.count()
+	_, env, raw := c.do("GET", api+"/env", nil)
+	// /env 是只读的投影（人工验收 Q105）：经 Workspace API 读 git 要借沙箱环境、动它的生命周期，所以不调；分支与改动网页从“改动”取。
+	if fake.count() != before || env["git"] != nil {
+		t.Fatalf("/env 不该调 Workspace API：%v %s", fake.methodsSince(before), raw)
+	}
+	if renv, _ := env["runtime_environments"].(map[string]any); renv["status"] != envStatusOK || len(renv["records"].([]any)) != 0 {
+		t.Fatalf("ledger 里没有记录时就是没有，不猜：%s", raw)
 	}
 
 	if code, _, raw := c.do("DELETE", "/api/projects/"+pid, nil); code != http.StatusOK {

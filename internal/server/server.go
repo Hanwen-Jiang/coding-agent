@@ -75,6 +75,10 @@ type Server struct {
 	wsLocks   sync.Map // 工作区 id → *sync.Mutex（workspaceLock）
 	providers map[string]*Provider
 	allowed   map[string]bool
+	// handoff 把会话选定的环境配置交给 Runtime（envhandoff.go；ENV-02 的契约定下之前不发）。
+	handoff environmentHandoff
+	// background 是请求返回后还在跑的后台工作（任务开始时补记提交）：测试收尾时等它们做完再删临时目录。
+	background sync.WaitGroup
 }
 
 // New 校验配置并构造 Server。
@@ -126,6 +130,7 @@ func New(cfg Config) (*Server, error) {
 		git:       Git{Bin: cfg.Git, HooksDir: hooks},
 		ws:        runtimeWorkspaces{api: api},
 		providers: providers,
+		handoff:   pendingHandoff{},
 	}
 	if cfg.Workspaces == "local" {
 		if err := os.MkdirAll(cfg.WorkspaceRoot, 0o755); err != nil {
