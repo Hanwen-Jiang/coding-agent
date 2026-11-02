@@ -75,6 +75,8 @@ var reasonCases = []codeCase{
 	reason("rule_done_without_changes", nil),
 	reason("rule_deliverable_empty", nil),
 	reason("rule_deliverable_unresolved", params{"references": []string{"$a.result"}}, "$a.result"),
+	reason("rule_judge_disowns", params{"probability": 0.99}),
+	reason("rule_judge_off_topic", params{"probability": 0.05}),
 	reason("rule_no_checkpoint", params{"checkpoint": "cp1"}, "cp1"),
 	reason("rule_unknown_recipe", params{"recipe": "r1"}, "r1"),
 	reason("rule_recipe_over_ceiling", params{"recipe": "r1", "risk": "write_irreversible", "ceiling": "read"}, "r1"),
