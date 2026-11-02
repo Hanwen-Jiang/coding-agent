@@ -41,7 +41,7 @@ func TestTheNewTextIsInBothLanguages(t *testing.T) {
 		"guidance.pending", "guidance.applied", "guidance.retract", "guidance.edit", "guidance.waitIrreversible",
 		"guidance.rejected.already_applied", "guidance.rejected.not_found", "guidance.rejected.too_many_pending",
 		"guidance.notApplied", "guidance.sendAsTask", "queued.edit", "queued.editTooLate",
-		"ctx.free", "ctx.compactionLine", "ctx.tools", "ctx.details",
+		"ctx.free", "ctx.compactionLine", "ctx.used", "ctx.window", "ctx.tools", "ctx.details",
 		"output.round", "output.files", "output.answers", "output.inThread",
 		"reason.user_guidance", "reason.user_interrupt",
 	} {
@@ -477,14 +477,16 @@ func TestInteractionInBrowser(t *testing.T) {
 
 	// --- 第 3 节 ---
 	truthy("usageShown", "右栏“上下文”要显示占比")
+	// 占比按可用长度算（压缩线 32k，不超过 200k 的窗口；Runtime 的 docs/plan/feedback-2026-11-01.md N-17）：按 200k 的窗口算时
+	// 2 万 token 只占 10%，条形图几乎是空的。
 	want := map[string]string{
-		"system_prompt": "System prompt|2.0k|1.0%",
-		"system_tools":  "System tools|4.0k|2.0%",
-		"mcp_tools":     "MCP tools|1.0k|0.5%",
-		"memory":        "Memory|500|0.3%",
-		"task_brief":    "Task brief|1.5k|0.8%",
-		"messages":      "Messages|11.0k|5.5%",
-		"free":          "Free space|180.0k|90.0%",
+		"system_prompt": "System prompt|2.0k|6.3%",
+		"system_tools":  "System tools|4.0k|12.5%",
+		"mcp_tools":     "MCP tools|1.0k|3.1%",
+		"memory":        "Memory|500|1.6%",
+		"task_brief":    "Task brief|1.5k|4.7%",
+		"messages":      "Messages|11.0k|34.4%",
+		"free":          "Free space|12.0k|37.5%",
 	}
 	for cat, line := range want {
 		if res.Context[cat] != line {
@@ -494,8 +496,8 @@ func TestInteractionInBrowser(t *testing.T) {
 	if segs, _ := steps["segments"].([]any); len(segs) != 7 {
 		t.Errorf("分段的进度条每类一段（含 Free space）：%v", steps["segments"])
 	}
-	if line, _ := steps["compactionLine"].(string); !strings.Contains(line, "32.0k") {
-		t.Errorf("要标出压缩线：%q", steps["compactionLine"])
+	if line, _ := steps["compactionLine"].(string); !strings.Contains(line, "32.0k") || !strings.Contains(line, "200.0k") {
+		t.Errorf("要写出压缩线与模型窗口：%q", steps["compactionLine"])
 	}
 	truthy("toolsCollapsed", "工具默认只看合计")
 	if tools, _ := steps["tools"].([]any); len(tools) != 3 {

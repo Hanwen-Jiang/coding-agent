@@ -2443,7 +2443,7 @@ function contextSummary() {
   const rounds = d && d.state && Array.isArray(d.state.rounds) ? d.state.rounds.length : task.rounds || 0;
   const cost = taskCost(task);
   const usage = latestUsage(task);
-  return [usage ? ctxPercent(num(usage.total_tokens), num(usage.window_tokens)) : null, rounds ? t("rounds", { n: rounds }) : null, cost ? fmtUSD(cost) : null].filter(Boolean).join(" · ") || "—";
+  return [usage ? ctxPercent(num(usage.total_tokens), ctxUsable(usage)) : null, rounds ? t("rounds", { n: rounds }) : null, cost ? fmtUSD(cost) : null].filter(Boolean).join(" · ") || "—";
 }
 
 // 上下文占比（Runtime 的 docs/plan/running-task-interaction.md 第 3 节，参考 Claude Code 的 /context）：这次模型调用的上下文里各类内容占多少。
@@ -2467,29 +2467,49 @@ function ctxPercent(tokens, total) {
   return `${(total > 0 ? (tokens / total) * 100 : 0).toFixed(1)}%`;
 }
 
+// 可用长度：超过它 Runtime 就开始压缩（压缩线），不超过模型的窗口。条形图以它为满格（Runtime 的 docs/plan/feedback-2026-11-01.md N-17）：
+// 模型窗口常有 100 万 token，按窗口画的话几万 token 的上下文只占一条细线，看不出多少。总数是这次实际计费的输入 token，各类按估算的比例分摊。
+function ctxUsable(usage) {
+  const windowTokens = num(usage.window_tokens);
+  const line = num(usage.effective_tokens);
+  if (windowTokens > 0 && line > 0) return Math.min(windowTokens, line);
+  return windowTokens || line;
+}
+
 function ctxUsage(usage) {
   const windowTokens = num(usage.window_tokens);
+  const usable = ctxUsable(usage);
   const total = num(usage.total_tokens);
-  const line = num(usage.effective_tokens);
+  const full = Math.max(usable, total);
   const byName = new Map((usage.categories || []).map((c) => [c.name, num(c.tokens)]));
-  const rows = [...CTX_CATEGORIES.map((name) => [name, byName.get(name) || 0, t(`ctx.cat.${name}`)]), ["free", Math.max(0, windowTokens - total), t("ctx.free")]];
+  const rows = [...CTX_CATEGORIES.map((name) => [name, byName.get(name) || 0, t(`ctx.cat.${name}`)]), ["free", Math.max(0, usable - total), t("ctx.free")]];
   const tools = usage.tools || [];
+  const segment = (name, tokens) => {
+    const seg = h("span", { class: "seg", "data-cat": name, title: `${t(name === "free" ? "ctx.free" : `ctx.cat.${name}`)} ${ctxTokens(tokens)}` });
+    seg.style.width = ctxPercent(tokens, full);
+    // 很小的一类也看得见（至少 2px），占比的数字照实写在下面。
+    if (tokens > 0 && name !== "free") seg.style.minWidth = "2px";
+    return seg;
+  };
   return h("div", { class: "ctx-usage" },
-    h("div", { class: "ctx-bar" }, rows.map(([name, tokens]) => {
-      const seg = h("span", { class: "seg", "data-cat": name, title: `${t(name === "free" ? "ctx.free" : `ctx.cat.${name}`)} ${ctxTokens(tokens)}` });
-      seg.style.width = ctxPercent(tokens, windowTokens);
-      return seg;
-    }), line < windowTokens ? (() => {
-      const mark = h("span", { class: "ctx-mark" });
-      mark.style.left = ctxPercent(line, windowTokens);
-      return mark;
-    })() : null),
+    h("div", { class: "ctx-head" },
+      h("span", { class: "ctx-used" }, t("ctx.used", { used: ctxTokens(total), usable: ctxTokens(usable) })),
+      h("span", { class: "ctx-pct-total" }, ctxPercent(total, usable))),
+    h("div", { class: "ctx-bar", role: "img", "aria-label": t("ctx.used", { used: ctxTokens(total), usable: ctxTokens(usable) }) },
+      rows.map(([name, tokens]) => segment(name, tokens)),
+      total > usable ? (() => {
+        const mark = h("span", { class: "ctx-mark" });
+        mark.style.left = ctxPercent(usable, full);
+        return mark;
+      })() : null),
     h("div", { class: "ctx-rows" }, rows.map(([name, tokens, label]) => h("div", { class: "ctx-row", "data-cat": name },
       h("span", { class: "ctx-dot", "data-cat": name }),
       h("span", { class: "ctx-label" }, label),
       h("span", { class: "ctx-num" }, ctxTokens(tokens)),
-      h("span", { class: "ctx-pct" }, ctxPercent(tokens, windowTokens))))),
-    h("div", { class: "ctx-line muted small" }, t("ctx.compactionLine", { n: ctxTokens(line) }), (usage.applied || []).length ? ` · ${t("ctx.applied", { steps: usage.applied.join(t("list.sep")) })}` : ""),
+      h("span", { class: "ctx-pct" }, ctxPercent(tokens, usable))))),
+    h("div", { class: "ctx-line muted small" },
+      windowTokens > usable ? t("ctx.window", { window: ctxTokens(windowTokens), usable: ctxTokens(usable) }) : t("ctx.compactionLine", { n: ctxTokens(usable) }),
+      (usage.applied || []).length ? ` · ${t("ctx.applied", { steps: usage.applied.join(t("list.sep")) })}` : ""),
     tools.length ? toggled("ctx-tools", state.ctxToolsOpen, (v) => { state.ctxToolsOpen = v; }, t("ctx.tools"),
       tools.map((x) => h("div", { class: "ctx-tool" }, h("span", { class: "mono small" }, x.name), x.mcp ? h("span", { class: "chip" }, "MCP") : null, h("span", { class: "grow" }), h("span", { class: "ctx-num" }, ctxTokens(num(x.tokens)))))) : null,
   );

@@ -2,6 +2,8 @@
 
 :root {
   color-scheme: light;
+  /* 页面本身的底色（只给 body，不给组件）：白天纯白、夜间纯黑（2026-11-02 人定）。组件的底色仍是下面的 --bg、--surface 等。 */
+  --page: #ffffff;
   --bg: #faf9f5;
   --bg-side: #f3f1ea;
   --surface: #ffffff;
@@ -33,7 +35,7 @@
   --shadow-sm: 0 1px 2px rgba(31, 30, 29, 0.05);
   --shadow: 0 1px 2px rgba(31, 30, 29, 0.04), 0 6px 20px rgba(31, 30, 29, 0.07);
   --shadow-lg: 0 2px 6px rgba(31, 30, 29, 0.06), 0 18px 48px rgba(31, 30, 29, 0.14);
-  --grain-opacity: 0.035;
+  --grain-opacity: 0;
 
   --font-serif: "Copernicus", "Tiempos Text", "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong, serif;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
@@ -49,6 +51,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
+    --page: #000000;
     --bg: #262624;
     --bg-side: #1f1e1d;
     --surface: #30302e;
@@ -80,12 +83,13 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 6px 20px rgba(0, 0, 0, 0.28);
     --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.3), 0 18px 48px rgba(0, 0, 0, 0.45);
-    --grain-opacity: 0.05;
+    --grain-opacity: 0;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --page: #000000;
   --bg: #262624;
   --bg-side: #1f1e1d;
   --surface: #30302e;
@@ -117,7 +121,7 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 6px 20px rgba(0, 0, 0, 0.28);
   --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.3), 0 18px 48px rgba(0, 0, 0, 0.45);
-  --grain-opacity: 0.05;
+  --grain-opacity: 0;
 }
 
 /* ------------------------------------------------------------------ 基础 */
@@ -126,7 +130,7 @@
 html, body { height: 100%; }
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--page);
   color: var(--text);
   font: 14px/1.55 var(--font-sans);
   -webkit-font-smoothing: antialiased;
@@ -665,7 +669,10 @@ textarea.field { height: auto; padding: 8px 11px; resize: vertical; line-height:
 .guidance-editor, .queued-editor { margin-top: 4px; }
 .guidance-editor textarea, .queued-editor textarea { width: 100%; border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 8px; background: var(--bg); }
 .ctx-usage { display: flex; flex-direction: column; gap: 8px; }
-.ctx-bar { position: relative; display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--sunken); }
+.ctx-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+.ctx-used { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.ctx-pct-total { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ctx-bar { position: relative; display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--sunken); }
 .ctx-bar .seg, .ctx-dot { background: var(--faint); }
 .ctx-bar .seg { display: block; height: 100%; flex: none; border-radius: 0; margin: 0; min-width: 0; }
 .ctx-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--warn); }
