@@ -1,6 +1,6 @@
 # GitHub App 接入计划
 
-> 状态：2026-10-30 设计稿，待人确认。来源：人给的六块设计建议，逐条对照本仓库与 Runtime 仓库的代码；GitHub 的行为查了官方文档（第 7 节）。
+> 状态：2026-10-30 设计稿；2026-11-03 第 5 节各条人已定，App 已注册（第 6 节），G-01～G-06 都做（登记在 Runtime 仓库的 `docs/plan/work-dag-2026-11-03.md`）。来源：人给的六块设计建议，逐条对照本仓库与 Runtime 仓库的代码；GitHub 的行为查了官方文档（第 7 节）。
 > 现在 GitHub 走的是 OAuth App（`repo read:user`）：令牌能碰用户名下的所有仓库，也不过期。接 GitHub App 就是为了按仓库授权、用短期令牌。
 
 ## 1. 已有与缺失
@@ -23,7 +23,7 @@
 4. **Setup URL 的 `installation_id` 不可信。** GitHub 明确说可能被伪造。回调里只把它当线索，用用户令牌确认这个用户确实能访问这个安装，才关联。
 5. **令牌会过期之后，续期的并发竞争就成了真问题。** 用户令牌 8 小时过期，续期令牌用一次就失效，旧的访问令牌也同时失效。`connToken` 现在读、续、写之间没有锁：两个并发请求同时续，后一个会失败，用户被要求重新授权。另外 `gitCredentials` 吞掉错误、返回空凭据，续不上时变成无凭据克隆，报的是别的错。
 6. **令牌的加密密钥要先分出来。** 用户令牌多了续期令牌，放在开发签名密钥派生的密钥下面不合适，而且换签名密钥会让所有令牌解不开。
-7. **“三张表”先用 JSON 文件。** 本仓库没有数据库，规定也不加依赖。1 副本时一个投递一个文件（`O_EXCL` 创建即去重，改名换状态）够用；要多副本时再换 Postgres。接口隔开。
+7. **“三张表”放 Postgres**（2026-11-03 人定，原稿是先用 JSON 文件）。用集群里已有的数据层（`data` 命名空间），coding-web 用单独的库与角色；要加一个 Postgres 驱动（与 Runtime 用同一个），是本仓库第一个数据库依赖。接口照样隔开，测试用替身。
 8. **事件只当提示。** GitHub 不保证顺序。收到 `pull_request`、`workflow_run` 后按 API 取当前状态，不用负载里的状态覆盖，否则迟到的旧事件会把状态改回去。
 9. **建议里没提、要加的：** `github_app_authorization`（用户撤销授权，要删他的令牌）；校验 `X-GitHub-Hook-Installation-Target-ID` 等于本 App（防测试与生产配错）；`code.cgent.link` 在 Cloudflare 后面，第一次投递要确认 Hookshot 没被 Browser Integrity Check 或 WAF 拦下，被拦就给这个路径加跳过规则；改 `.github/workflows/` 的推送要 `workflows` 权限，没有就会被拒，要给明确的提示。
 
@@ -33,19 +33,24 @@
 
 **配置**
 
-| 变量 | 内容 | 放哪儿 |
-| --- | --- | --- |
-| `CODING_GITHUB_CLIENT_ID`、`_SECRET` | App 的 Client ID 与 Secret（切换时替换 OAuth App 的值） | `coding-oauth` |
-| `CODING_GITHUB_APP_ID`、`CODING_GITHUB_APP_SLUG` | App ID、Slug | `coding-github-app` |
-| `CODING_GITHUB_WEBHOOK_SECRET`、`_PREVIOUS` | Webhook secret；`_PREVIOUS` 只在轮换期间有 | `coding-github-app` |
-| `CODING_GITHUB_APP_PRIVATE_KEY_FILE` | 私钥文件的路径；Secret 以文件挂载，模式 0400 | `coding-github-app` |
-| `CODING_TOKEN_KEY`、`_PREVIOUS` | 令牌加密密钥（32 字节）；旧格式读得出，下次写入时换新 | `coding-github-app` |
+| 变量 | 内容 | 放哪儿 | 2026-11-03 线上 |
+| --- | --- | --- | --- |
+| `CODING_GITHUB_CLIENT_ID`、`_SECRET` | 旧 OAuth App 的，并存期（30 天）内照用 | `coding-oauth` | 有 |
+| `CODING_GITHUB_APP_ID`、`CODING_GITHUB_APP_CLIENT_ID` | App ID、App 的 Client ID（不是密钥） | `coding-oauth` | 有 |
+| `CODING_GITHUB_APP_CLIENT_SECRET` | App 的 Client secret：用户授权（G-03 的用户令牌）要用 | `coding-oauth` | **没有**，G-03 之前在 App 设置页生成并存进去 |
+| `CODING_GITHUB_APP_SLUG` | `coding-agent-link`，不是密钥 | Chart 的 values | — |
+| `CODING_GITHUB_WEBHOOK_SECRET`、`_PREVIOUS` | Webhook secret；`_PREVIOUS` 只在轮换期间有 | `coding-oauth` | 有（没有 `_PREVIOUS`） |
+| `CODING_GITHUB_APP_PRIVATE_KEY` → `CODING_GITHUB_APP_PRIVATE_KEY_FILE` | 私钥。Secret 里是 PEM 原文；G-01 只把这一项按文件挂进 coding-web（`items`，模式 0400），变量给路径 | `coding-oauth` | 有 |
+| `CODING_TOKEN_KEY`、`_PREVIOUS` | 令牌加密密钥（32 字节）；旧格式读得出，下次写入时换新 | `coding-oauth` | 没有，G-01 生成 |
+| `CODING_GITHUB_DSN` | 收件箱与安装记录的库（第 2 节第 7 条） | 新 Secret 或 `coding-oauth` | 没有，G-02 建库时给 |
 
-都在服务器的 SOPS 文件里（`deploy/cluster/secrets/secrets.enc.yaml`，`coding-oauth` 就在那儿），只注入 coding-web。全不配时功能关闭、行为不变；配了一部分时启动失败，错误里只写变量名。
+服务器上：K8s Secret `coding-oauth`（`agent-runtime` 命名空间）是 coding-web 读的；`/root/ar-secrets/coding-oauth.env` 是同样几项的副本，私钥一项叫 `CODING_GITHUB_APP_PRIVATE_KEY_B64`（一行 base64）；PEM 另存在 `/root/ar-secrets/github-app.private-key.pem`。**SOPS 文件（`/root/ar-secrets/secrets.enc.yaml`）里还只有旧 OAuth 的两项**：按 SOPS 重建 Secret 会丢掉 App 的密钥，G-01 上线前补进去。只注入 coding-web。全不配时功能关闭、行为不变；配了一部分时启动失败，错误里只写变量名。
 
-**收件箱**：`<数据目录>/github/inbox/<delivery>.json`。状态 `received → processing → done`，失败 `retry`（退避，5 次），之后 `dead`。流程：边读边算 HMAC 并写临时文件 → 校验 → 改名入箱 → fsync → 2xx（GitHub 要求 10 秒内）→ 后台处理。上限 25 MiB（GitHub 不投更大的）。原始负载留 7 天，磁盘超上限时回 503 并告警。日志只有 delivery、event、action、installation id。
+私钥轮换（2026-11-03 13:51 服务器时间轮换过一次，旧的已在 GitHub 上作废）：在 App 设置页生成新私钥，放到 `/root/ar-secrets/github-app.private-key.new`，执行 `bash /root/ar-secrets/rotate-github-app-key.sh`。脚本更新 PEM 文件、`coding-oauth.env` 与 Secret 三处，各留一份备份，不打印密钥；G-01 部署后还要 `kubectl -n agent-runtime rollout restart deploy/coding-web` 才读到新私钥。GitHub 上的旧私钥要手工删，等 coding-web 用新私钥签出过令牌再删。
 
-**记录**：`github/installations/<id>.json`（账号 ID 与登录名、是否暂停、仓库范围、权限）、`github/repos/<repo_id>.json`（当前全名、安装 ID）。`Project` 加 `RepoID`、`InstallationID`；旧工作区第一次用到时按 `GET /repos/{owner}/{repo}/installation` 补上。
+**收件箱**（Postgres，第 2 节第 7 条）：表 `github_deliveries`（`delivery` 主键、event、action、installation id、负载、状态、次数、下次时间、收到时间）。状态 `received → processing → done`，失败 `retry`（退避，5 次），之后 `dead`。流程：边读边算 HMAC（请求体限长读入）→ 校验 → `INSERT … ON CONFLICT (delivery)` 入箱（已有且是 `dead` 的改回 `received`，别的不动）→ 提交 → 2xx（GitHub 要求 10 秒内）→ 后台处理。后台用 `FOR UPDATE SKIP LOCKED` 领取，`processing` 带租约，超时的重新领取（进程崩溃的情形），这样多副本也不会重复处理。上限 25 MiB（GitHub 不投更大的）。原始负载留 7 天（之后清空负载列、保留行做去重与统计），库连不上时回 503（GitHub 不自动重投，靠对账补）。日志只有 delivery、event、action、installation id。
+
+**记录**：与收件箱同一个库（随第 2 节第 7 条一起放 Postgres，没有单独问）：`github_installations`（账号 ID 与登录名、是否暂停、仓库范围、权限、卸载时间）、`github_repos`（仓库 ID、当前全名、安装 ID）。`Project` 加 `RepoID`、`InstallationID`；旧工作区第一次用到时按 `GET /repos/{owner}/{repo}/installation` 补上。
 
 **一次操作的授权（`authorizeRepo`）**：工作区属于这个租户（已有）→ 取用户令牌（按用户串行续期）→ 安装没被暂停 → 用用户令牌确认他对这个仓库有所需的权限（读：克隆；写：推送、开 PR；不可达一律拒绝，结果缓存不超过 60 秒）→ 签安装令牌（`repository_ids` 只有这个仓库，`permissions` 只给这次要的）→ 经 Workspace API 传入（用户名 `x-access-token`）→ 操作结束调 `DELETE /installation/token`，失败不影响结果。令牌不落盘。
 
@@ -53,7 +58,7 @@
 
 ## 4. 工作项与验收
 
-顺序：G-01 → G-02 → G-03 → G-04 → G-05；G-06 单独确认。上线前必须有 G-01～G-03，G-02 含对账。都先写测试（替身 GitHub，本仓库已有这种做法）。
+顺序：G-01 → G-02 → G-03 → G-04 → G-05，G-06 在 G-03、G-04 之后（2026-11-03 人定一起做，不再单独确认）。上线前必须有 G-01～G-03，G-02 含对账。都先写测试（替身 GitHub，本仓库已有这种做法；Postgres 的测试像 Runtime 那样自己拉起临时实例）。
 
 ### G-01 密钥与配置
 
@@ -69,10 +74,10 @@
 2. 目标 App ID 不符：拒绝。
 3. 超过上限：413，不留临时文件；大请求不把内存吃满。
 4. 处理函数卡住时，接收仍在 1 秒内回 2xx。
-5. 同一个 delivery：`done`、`processing` 的回 2xx 不重复处理；`dead` 的重新入队。进程重启后去重仍生效。
-6. 处理失败按退避重试，5 次后进死信；`coding-web github-replay <delivery>` 能重放；进程崩溃时 `processing` 的重新入队；每个处理函数执行两次结果相同。
+5. 同一个 delivery：`done`、`processing` 的回 2xx 不重复处理；`dead` 的重新入队。进程重启后去重仍生效；两个副本并发领取，同一条只处理一次。
+6. 处理失败按退避重试，5 次后进死信；`coding-web github-replay <delivery>` 能重放；进程崩溃时 `processing` 的租约到期后重新领取；每个处理函数执行两次结果相同。
 7. **对账**：替身 GitHub 里有 3 个投递失败，启动与定时（每 10 分钟）调 `GET /app/hook/deliveries` 重投；窗口不超过 3 天，每轮有上限，不会重复重投同一条。
-8. 负载 7 天后清掉；磁盘到上限时回 503 并记告警指标。
+8. 负载 7 天后清掉；库连不上时回 503 并记告警指标。
 9. 线上第一次真实投递成功（确认没被 Cloudflare 拦）。
 
 ### G-03 身份、安装与令牌
@@ -110,28 +115,46 @@
 4. 卸载与删除账号：令牌立即清掉，负载与记录按第 5 节第 6 条处理。
 5. 单独注册一个测试 App，配置与生产不共用；本机与测试只用它。
 
-### G-06 自动触发（最后做，开工前单独确认）
+### G-06 自动触发（2026-11-03 人定一起做）
+
+授权的规则（人定）：有写权限的成员在 Issue 或 PR 里发出触发评论，就算授权**这一次**推到 `agent/*` 并开 PR；改了 `.github/workflows/` 下的文件时，推送前先在那个 PR 或 Issue 里再问一次，等触发者回复确认。
 
 1. 过滤本 App 与其他 Bot 产生的事件（`sender.type`、本 App 的 `<slug>[bot]`）：测试里不会形成循环。
-2. 只有写权限的成员能触发，按 `GET /repos/{owner}/{repo}/collaborators/{username}/permission` 查，不信 `author_association`。
-3. Issue、评论、PR 与代码内容都作为数据传给 Task，不进系统提示；带注入样本的回归进评测集。
-4. 单独的预算与限流（每仓库、每小时），超了不启动并在 PR 上说明。
-5. fork 来的 PR 不用安装令牌跑它的代码。
-6. 推送仍只到 `agent/**`，默认分支推不了（Runtime 的租户策略）。
+2. 只有写权限的成员能触发，按 `GET /repos/{owner}/{repo}/collaborators/{username}/permission` 查，不信 `author_association`。没有写权限的评论不启动 Task，也不回复（不给刷屏的机会）。
+3. 一条触发评论只授权一次推送与一个 PR：同一个 Task 第二次推送、或别的评论想复用这次授权，都被拒。
+4. 改动包含 `.github/workflows/` 时，第一次推送之前停下，在 PR 或 Issue 里列出改了哪些工作流文件并请求确认；只有触发者本人（或另一位有写权限的成员）的确认评论能放行；没有确认时不推，超时后在评论里说明并结束。
+5. Issue、评论、PR 与代码内容都作为数据传给 Task，不进系统提示；带注入样本的回归进评测集。
+6. 单独的预算与限流（每仓库、每小时），超了不启动并在 PR 上说明。
+7. fork 来的 PR 不用安装令牌跑它的代码。
+8. 推送仍只到 `agent/**`，默认分支推不了（Runtime 的租户策略）。
 
-## 5. 要人定的
+## 5. 人定的（2026-11-03）
 
-| # | 问题 | 建议 |
+| # | 问题 | 决定 |
 | --- | --- | --- |
-| 1 | 人点按钮开 PR 用谁的令牌 | 用户令牌，PR 记在这个人名下；安装令牌留给克隆、推送与自动触发。原建议是全用安装令牌（PR 作者会是 Bot） |
-| 2 | App 可以装在哪些账号 | 测试 App 只限自己；生产选任何账号（code.cgent.link 已开放注册） |
+| 1 | 开 PR 用谁的令牌 | 用户令牌，PR 记在这个人名下；安装令牌留给克隆、推送与自动触发 |
+| 2 | App 可以装在哪些账号 | 测试 App 只装本人账号；正式 App（`coding-agent-link`）谁都能装 |
 | 3 | 旧 OAuth 用户怎么切 | 并存 30 天：新连接走 App，旧连接照用并提示，到期后删除旧令牌与旧路径 |
-| 4 | 给不给 `workflows` 权限 | 不给。Agent 改工作流文件时明确提示，由人处理 |
-| 5 | 收件箱放哪儿 | 先用 JSON 文件；要多副本时换 Postgres |
-| 6 | 数据保留多久 | 原始负载 7 天；安装记录保留到卸载后 30 天；令牌立即删除 |
-| 7 | 自动触发与“推送由人点按钮”这条规定冲突 | G-06 开工前再定 |
+| 4 | 给不给 `workflows` 权限 | 给（App 已有 Workflows 读写）。改工作流文件要人确认过：对话里由人确认；自动触发时在 PR 或 Issue 里再问一次（G-06） |
+| 5 | 收件箱放哪儿 | Postgres，不用 JSON 文件（第 2 节第 7 条、第 3 节） |
+| 6 | 数据保留多久 | 原始负载 7 天；安装记录保留到卸载后 30 天；令牌卸载后立即删除 |
+| 7 | 自动触发与“推送由人点按钮”这条规定冲突 | 作废：推送与改工作流不再要求点按钮，人在对话里确认过就可以代为操作；自动触发按 G-06 的授权规则。本仓库 CLAUDE.md 里“由人点按钮触发”那句要跟着改（人改） |
 
-## 6. 注册 App 时的设置
+## 6. App 的设置
+
+已注册（2026-11-03）：`coding-agent-link`，App ID 5542758，Client ID `Iv23liBSYi00ZcKTWpxk`，所有者 Hanwen-Jiang。
+
+GitHub 上的实际设置（`gh api apps/coding-agent-link`，2026-11-03）与原计划的差别：
+
+| 项 | 实际 | 原计划 | 要做的 |
+| --- | --- | --- | --- |
+| 仓库权限 | Contents 读写、Metadata 只读、Pull requests 读写、Workflows 读写 | 另有 Actions 只读、Commit statuses 只读，没有 Workflows | G-04 显示 CI 状态前核对缺 Actions、Commit statuses 时 `workflow_run` 与状态接口能不能用，不能就加上 |
+| 账号权限 | Email addresses 只读 | — | 正好给开放注册的防滥用（有验证过的邮箱）用 |
+| 订阅事件 | create、delete、pull_request、pull_request_review、pull_request_review_comment、pull_request_review_thread、push、repository、workflow_run | repository、push、pull_request、pull_request_review、workflow_run | G-06 的触发评论（Issue 与 PR 的普通评论）是 `issue_comment`，现在没订阅，要加 Issues 读写与 `issue_comment` 事件 |
+
+加权限要每个安装重新同意，所以 G-04、G-06 要的权限最好一次加齐。
+
+注册时用的设置：
 
 - 回调：`https://code.cgent.link/api/auth/github/callback`。打开 Expire user authorization tokens 与安装时请求用户授权。
 - Setup URL：`https://code.cgent.link/api/github/setup`，打开 Redirect on update。
