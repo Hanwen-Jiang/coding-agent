@@ -9,6 +9,8 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +31,6 @@ import (
 const (
 	cookieName  = "cw_token"
 	csrfHeader  = "X-Coding-Web"
-	tokenTTL    = 12 * time.Hour
 	maxBodySize = 1 << 20
 )
 
@@ -49,13 +50,17 @@ type Config struct {
 	// JWTKey、JWTKeyID、JWTIssuer（AUTH-01）：给了 Ed25519 私钥就用它签 Runtime 令牌（标准 JWT，iss 默认 coding-agent），
 	// Runtime 只持对应的公钥；SigningKey 的开发令牌不再签发、也不再认。TokenKey 是第三方平台令牌的加密密钥（32 字节），
 	// 与签名密钥无关；没给时沿用由 SigningKey 派生的旧密钥，两者都给时旧数据读到时用新密钥重新加密。
-	JWTKey       ed25519.PrivateKey
-	JWTKeyID     string
-	JWTIssuer    string
-	TokenKey     []byte
-	PoliciesFile string
-	Git          string
-	SecureCookie bool
+	JWTKey    ed25519.PrivateKey
+	JWTKeyID  string
+	JWTIssuer string
+	TokenKey  []byte
+	// SessionIdle、SessionMaxAge 是浏览器会话的空闲与绝对有效期（AUTH-02，browser_sessions.go；默认 24 小时、7 天）。Now 只给测试换时钟。
+	SessionIdle   time.Duration
+	SessionMaxAge time.Duration
+	Now           func() time.Time
+	PoliciesFile  string
+	Git           string
+	SecureCookie  bool
 	// 登录方式（github、gitee、gitlab、gitea、bitbucket、google，见 oauth.go）：Client ID 与 Secret 都给了才打开；
 	// PublicURL 用来拼回调地址 <PublicURL>/api/auth/<平台>/callback。GitHub 也可以用下面旧的 GitHub* 字段配置。
 	Providers          map[string]ProviderConfig
@@ -79,6 +84,7 @@ type Config struct {
 type Server struct {
 	cfg       Config
 	ingress   tokens
+	sessions  *sessions
 	store     *Store
 	api       *TaskAPI
 	git       Git
@@ -151,6 +157,7 @@ func New(cfg Config) (*Server, error) {
 		allowed:   allowed,
 		cfg:       cfg,
 		ingress:   tok,
+		sessions:  newSessions(cfg),
 		store:     NewStore(cfg.DataDir),
 		api:       api,
 		git:       Git{Bin: cfg.Git, HooksDir: hooks},
@@ -174,6 +181,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
+	mux.HandleFunc("POST /api/sessions/revoke-all", s.authed(s.handleRevokeAll))
 	mux.HandleFunc("GET /api/me", s.authed(s.handleMe))
 	// 第三方登录与账号关联（accounts.go）。
 	mux.HandleFunc("GET /api/auth/{provider}/login", s.handleOAuthLogin)
@@ -278,18 +286,31 @@ type jwtTokens struct {
 	signer *jwtingress.Signer
 }
 
-// IssueToken 签一个 JWT；租户与用户已经按 slug 校验过，签不出来时返回空串（Cookie 为空，下一个请求要求重新登录）。
+// IssueToken 签一个 JWT，每个都带随机的 jti（AUTH-02）；租户与用户已经按 slug 校验过，签不出来时返回空串
+// （Runtime 拒绝，用户看到要重新登录）。
 func (j jwtTokens) IssueToken(tenant, user string, ttl time.Duration) string {
-	token, err := j.signer.Issue(jwtingress.Claims{Tenant: tenant, User: user, TTL: ttl})
+	jti := make([]byte, 16)
+	if _, err := rand.Read(jti); err != nil {
+		return ""
+	}
+	token, err := j.signer.Issue(jwtingress.Claims{Tenant: tenant, User: user, TTL: ttl, ID: hex.EncodeToString(jti)})
 	if err != nil {
 		return ""
 	}
 	return token
 }
 
+// identity 是认证过的请求：token 是这个会话现签的 Runtime 短期令牌，session 是会话 id（退出登录用）。
 type identity struct {
 	ingress.Identity
-	token string
+	token   string
+	session string
+}
+
+// sessionIdentity 是会话对应的身份，带这个会话现签的 Runtime 短期令牌。
+func (s *Server) sessionIdentity(sid string, sess browserSession) identity {
+	id := ingress.Identity{TenantID: sess.Tenant, UserID: sess.User, ExpiresAt: s.sessions.expiresAt(sess)}
+	return identity{Identity: id, token: s.sessions.runtimeToken(sid, sess, s.ingress.IssueToken), session: sid}
 }
 
 type authedHandler func(w http.ResponseWriter, r *http.Request, id identity)
@@ -301,17 +322,40 @@ func (s *Server) authed(h authedHandler) http.HandlerFunc {
 			writeMsg(w, r, http.StatusUnauthorized, "请先登录")
 			return
 		}
-		id, err := s.ingress.Authenticate(r.Context(), ingress.Credentials{BearerToken: cookie.Value})
+		csrfOK := r.Method == http.MethodGet || r.Header.Get(csrfHeader) != ""
+		sid := cookie.Value
+		if strings.Contains(sid, ".") {
+			// 过渡（AUTH-02 之前登录的）：Cookie 里还是令牌。有效的换成会话，之后浏览器只拿会话 id。
+			old, err := s.ingress.Authenticate(r.Context(), ingress.Credentials{BearerToken: sid})
+			if err != nil {
+				s.clearCookie(w)
+				writeMsg(w, r, http.StatusUnauthorized, "登录已过期，请重新登录")
+				return
+			}
+			if !csrfOK {
+				writeMsg(w, r, http.StatusForbidden, "缺少 X-Coding-Web 头")
+				return
+			}
+			if sid, err = s.setSession(w, old.TenantID, old.UserID); err != nil {
+				writeMsg(w, r, http.StatusInternalServerError, "建会话失败：%v", err)
+				return
+			}
+		}
+		sess, ok, err := s.sessions.lookup(sid)
 		if err != nil {
+			writeMsg(w, r, http.StatusInternalServerError, "读会话失败：%v", err)
+			return
+		}
+		if !ok {
 			s.clearCookie(w)
 			writeMsg(w, r, http.StatusUnauthorized, "登录已过期，请重新登录")
 			return
 		}
-		if r.Method != http.MethodGet && r.Header.Get(csrfHeader) == "" {
+		if !csrfOK {
 			writeMsg(w, r, http.StatusForbidden, "缺少 X-Coding-Web 头")
 			return
 		}
-		h(w, r, identity{Identity: id, token: cookie.Value})
+		h(w, r, s.sessionIdentity(sid, sess))
 	}
 }
 
@@ -335,13 +379,17 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// setSession 签发 Runtime 令牌，放进 HttpOnly Cookie。
-func (s *Server) setSession(w http.ResponseWriter, tenant, user string) {
-	token := s.ingress.IssueToken(tenant, user, tokenTTL)
+// setSession 建一个浏览器会话（browser_sessions.go），会话 id 放进 HttpOnly Cookie；返回会话 id。
+func (s *Server) setSession(w http.ResponseWriter, tenant, user string) (string, error) {
+	id, err := s.sessions.create(tenant, user)
+	if err != nil {
+		return "", err
+	}
 	http.SetCookie(w, &http.Cookie{
-		Name: cookieName, Value: token, Path: "/", HttpOnly: true, Secure: s.cfg.SecureCookie,
-		SameSite: http.SameSiteLaxMode, MaxAge: int(tokenTTL.Seconds()),
+		Name: cookieName, Value: id, Path: "/", HttpOnly: true, Secure: s.cfg.SecureCookie,
+		SameSite: http.SameSiteLaxMode, MaxAge: int(s.sessions.maxAge.Seconds()),
 	})
+	return id, nil
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -373,13 +421,34 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeMsg(w, r, http.StatusInternalServerError, "写租户策略失败：%v", err)
 		return
 	}
-	s.setSession(w, req.Tenant, req.User)
+	if _, err := s.setSession(w, req.Tenant, req.User); err != nil {
+		writeMsg(w, r, http.StatusInternalServerError, "建会话失败：%v", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"tenant": req.Tenant, "user": req.User})
 }
 
-func (s *Server) handleLogout(w http.ResponseWriter, _ *http.Request) {
+// handleLogout 删掉这个会话的记录（立即生效，AUTH-02）并清掉 Cookie。
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(cookieName); err == nil && cookie.Value != "" && !strings.Contains(cookie.Value, ".") {
+		if err := s.sessions.revoke(cookie.Value); err != nil {
+			writeMsg(w, r, http.StatusInternalServerError, "删会话失败：%v", err)
+			return
+		}
+	}
 	s.clearCookie(w)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleRevokeAll 退出所有设备：删掉这个用户的全部会话（AUTH-02）。
+func (s *Server) handleRevokeAll(w http.ResponseWriter, r *http.Request, id identity) {
+	n, err := s.sessions.revokeUser(id.TenantID, id.UserID)
+	if err != nil {
+		writeMsg(w, r, http.StatusInternalServerError, "删会话失败：%v", err)
+		return
+	}
+	s.clearCookie(w)
+	writeJSON(w, http.StatusOK, map[string]int{"revoked": n})
 }
 
 func (s *Server) clearCookie(w http.ResponseWriter) {

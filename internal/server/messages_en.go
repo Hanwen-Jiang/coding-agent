@@ -13,6 +13,9 @@ var english = map[string]string{
 	"租户与用户名只能用小写字母、数字、- 与 _，以字母或数字开头":                "Tenant and username may only use lowercase letters, digits, - and _, and must start with a letter or digit",
 	"gh-、gitee-、gl-、gitea-、bb-、google- 开头的租户留给第三方登录": "Tenants starting with gh-, gitee-, gl-, gitea-, bb- or google- are reserved for third-party sign-in",
 	"写租户策略失败：%v":    "Couldn't write the tenant policy: %v",
+	"建会话失败：%v":      "Couldn't create the sign-in session: %v",
+	"读会话失败：%v":      "Couldn't read the sign-in session: %v",
+	"删会话失败：%v":      "Couldn't delete the sign-in session: %v",
 	"租户策略文件格式不对：%v": "The tenant policy file is malformed: %v",
 
 	// 第三方登录与账号

@@ -460,11 +460,19 @@ func (s *Server) currentIdentity(r *http.Request) (identity, bool) {
 	if err != nil || cookie.Value == "" {
 		return identity{}, false
 	}
-	id, err := s.ingress.Authenticate(r.Context(), ingress.Credentials{BearerToken: cookie.Value})
-	if err != nil {
+	if strings.Contains(cookie.Value, ".") {
+		// AUTH-02 之前登录的：Cookie 里还是令牌（authed 会把它换成会话）。
+		id, err := s.ingress.Authenticate(r.Context(), ingress.Credentials{BearerToken: cookie.Value})
+		if err != nil {
+			return identity{}, false
+		}
+		return identity{Identity: id, token: cookie.Value}, true
+	}
+	sess, ok, err := s.sessions.lookup(cookie.Value)
+	if err != nil || !ok {
 		return identity{}, false
 	}
-	return identity{Identity: id, token: cookie.Value}, true
+	return s.sessionIdentity(cookie.Value, sess), true
 }
 
 // handleOAuthCallback 换令牌、认人，然后登录（找到或新建账号）或把这一家连接到当前账号。
@@ -599,7 +607,10 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("OAuth %s（login）成功：%s 登录为 %s/%s", p.id, u.Login, ref.Tenant, ref.User)
-	s.setSession(w, ref.Tenant, ref.User)
+	if _, err := s.setSession(w, ref.Tenant, ref.User); err != nil {
+		fail(msg("建会话失败：%v", err))
+		return
+	}
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

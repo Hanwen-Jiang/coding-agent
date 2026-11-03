@@ -17,6 +17,8 @@
 //	CODING_JWT_ISSUER           JWT 的 iss，默认 coding-agent
 //	CODING_TOKEN_KEY            第三方平台令牌的加密密钥（32 字节的 base64）；只用 JWT 时必填。没给时沿用由 AR_DEV_SIGNING_KEY 派生的；
 //	                            两者都给时，旧数据读到时用它重新加密，之后可以去掉 AR_DEV_SIGNING_KEY
+//	CODING_SESSION_IDLE         浏览器会话的空闲有效期（AUTH-02，Go 的时长写法，默认 24h）：Cookie 里只有会话 id，
+//	CODING_SESSION_MAX_AGE      绝对有效期（默认 168h）；退出登录、“退出所有设备”立即生效，调 Runtime 时现签 5 分钟的令牌
 //	CODING_TENANT_POLICIES_FILE task-service 的开发租户策略文件；给了就在租户首次登录时把 effect 上限设为 write_reversible
 //	                            （只给本机开发；每个任务的沙箱等级经 effect_ceiling 传，集群里租户策略由 Runtime 的 Registry 定）
 //	CODING_GIT                  git 可执行文件，默认 PATH 上的 git
@@ -115,7 +117,7 @@ func main() {
 	}
 }
 
-// readKeys 读 JWT 私钥与第三方令牌的加密密钥（AUTH-01）；错误信息只提变量名，不带密钥。
+// readKeys 读 JWT 私钥、第三方令牌的加密密钥（AUTH-01）与会话的有效期（AUTH-02）；错误信息只提变量名，不带密钥。
 func readKeys(cfg *server.Config, getenv func(string) string) error {
 	if path := getenv("CODING_JWT_KEY_FILE"); path != "" {
 		raw, err := os.ReadFile(path)
@@ -127,6 +129,15 @@ func readKeys(cfg *server.Config, getenv func(string) string) error {
 			return fmt.Errorf("CODING_JWT_KEY_FILE 不是 Ed25519 私钥：%w", err)
 		}
 		cfg.JWTKey, cfg.JWTKeyID, cfg.JWTIssuer = key, getenv("CODING_JWT_KID"), getenv("CODING_JWT_ISSUER")
+	}
+	for name, target := range map[string]*time.Duration{"CODING_SESSION_IDLE": &cfg.SessionIdle, "CODING_SESSION_MAX_AGE": &cfg.SessionMaxAge} {
+		if raw := getenv(name); raw != "" {
+			d, err := time.ParseDuration(raw)
+			if err != nil || d <= 0 {
+				return fmt.Errorf("%s 要是正的时长，例如 24h", name)
+			}
+			*target = d
+		}
 	}
 	if raw := strings.TrimSpace(getenv("CODING_TOKEN_KEY")); raw != "" {
 		key, err := base64.StdEncoding.DecodeString(raw)
