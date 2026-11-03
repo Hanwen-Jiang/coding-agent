@@ -12,7 +12,7 @@
 
 ## 与 Runtime 的边界
 
-- 本仓库只是应用：只经 Task API 与 Workspace API（task-service 上同一个地址）与 Runtime 打交道，代码上只依赖 Runtime 的 `libs/go-core`（开发登录用）。不在这里绕过它们调 Runtime 的内部服务。工作区的文件一律经 Workspace API（`internal/server/workspaces.go`，`CODING_WORKSPACES=runtime`，默认）；`local`（自己在共用的工作区根里跑 git）只留给单元测试与没有 Workspace API 的 Runtime。
+- 本仓库只是应用：只经 Task API、Workspace API 与只读的 EnvironmentService（都在 task-service 上同一个地址；EnvironmentService 只给沙箱环境的记录，右栏“环境”一栏读它，看一眼不借沙箱）与 Runtime 打交道，代码上只依赖 Runtime 的 `libs/go-core`（开发登录用）。不在这里绕过它们调 Runtime 的内部服务。工作区的文件一律经 Workspace API（`internal/server/workspaces.go`，`CODING_WORKSPACES=runtime`，默认）；`local`（自己在共用的工作区根里跑 git）只留给单元测试与没有 Workspace API 的 Runtime。
 - Runtime 要改的（契约、Task API、Worker 的工具与沙箱）在 Runtime 仓库里改，按它的规则走（`/proto`、`/schemas` 走 S-01）；不要把应用的代码放回 Runtime 仓库。
 - 两个仓库并排检出：`../agent-runtime`。`go.mod` 用 replace 指过去（Runtime 的模块路径还是占位）。
 - 术语按 Runtime 设计书附录 A（Task、Session、effect 上限、Verdict……）；界面上给用户看的叫法以计划第 7 节为准（“项目”在界面上叫工作区）。
