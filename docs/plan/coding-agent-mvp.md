@@ -128,6 +128,9 @@ task-service（Task API、Session 与 Task 工作流）→ Worker（Planner、to
 - **迁移**：会话出现之前的项目（记着 Runtime Session、推送记录或任务）读到时变成这个工作区的 `main` 会话，直接用工作区自己的目录与原来的任务记录；删 `main` 会话只删记录，不删目录。
 - **接口**：工作区 `GET/POST /api/projects`、`DELETE /api/projects/{p}`（连同所有会话的副本）；会话 `GET /api/sessions`、`POST /api/projects/{p}/sessions`，其余（任务、事件、回复、取消、改动、提交、补丁、推送、回到基线、文件、提交历史、环境、改名、删除）都在 `/api/projects/{p}/sessions/{s}/…` 下；`GET /api/tasks/active` 带上工作区与会话。
 - **界面**：左栏上半部分是“新建会话、搜索（Ctrl K）、工作区、进行中”，下半部分按工作区分组列出会话（可折叠，悬停出现“+”开新会话、“…”改名或删除）。中间多了“工作区”一览（每个工作区的会话数、在跑的会话、最近的会话，新建会话、删除工作区）与“进行中”（所有会话里在跑与排队的任务，可跳转、可停止）。地址是 `#/w/<工作区>/s/<会话>`、`#/w/<工作区>/new`、`#/workspaces`、`#/activity`。
+- **Workspace 界面**（2026-11-03，Runtime 计划 P1-C）：抽屉里的改动、文件、提交历史之外，会话菜单“复制会话”（Workspace API 的 copy），
+  右栏“拉取 <基线分支>”（sync，只给还没推送到自己分支、干净、没有自己提交的会话），文件树标出改动并可跳到 diff，提交历史标出会话起点与
+  本会话的提交、可以多取（最多 200 个）。
 - **还没做**：会话之间合并改动（现在靠各自推 PR，或在基线仓库外手动合并）；归档会话；清理长期不用的副本。
 
 ## 9. 多平台登录与账号关联
@@ -148,7 +151,8 @@ task-service（Task API、Session 与 Task 工作流）→ Worker（Planner、to
 2026-10-26 用户定：Coding Agent 不放在 Runtime 仓库里，单独一个仓库。Runtime 仓库（`agent-runtime`）只放通用的部分；本仓库是建在它上面的一个应用。
 
 - **代码依赖**：只用 Runtime 的 `libs/go-core`（开发登录用的 `dev/localingress` 与 `providers/ingress`）。两个仓库并排检出（`../agent-runtime`），`go.mod` 的 replace 指过去；Runtime 的模块路径还是占位，定下真实地址后改成正常的版本依赖。
-- **运行时接口**：Task API（提交、查询、取消、信号、SSE 事件）与 Workspace API（2026-10-28 起：建工作区（克隆、复制、示例文件）、文件树、读文件、提交记录、改动、提交、丢弃改动、推送、与远端同步、删除；`internal/server/workspaces.go`），两者在 task-service 的同一个地址。本机开发时另外共用两样东西，都由 Runtime 的 `scripts/dev_stack.py status --json` 报出来：开发租户策略文件（只在租户首次登录时把上限设为 write_reversible）、开发签名密钥所在的文件（coding-web 签发 Runtime 令牌）。`CODING_WORKSPACES=local` 时退回旧做法（coding-web 自己在共用的工作区根里跑 git），只留给单元测试与没有 Workspace API 的 Runtime。
+- **运行时接口**：Task API（提交、查询、取消、信号、SSE 事件）、只读的 EnvironmentService（右栏“环境”的沙箱环境记录，见
+  [cloud-environments-config.md](cloud-environments-config.md)）与 Workspace API（2026-10-28 起：建工作区（克隆、复制、示例文件）、文件树、读文件、提交记录、改动、提交、丢弃改动、推送、与远端同步、删除；`internal/server/workspaces.go`），两者在 task-service 的同一个地址。本机开发时另外共用两样东西，都由 Runtime 的 `scripts/dev_stack.py status --json` 报出来：开发租户策略文件（只在租户首次登录时把上限设为 write_reversible）、开发签名密钥所在的文件（coding-web 签发 Runtime 令牌）。`CODING_WORKSPACES=local` 时退回旧做法（coding-web 自己在共用的工作区根里跑 git），只留给单元测试与没有 Workspace API 的 Runtime。
 - **沙箱等级**（2026-10-26 改）：每个任务经 `SubmitTaskRequest.effect_ceiling` 传给 Runtime（Runtime 的 D-08），只能比租户策略低，高了 Task API 拒绝并说明原因；不再在提交前改写租户策略文件，也不再按租户串行提交。
 - **上云**：镜像 `deploy/Dockerfile`（构建上下文是两个仓库的上一级目录；打 `v*` 标签时 `.github/workflows/image.yml` 推到 GHCR），清单 `deploy/k8s/coding-web.yaml`（装在 Runtime 的 agent-runtime 命名空间，经 Workspace API、不挂工作区卷，只开第三方登录）。
 - **要去掉的耦合**（与 Runtime 仓库的 `docs/plan/cloud-deploy.md` 对应）：
