@@ -97,6 +97,16 @@ func TestEnvironmentConfigurationInBrowser(t *testing.T) {
 	if bound["configured one"] == "" || bound["configured one"] != bound["configured two"] || bound["deployment default"] != "" {
 		t.Fatalf("repo-independent/default bindings = %#v", bound)
 	}
+	// 删除时密钥立即删掉；会话保留创建时的快照。
+	tomb, found, err := app.store.Environment("acme", bound["configured one"])
+	if err != nil || !found || tomb.DeletedAt == nil || len(tomb.Secrets) != 0 {
+		t.Fatalf("tombstone keeps no secrets: %#v %v", tomb, err)
+	}
+	for _, s := range sessions {
+		if snap, ok, _ := app.store.Snapshot("acme", s.WorkspaceID); s.EnvironmentID != "" && (!ok || snap.EnvironmentID != s.EnvironmentID || snap.StartCommand != "python -m app") {
+			t.Fatalf("session %q keeps its snapshot: %#v %v", s.Title, snap, ok)
+		}
+	}
 }
 
 func environmentTestBrowser() string {
@@ -161,11 +171,26 @@ try {
   card.querySelector('[data-environment-edit]').click();
   check(field('env').value === 'MODE=dev\nPORT=8080', 'edit did not restore ordinary .env');
   field('description', 'Updated shared tooling');
+  // .env 的密钥：只写，存在服务端；之后只看得到名字。
+  $('.environment-editor [data-secret-add]').click();
+  const secretRow = await wait(() => $('.environment-editor [data-secret-row]:last-child'), 'secret row');
+  const secretName = secretRow.querySelector('[data-secret-name]');
+  const secretValue = secretRow.querySelector('[data-secret-value]');
+  check(secretValue.type === 'password', 'secret value is a password field');
+  secretName.value = 'OPENAI_API_KEY'; secretName.dispatchEvent(new Event('input', {bubbles:true}));
+  secretValue.value = 'sk-leaky-value'; secretValue.dispatchEvent(new Event('input', {bubbles:true}));
   save();
   await wait(() => !$('.environment-editor') && document.body.innerText.includes('Updated shared tooling'), 'edit save');
   const stored = await (await fetch('/api/environments/' + id)).json();
   check(stored.privacy === 'only_me' && stored.start_command === 'python -m app', 'configuration lost fields');
-  check(Object.values(localStorage).every(v => !String(v).includes('MODE=dev')), '.env leaked into localStorage');
+  check(JSON.stringify(stored.secrets) === JSON.stringify([{name: 'OPENAI_API_KEY', set: true}]), 'secret names only: ' + JSON.stringify(stored.secrets));
+  check(Object.values(localStorage).every(v => !String(v).includes('MODE=dev') && !String(v).includes('sk-leaky')), '.env leaked into localStorage');
+  check(!document.body.innerHTML.includes('sk-leaky'), 'secret value left in the page');
+  document.querySelector('[data-environment-id="' + id + '"] [data-environment-edit]').click();
+  const kept = await wait(() => $('.environment-editor [data-secret-row] [data-secret-name]'), 'kept secret');
+  check(kept.value === 'OPENAI_API_KEY' && $('.environment-editor [data-secret-value]').value === '', 'secret shown by name only');
+  $('.environment-editor [data-editor-cancel]').click();
+  await wait(() => !$('.environment-editor'), 'editor cancelled');
   for (let i=0; i<3; i++) {
     location.hash = '#/w/' + projects[i % 2] + '/new';
     const select = await wait(() => $('[data-environment-select]:not(:disabled)'), 'draft selector');
@@ -183,10 +208,19 @@ try {
   }
   location.hash = '#/environments';
   await wait(() => $('[data-environment-id="' + id + '"]'), 'list after sessions');
-  window.confirm = () => true;
+  // 删除时说清还有几个会话在用、密钥立即删除（2026-11-03 人定）。
+  let asked = '';
+  window.confirm = (text) => { asked = text; return true; };
   $('[data-environment-delete]').click();
   await wait(() => !$('[data-environment-id]'), 'delete');
+  check(asked.includes('2 sessions') && asked.includes('immediately'), 'delete confirmation: ' + asked);
   check((await fetch('/api/environments/' + id)).status === 404, 'deleted environment still available');
+  // 用它的会话：右栏说明这个环境已删除、用的是创建时的设置、密钥已删除。
+  const used = (await (await fetch('/api/sessions')).json()).find((x) => x.title === 'configured one');
+  location.hash = '#/w/' + used.project_id + '/s/' + used.id;
+  const gone = await wait(() => $('[data-env-config-deleted]'), 'deleted environment note');
+  check(gone.innerText.includes('creation-time settings') && gone.innerText.includes('secrets'), 'deleted note: ' + gone.innerText);
+  check($('[data-environment-select]').disabled, 'still bound');
   await fetch('/__environment_result', {method:'POST',body:'ok'});
 } catch (err) {
   await fetch('/__environment_result', {method:'POST',body:String(err.stack || err)});

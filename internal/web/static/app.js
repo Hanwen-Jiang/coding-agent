@@ -1266,7 +1266,8 @@ function renderEnvironments() {
         h("span", { class: "chip" + (n.mode === "open" ? " warn" : "") }, icon((NETWORK_MODES.find((m) => m.id === n.mode) || NETWORK_MODES[0]).icon, "xs"), networkLabel(env)),
         env.setup_script ? h("span", { class: "chip" }, icon("terminal", "xs"), t("envcfg.setupChip")) : null,
         env.start_command ? h("span", { class: "chip" }, icon("play", "xs"), t("envcfg.startChip")) : null,
-        envVarCount(env) ? h("span", { class: "chip mono" }, t("envcfg.vars", { n: envVarCount(env) })) : null),
+        envVarCount(env) ? h("span", { class: "chip mono" }, t("envcfg.vars", { n: envVarCount(env) })) : null,
+        (env.secrets || []).length ? h("span", { class: "chip" }, icon("shield", "xs"), t("envcfg.secretsCount", { n: env.secrets.length })) : null),
       h("div", { class: "stats" }, h("span", { class: "muted" }, used ? t("envcfg.used", { n: used }) : t("envcfg.unused"))),
       h("div", { class: "actions" },
         h("button", { class: "btn sm", "data-environment-edit": "", onclick: () => openEnvironmentEditor(env) }, icon("edit", "sm"), t("envcfg.edit")),
@@ -1333,10 +1334,30 @@ function openEnvironmentEditor(env) {
     h("div", { class: "env-label" }, h("label", { class: "lbl grow" }, label), name ? counters[name] : null),
     el, hint ? h("div", { class: "muted small env-hint" }, hint) : null);
   const save = h("button", { class: "btn primary", type: "submit" }, t("envcfg.save"));
-  const cancel = h("button", { class: "btn ghost", type: "button" }, t("common.cancel"));
+  const cancel = h("button", { class: "btn ghost", type: "button", "data-editor-cancel": "" }, t("common.cancel"));
+  // 密钥：只写。已有的只显示名字（值留空就保留原来的），新加的填名字与值；保存后值不再出现在页面上。
+  const secretList = h("div", { class: "env-secrets" });
+  const secretRows = [];
+  const addSecret = (name = "", existing = false) => {
+    const nameEl = h("input", { class: "field mono", "data-secret-name": "", value: name, placeholder: "API_KEY", autocomplete: "off", spellcheck: "false", readonly: existing || null });
+    const valueEl = h("input", { class: "field mono", type: "password", "data-secret-value": "", autocomplete: "new-password",
+      placeholder: existing ? t("envcfg.secretKeep") : t("envcfg.secretValuePh") });
+    const item = { nameEl, valueEl };
+    item.row = h("div", { class: "env-secret-row", "data-secret-row": "" }, nameEl, valueEl,
+      h("button", { type: "button", class: "btn ghost xs icon-only", title: t("envcfg.secretRemove"), onclick: () => { item.row.remove(); secretRows.splice(secretRows.indexOf(item), 1); } }, icon("x", "xs")));
+    secretRows.push(item);
+    secretList.append(item.row);
+    return item;
+  };
+  for (const sec of (env && env.secrets) || []) addSecret(sec.name, true);
+  const secretsBlock = h("div", {},
+    h("div", { class: "env-label" }, h("label", { class: "lbl grow" }, t("envcfg.secrets")),
+      h("button", { type: "button", class: "btn ghost xs", "data-secret-add": "", onclick: () => addSecret().nameEl.focus() }, icon("plus", "xs"), t("envcfg.secretAdd"))),
+    secretList,
+    h("div", { class: "muted small env-hint" }, t("envcfg.secretsHint")));
   const form = h("form", { novalidate: true },
     h("div", { class: "d-head" }, h("h2", {}, env ? t("envcfg.editTitle") : t("envcfg.newTitle")),
-      h("div", { class: "muted small" }, t("envcfg.pendingNote"))),
+      h("div", { class: "muted small" }, t("envcfg.editorNote"))),
     h("div", { class: "d-body" },
       h("div", { class: "row env-row" },
         h("div", { class: "grow" }, block(t("envcfg.name"), null, fields.name, "name")),
@@ -1345,6 +1366,7 @@ function openEnvironmentEditor(env) {
       block(t("envcfg.setup"), t("envcfg.setupHint"), fields.setup_script, "setup_script"),
       block(t("envcfg.start"), t("envcfg.startHint"), fields.start_command, "start_command"),
       block(t("envcfg.env"), t("envcfg.envHint"), fields.env, "env"),
+      secretsBlock,
       h("div", { class: "col env-network" }, h("label", { class: "lbl" }, t("envcfg.network")), seg, netHint, hostsBox)),
     // 错误放在按钮旁：表单长，放在最下面时常常看不到。
     h("div", { class: "d-foot" }, h("div", { class: "grow env-err" }, err), cancel, save),
@@ -1377,6 +1399,8 @@ function openEnvironmentEditor(env) {
       name: fields.name.value, description: fields.description.value, privacy: "only_me",
       setup_script: fields.setup_script.value, start_command: fields.start_command.value, env: fields.env.value,
       network: { mode, allowed_hosts: hosts },
+      // 空着的新行不算；已有的值留空表示保留。
+      secrets: secretRows.map((r) => ({ name: r.nameEl.value.trim(), value: r.valueEl.value })).filter((x) => x.name || x.value),
     };
     save.disabled = true;
     save.textContent = t("envcfg.saving");
@@ -1406,6 +1430,7 @@ function openEnvironmentEditor(env) {
 
 async function deleteEnvironment(env) {
   const n = environmentSessions(env).length;
+  // 还有会话在用时说清楚：它们保留创建时的设置，但密钥立即删除（2026-11-03 人定）。
   if (!confirm(t(n ? "envcfg.deleteConfirmUsed" : "envcfg.deleteConfirm", { name: env.name, n }))) return;
   try {
     await api("DELETE", `/api/environments/${env.id}`);
@@ -2781,7 +2806,8 @@ function envConfigValue(cfg) {
   const name = (env && env.name) || cfg.name || t("envcfg.missing");
   return [
     env ? h("button", { class: "link-btn", onclick: () => openEnvironmentEditor(env) }, name) : h("span", {}, name),
-    cfg.deleted ? h("span", { class: "muted small" }, t("env.configDeleted")) : null,
+    cfg.deleted ? h("div", { class: "muted small env-note", "data-env-config-deleted": "" }, t("env.configDeletedNote")) : null,
+    !cfg.deleted && cfg.changed_since ? h("div", { class: "muted small env-note" }, t("env.configChanged")) : null,
     cfg.handoff === "pending" ? h("span", { class: "chip warn", title: t("envcfg.pendingNote") }, t("env.handoffPending")) : null,
   ];
 }
