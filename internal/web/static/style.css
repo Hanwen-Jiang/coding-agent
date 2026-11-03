@@ -828,6 +828,8 @@ dialog.environment-editor .d-head .muted { margin-top: 6px; }
 .env-bytes { font-size: 11.5px; color: var(--faint); white-space: nowrap; }
 .env-bytes.over { color: var(--err); }
 .env-hint { margin-top: 4px; }
+.environment-editor .d-foot { align-items: center; }
+.env-err { line-height: 1.4; }
 .env-row { align-items: flex-start; gap: 12px; }
 .env-network { gap: 8px; }
 textarea.field.mono { font-family: var(--font-mono); font-size: 12.5px; }

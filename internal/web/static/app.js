@@ -1333,9 +1333,9 @@ function openEnvironmentEditor(env) {
       block(t("envcfg.setup"), t("envcfg.setupHint"), fields.setup_script, "setup_script"),
       block(t("envcfg.start"), t("envcfg.startHint"), fields.start_command, "start_command"),
       block(t("envcfg.env"), t("envcfg.envHint"), fields.env, "env"),
-      h("div", { class: "col env-network" }, h("label", { class: "lbl" }, t("envcfg.network")), seg, netHint, hostsBox),
-      err),
-    h("div", { class: "d-foot" }, cancel, save),
+      h("div", { class: "col env-network" }, h("label", { class: "lbl" }, t("envcfg.network")), seg, netHint, hostsBox)),
+    // 错误放在按钮旁：表单长，放在最下面时常常看不到。
+    h("div", { class: "d-foot" }, h("div", { class: "grow env-err" }, err), cancel, save),
   );
   const dialog = h("dialog", { class: "environment-editor" }, form);
   // 本地先挡字节上限（与服务端同一个数）；挡下时指到那一栏。
@@ -2786,7 +2786,7 @@ function runtimeEnvBlock(re) {
     head,
     h("div", { class: "env-record", "data-env-status": "ok", "data-env-ref": cur.env_ref },
       kv([
-        [t("env.runtimeEnv"), [envStateChip(cur), h("span", { class: "mono small muted", title: cur.env_ref }, cur.env_ref)]],
+        [t("env.state"), [envStateChip(cur), h("span", { class: "mono small muted", title: cur.env_ref }, cur.env_ref)]],
         [t("env.reused"), cur.reused ? t("env.reusedYes", { at: fmtTime(cur.reused_at) || "—" }) : t("env.reusedNo")],
         [t("env.healthAt"), when(cur.health_confirmed_at)],
         [t("env.expires"), when(cur.expires_at)],
