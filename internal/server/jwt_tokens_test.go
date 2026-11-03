@@ -2,8 +2,9 @@ package server
 
 // AUTH-01（Runtime 仓库的 docs/plan/auth-tokens-2026-11-03.md 第 2 节）的 coding-agent 一侧：
 //
-//  1. 配了 Ed25519 私钥（JWTKey、JWTKeyID）时，登录放进 Cookie、转给 Task API 的都是 JWT：Runtime 只凭 coding-agent 的公钥
+//  1. 配了 Ed25519 私钥（JWTKey、JWTKeyID）时，转给 Task API 的是 JWT：Runtime 只凭 coding-agent 的公钥
 //     （jwtingress，iss = JWTIssuer、aud = agent-runtime）就验得过；开发令牌（HMAC）的 Cookie 不再认。
+//     （AUTH-02 之后 Cookie 里是会话 id，见 browser_sessions_test.go。）
 //  2. 第三方平台令牌的加密密钥独立（TokenKey），不再从签名密钥派生：换签名密钥不影响，签名密钥泄露也解不开。
 //  3. 迁移：旧数据（用签名密钥派生的密钥加密的）读到时用旧密钥解开、用新密钥重新加密写回；之后去掉签名密钥照样能读。
 //  4. 配置：签名密钥与 JWT 私钥至少给一个；用 JWT 而没有签名密钥时必须给 TokenKey；JWT 私钥要配 kid；TokenKey 是 32 字节。
@@ -62,21 +63,8 @@ func TestJWTModeSignsCookiesAndRuntimeCallsWithEd25519(t *testing.T) {
 	if code, _, raw := c.do("POST", "/api/login", map[string]string{"tenant": "acme", "user": "alice"}); code != http.StatusOK {
 		t.Fatalf("登录失败：%d %s", code, raw)
 	}
-	u, _ := url.Parse(ts.URL)
-	var cookie string
-	for _, ck := range c.http.Jar.Cookies(u) {
-		if ck.Name == cookieName {
-			cookie = ck.Value
-		}
-	}
+	// AUTH-02 之后 Cookie 里是会话 id（browser_sessions_test.go），这里只看转给 Runtime 的令牌。
 	runtime := runtimeSide(t, key, "k1")
-	id, err := runtime.Authenticate(context.Background(), ingress.Credentials{BearerToken: cookie})
-	if err != nil || id.TenantID != "acme" || id.UserID != "alice" {
-		t.Fatalf("Cookie 里是 Runtime 只凭公钥就验得过的 JWT：%+v %v", id, err)
-	}
-	if strings.Count(cookie, ".") != 2 {
-		t.Fatalf("Cookie 是 JWT 的紧凑格式：%q", cookie)
-	}
 
 	pid := sampleProject(t, c)
 	code, sess, raw := c.do("POST", "/api/projects/"+pid+"/sessions", map[string]string{"title": "jwt"})
@@ -91,8 +79,9 @@ func TestJWTModeSignsCookiesAndRuntimeCallsWithEd25519(t *testing.T) {
 		t.Fatal("要把令牌转给 Task API")
 	}
 	forwarded := strings.TrimPrefix(fake.tokens[0], "Bearer ")
-	if _, err := runtime.Authenticate(context.Background(), ingress.Credentials{BearerToken: forwarded}); err != nil {
-		t.Fatalf("转给 Task API 的是 JWT：%v", err)
+	id, err := runtime.Authenticate(context.Background(), ingress.Credentials{BearerToken: forwarded})
+	if err != nil || id.TenantID != "acme" || id.UserID != "alice" || strings.Count(forwarded, ".") != 2 {
+		t.Fatalf("转给 Task API 的是 Runtime 只凭公钥就验得过的 JWT：%+v %v", id, err)
 	}
 }
 
