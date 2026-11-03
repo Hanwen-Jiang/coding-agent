@@ -20,6 +20,11 @@ var english = map[string]string{
 	"先登录，再连接 %s":                  "Sign in first, then connect %s",
 	"登录状态不匹配，请重新登录":               "Sign-in state doesn't match. Please sign in again.",
 	"这个 %s 账号还没有开通":               "This %s account doesn't have access yet",
+	"这个 %s 账号已停用":                 "This %s account has been blocked",
+	"读不到这个 %s 账号的注册时间，暂时不能用它注册":   "Couldn't read when this %s account was created, so it can't be used to sign up yet",
+	"这个 %s 账号注册还不满 %d 天，暂时不能用它注册": "This %s account is less than %d days old, so it can't be used to sign up yet",
+	"这个 %s 账号没有验证过的邮箱（或没有授权读取邮箱）：在 %s 上验证邮箱后再来":      "This %s account has no verified email (or didn't allow reading it). Verify an email on %s, then try again",
+	"%s 查不了账号的注册时间与邮箱，不能用它注册新账号：先用别的方式登录，再在账号页连接 %s": "%s can't tell us the account's age or email, so it can't be used to sign up. Sign in another way, then connect %s on the account page",
 	"%s 没有授权：%s":                  "%s didn't grant access: %s",
 	"%s 登录没有完成：%v":                "Signing in with %s didn't complete: %v",
 	"读不到 %s 账号：%v":                "Couldn't read your %s account: %v",
@@ -99,7 +104,9 @@ var english = map[string]string{
 	"工作区已经存在": "Workspace files already exist",
 
 	// 任务
-	"任务不存在": "Task not found",
+	"任务不存在":      "Task not found",
+	"文件已过期":      "The file has expired",
+	"暂时下载不了这个文件": "Can't download this file right now",
 	"任务描述不能为空，也不能超过 20000 个字":         "The task description can't be empty or longer than 20,000 characters",
 	"沙箱等级只能是 read 或 write_reversible": "The sandbox level must be read or write_reversible",
 	"模型倾向只能是 economy、balanced 或 best": "The model preference must be economy, balanced or best",

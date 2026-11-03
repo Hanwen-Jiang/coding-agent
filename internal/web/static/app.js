@@ -67,6 +67,7 @@ const state = {
   tasks: [], // 旧 → 新
   runs: new Map(), // taskId → { events, done, es, promise }
   detail: new Map(), // taskId → { state, usage, cost, roundSeq }
+  artifacts: new Map(), // taskId → { list, failed }：任务交付的文件（N-18），结束后取一次
   open: new Set(), // 展开的工作过程
   closed: new Set(), // 用户手动收起的
   replied: new Set(),
@@ -786,6 +787,7 @@ function resetSessionState() {
   state.tasks = [];
   state.runs = new Map();
   state.detail = new Map();
+  state.artifacts = new Map();
   state.guidance = new Map();
   state.queuedEdit = null;
   state.changes = null;
@@ -1963,13 +1965,46 @@ function taskCost(t) {
   return d && d.cost !== undefined ? d.cost : t.cost_usd || 0;
 }
 
+// 任务交付的文件（N-18）：结束后取一次（同一个任务不重复取），取到了再重画；过期的标出来、不给链接。
+function loadArtifacts(task) {
+  const base = sbase();
+  if (!base || state.artifacts.has(task.id)) return;
+  state.artifacts.set(task.id, { list: null });
+  api("GET", base + "/tasks/" + task.id + "/artifacts")
+    .then((d) => state.artifacts.set(task.id, { list: (d && d.artifacts) || [] }))
+    .catch(() => state.artifacts.set(task.id, { failed: true }))
+    .finally(() => renderThread());
+}
+
+function artifactItems(task) {
+  const a = state.artifacts.get(task.id);
+  if (!a) {
+    loadArtifacts(task);
+    return null;
+  }
+  if (a.failed) return [h("div", { class: "muted" }, t("artifacts.loadFailed"))];
+  if (!a.list || !a.list.length) return null;
+  return [
+    h("div", { class: "sp-sub" }, t("artifacts.title")),
+    a.list.map((f) => h("div", { class: "deliverable" },
+      f.url
+        ? h("a", { href: f.url, download: f.name, title: t("artifacts.download") }, f.name)
+        : h("span", { class: "deliverable-expired", title: t("artifacts.expired") }, f.name),
+      h("span", { class: "muted" }, f.url ? fmtSize(f.size_bytes || 0) : t("artifacts.expired")),
+    )),
+  ];
+}
+
 function result(task, r) {
   const text = deliverableText(r);
   const ok = r.status === "TASK_STATUS_DONE";
   const cost = taskCost(task);
   const rounds = r.rounds || task.rounds;
   const n = state.changes ? state.changes.files.length : 0;
+  // 交付区先列文件，再给文字（N-18）。
+  const files = artifactItems(task);
   return h("div", { class: "col" },
+    files ? h("div", { class: "deliverables" }, files) : null,
     text ? h("div", { class: "answer" }, md(text)) : null,
     r.error ? h("div", { class: "error-box" }, typeof r.error === "string" ? r.error : pick(r.error, "message") || JSON.stringify(r.error)) : null,
     h("div", { class: "result-foot" },

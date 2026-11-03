@@ -18,6 +18,9 @@
 //	CODING_PUBLIC_URL           对外的地址（拼 OAuth 回调 <地址>/api/auth/<平台>/callback），例如 http://127.0.0.1:8095
 //	CODING_ALLOWED_LOGINS       逗号分隔的 <平台>:<登录名>（例如 github:octo-cat）：给了就只放行这些账号（与关联到它们的别家账号）；
 //	                            不给时谁都能用第三方登录
+//	CODING_SIGNUP_MIN_ACCOUNT_AGE_DAYS    开放注册时新注册的平台账号至少注册了多少天（默认 30，0 不查；GitHub、GitLab、Gitee、Gitea）
+//	CODING_SIGNUP_REQUIRE_VERIFIED_EMAIL  新注册要有验证过的邮箱（默认 true；GitHub 读 /user/emails，Google 看 email_verified）
+//	CODING_BLOCKED_LOGINS       逗号分隔的 <平台>:<登录名>：封禁，登录与连接都拒绝（已有的账号也一样）
 //
 // 第三方登录（<平台> 是 GITHUB、GITEE、GITLAB、GITEA、BITBUCKET、GOOGLE；Client ID 与 Secret 都给了才打开这一家）：
 //
@@ -25,7 +28,7 @@
 //	CODING_<平台>_CLIENT_SECRET  OAuth 应用的 Client Secret（不写进日志）
 //	CODING_<平台>_URL            网页地址：自建的 GitLab、Gitea 填它的地址；GitHub Enterprise 也填（默认各家公共站，Gitea 默认 Codeberg）
 //	CODING_<平台>_API_URL        API 地址，不填按网页地址推出
-//	CODING_<平台>_SCOPES         OAuth 的 scope，不填用各家默认（GitHub "repo read:user"，GitLab "api read_user"…）
+//	CODING_<平台>_SCOPES         OAuth 的 scope，不填用各家默认（GitHub "repo read:user user:email"，GitLab "api read_user"…）
 //	CODING_<平台>_NAME           显示名，例如自建 Gitea 叫 "公司 Git"
 //	CODING_SANDBOX              Worker 的 shell_run 在哪里跑（docker 或 host），只用来在界面上说明环境
 //	CODING_SANDBOX_IMAGE        docker 时 shell_run 用的镜像（与 Worker 的 AR_TOOL_SHELL_IMAGE 相同）
@@ -64,6 +67,11 @@ func main() {
 		Sandbox:      os.Getenv("CODING_SANDBOX"),
 		SandboxImage: os.Getenv("CODING_SANDBOX_IMAGE"),
 	}
+	signup, err := server.SignupRulesFromEnv(os.Getenv)
+	if err != nil {
+		log.Fatal(err)
+	}
+	cfg.Signup = signup
 	for _, id := range []string{"github", "gitee", "gitlab", "gitea", "bitbucket", "google"} {
 		env := func(name string) string { return os.Getenv("CODING_" + strings.ToUpper(id) + "_" + name) }
 		if c := (server.ProviderConfig{

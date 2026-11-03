@@ -109,6 +109,16 @@ func (a *TaskAPI) call(ctx context.Context, client *http.Client, path, token str
 	return json.Unmarshal(data, resp)
 }
 
+// Artifact 下载 Task 交付的一个文件（GET /v1/tasks/{task}/artifacts/{artifact}，N-18）；调用方负责关闭 Body。
+func (a *TaskAPI) Artifact(ctx context.Context, token, taskID, artifactID string) (*http.Response, error) {
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, a.base+"/v1/tasks/"+taskID+"/artifacts/"+artifactID, nil)
+	if err != nil {
+		return nil, err
+	}
+	r.Header.Set("Authorization", "Bearer "+token)
+	return a.stream.Do(r)
+}
+
 // Events 打开一个 Task 的 SSE 流；调用方负责关闭 Body。
 func (a *TaskAPI) Events(ctx context.Context, token, taskID, lastEventID string) (*http.Response, error) {
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, a.base+"/v1/tasks/"+taskID+"/events", nil)

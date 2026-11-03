@@ -8,7 +8,7 @@ package server
 //     另外 nosniff、CSP sandbox、no-store（不用网页的 CSP）；Task API 的 404、410 原样，5xx 换成 502，错误里不带上游的正文。
 //   - 任务要属于这个会话、会话要属于这个租户，否则 404，而且不去问 Task API；文件编号格式不对也一样。
 //
-// 实现之前（路由还没有，列文件是 404）这些测试跳过。
+// 实现在 artifacts.go。
 
 import (
 	"encoding/json"
@@ -99,15 +99,6 @@ func newArtifactSession(t *testing.T) (*httptest.Server, *client, string, *artif
 	api, _ := newSession(t, c, cfg, "acme", pid)
 	if code, task, raw := c.do("POST", api+"/tasks", map[string]string{"message": "做一份季度报告"}); code != http.StatusCreated || task["id"] != "tsk_1" {
 		t.Fatalf("提交任务失败：%d %s", code, raw)
-	}
-	// 实现之前没有这个路由：任务明明在，列文件却是 404。实现之后去掉这段跳过。
-	res, err := c.http.Get(ts.URL + api + "/tasks/tsk_1/artifacts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode == http.StatusNotFound {
-		t.Skip("交付区的接口还没写：先审验收测试（Runtime 的 docs/plan/n18-file-delivery-f3.md）")
 	}
 	return ts, c, api, up
 }

@@ -450,9 +450,20 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := identityKey(p.id, u.ID)
+	if s.blockedLogin(p.id, u.Login) {
+		fail(msg("这个 %s 账号已停用", p.Name))
+		return
+	}
 	if mode == "login" && !s.loginAllowed(p.id, u.Login, key) {
 		fail(msg("这个 %s 账号还没有开通", p.Name))
 		return
+	}
+	// 新注册（还没关联到本地账号、也不在名单里）要满足开放注册的规则（signup.go）。
+	if _, known := s.lookupIdentity(key); mode == "login" && !known && !s.allowed[p.id+":"+strings.ToLower(u.Login)] {
+		if why := s.signupCheck(ctx, p, t.Access, u); why != nil {
+			fail(why)
+			return
+		}
 	}
 	now := time.Now().UTC()
 	conn := Connection{Provider: p.id, RemoteID: u.ID, Login: u.Login, Name: u.Name, AvatarURL: u.AvatarURL, Email: u.Email, ConnectedAt: now}

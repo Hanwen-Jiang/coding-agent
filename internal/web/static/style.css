@@ -710,6 +710,9 @@ textarea.field { height: auto; padding: 8px 11px; resize: vertical; line-height:
 .out-round:last-child { border-bottom: 0; }
 .out-round-h { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); }
 .out-file { padding: 2px 0; }
+.deliverables { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.deliverable { display: flex; gap: 8px; align-items: baseline; }
+.deliverable-expired { color: var(--muted); text-decoration: line-through; }
 .out-path { display: block; max-width: 100%; padding: 0; border: 0; background: none; color: var(--accent); text-align: left; cursor: pointer; word-break: break-all; }
 .out-path:hover { text-decoration: underline; }
 .out-why { line-height: 1.4; }

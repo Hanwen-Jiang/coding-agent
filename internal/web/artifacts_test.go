@@ -2,7 +2,7 @@ package web
 
 // Runtime 的 docs/plan/n18-file-delivery-f3.md 第 2 节第 4 条（F3，网页一侧）：任务结束后交付区先列文件，再给文字（N-18 原话）。
 // 静态检查：app.js 取 <会话>/tasks/{task}/artifacts，result() 里文件块排在答案前面，过期的文件不给链接；新的文字两种语言都有。
-// 实现之前（app.js 里还没有 /artifacts）这些测试跳过。
+// 实现在 app.js 的 result()、artifactItems() 与 i18n.js。
 
 import (
 	"regexp"
@@ -13,9 +13,6 @@ import (
 func appWithArtifacts(t *testing.T) string {
 	t.Helper()
 	_, app := getFrom(t, Handler(), "/assets/app.js")
-	if !strings.Contains(string(app), "/artifacts") {
-		t.Skip("交付区还没写：先审验收测试（Runtime 的 docs/plan/n18-file-delivery-f3.md）")
-	}
 	return string(app)
 }
 

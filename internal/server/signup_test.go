@@ -10,7 +10,7 @@ package server
 //   - 封禁名单 CODING_BLOCKED_LOGINS（<平台>:<登录名>，不分大小写）：登录与连接都拒绝，已有的账号也一样。
 //   - 被拒时不建账号，错误说明原因。
 //
-// 实现之前 SignupRulesFromEnv 报 errSignupPending，这些测试跳过。
+// 实现在 signup.go。
 
 import (
 	"errors"
@@ -58,16 +58,8 @@ var (
 	strict     = SignupRules{MinAccountAge: 30 * 24 * time.Hour, RequireVerifiedEmail: true}
 )
 
-func skipUntilSignup(t *testing.T) {
-	t.Helper()
-	if _, err := SignupRulesFromEnv(func(string) string { return "" }); errors.Is(err, errSignupPending) {
-		t.Skip("F4 的注册防滥用还没写：先审验收测试（Runtime 的 docs/plan/open-signup.md 第 2 节第 4 条）")
-	}
-}
-
 func newSignupServer(t *testing.T, rules SignupRules, edit func(*Config)) (*httptest.Server, Config, *Server) {
 	t.Helper()
-	skipUntilSignup(t)
 	ts, _, cfg, srv := newServerWith(t, func(c *Config) {
 		c.Providers = map[string]ProviderConfig{}
 		for _, id := range []string{"github", "gitlab", "gitee", "gitea", "google", "bitbucket"} {
@@ -98,8 +90,7 @@ func noAccount(t *testing.T, cfg Config, tenant string) {
 }
 
 func TestSignupRulesFromEnv(t *testing.T) {
-	skipUntilSignup(t)
-	env :=func(kv map[string]string) func(string) string { return func(k string) string { return kv[k] } }
+	env := func(kv map[string]string) func(string) string { return func(k string) string { return kv[k] } }
 	rules, err := SignupRulesFromEnv(env(nil))
 	if err != nil || rules.MinAccountAge != 30*24*time.Hour || !rules.RequireVerifiedEmail || len(rules.Blocked) != 0 {
 		t.Fatalf("默认：满 30 天、要验证过的邮箱、没有封禁：%+v %v", rules, err)

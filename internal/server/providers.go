@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // 各家 Git 平台不同的地方：账号信息、仓库列表、仓库地址的形状、推送时的 Basic 认证、开 PR/MR。
@@ -18,6 +19,18 @@ import (
 // remoteUser 是平台上的账号。ID 是平台给的不变的编号（登录名会改），用来认出同一个人。
 type remoteUser struct {
 	ID, Login, Name, AvatarURL, Email string
+	// CreatedAt 是平台账号的注册时间（GitHub、Gitee、Gitea、GitLab 给；读不到时为零值），开放注册的规则看它（signup.go）。
+	CreatedAt time.Time
+}
+
+// accountTime 解析平台给的注册时间；格式不对时为零值。
+func accountTime(values ...string) time.Time {
+	for _, v := range values {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 func (p *Provider) user(ctx context.Context, token string) (remoteUser, error) {
@@ -30,6 +43,8 @@ func (p *Provider) user(ctx context.Context, token string) (remoteUser, error) {
 			FullName  string      `json:"full_name"`
 			AvatarURL string      `json:"avatar_url"`
 			Email     string      `json:"email"`
+			CreatedAt string      `json:"created_at"`
+			Created   string      `json:"created"` // Gitea
 		}
 		if err := p.api(ctx, token, http.MethodGet, "/user", nil, &u); err != nil {
 			return remoteUser{}, err
@@ -38,7 +53,7 @@ func (p *Provider) user(ctx context.Context, token string) (remoteUser, error) {
 		if name == "" {
 			name = u.FullName
 		}
-		return remoteUser{ID: u.ID.String(), Login: u.Login, Name: name, AvatarURL: u.AvatarURL, Email: u.Email}, nil
+		return remoteUser{ID: u.ID.String(), Login: u.Login, Name: name, AvatarURL: u.AvatarURL, Email: u.Email, CreatedAt: accountTime(u.CreatedAt, u.Created)}, nil
 	case "gitlab":
 		var u struct {
 			ID          json.Number `json:"id"`
@@ -46,11 +61,12 @@ func (p *Provider) user(ctx context.Context, token string) (remoteUser, error) {
 			Name        string      `json:"name"`
 			AvatarURL   string      `json:"avatar_url"`
 			PublicEmail string      `json:"public_email"`
+			CreatedAt   string      `json:"created_at"`
 		}
 		if err := p.api(ctx, token, http.MethodGet, "/user", nil, &u); err != nil {
 			return remoteUser{}, err
 		}
-		return remoteUser{ID: u.ID.String(), Login: u.Username, Name: u.Name, AvatarURL: u.AvatarURL, Email: u.PublicEmail}, nil
+		return remoteUser{ID: u.ID.String(), Login: u.Username, Name: u.Name, AvatarURL: u.AvatarURL, Email: u.PublicEmail, CreatedAt: accountTime(u.CreatedAt)}, nil
 	case "bitbucket":
 		var u struct {
 			UUID        string `json:"uuid"`

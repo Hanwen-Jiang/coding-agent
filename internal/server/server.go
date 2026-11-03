@@ -116,11 +116,16 @@ func New(cfg Config) (*Server, error) {
 	}
 	allowed := map[string]bool{}
 	for _, entry := range cfg.AllowedLogins {
-		provider, login, ok := strings.Cut(strings.ToLower(strings.TrimSpace(entry)), ":")
-		if _, known := specOf(provider); !ok || login == "" || !known {
+		key, ok := loginKey(entry)
+		if !ok {
 			return nil, fmt.Errorf("CODING_ALLOWED_LOGINS 的 %q 不是 <平台>:<登录名>", entry)
 		}
-		allowed[provider+":"+login] = true
+		allowed[key] = true
+	}
+	for _, entry := range cfg.Signup.Blocked {
+		if _, ok := loginKey(entry); !ok {
+			return nil, fmt.Errorf("CODING_BLOCKED_LOGINS 的 %q 不是 <平台>:<登录名>", entry)
+		}
 	}
 	api := NewTaskAPI(strings.TrimRight(cfg.TaskAPI, "/"))
 	s := &Server{
@@ -200,6 +205,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+sess+"/tasks/{task}/message", s.authed(s.handleEditQueued))
 	mux.HandleFunc("POST "+sess+"/tasks/{task}/message/result", s.authed(s.handleQueuedResult))
 	mux.HandleFunc("POST "+sess+"/tasks/{task}/cancel", s.authed(s.handleCancel))
+	mux.HandleFunc("GET "+sess+"/tasks/{task}/artifacts", s.authed(s.handleListArtifacts))
+	mux.HandleFunc("GET "+sess+"/tasks/{task}/artifacts/{artifact}", s.authed(s.handleArtifactDownload))
 	mux.HandleFunc("GET /api/tasks/active", s.authed(s.handleActiveTasks))
 
 	mux.Handle("GET /", web.Handler())

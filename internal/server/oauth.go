@@ -50,7 +50,7 @@ type providerSpec struct {
 
 var providerSpecs = []providerSpec{
 	{id: "github", name: "GitHub", prefix: "gh", git: true, web: "https://github.com", api: "https://api.github.com",
-		authorize: "/login/oauth/authorize", token: "/login/oauth/access_token", scopes: "repo read:user", extra: url.Values{"allow_signup": {"false"}}},
+		authorize: "/login/oauth/authorize", token: "/login/oauth/access_token", scopes: "repo read:user user:email", extra: url.Values{"allow_signup": {"false"}}},
 	{id: "gitee", name: "Gitee", prefix: "gitee", git: true, web: "https://gitee.com", api: "{web}/api/v5",
 		authorize: "/oauth/authorize", token: "/oauth/token", scopes: "user_info projects pull_requests", queryToken: true},
 	{id: "gitlab", name: "GitLab", prefix: "gl", git: true, web: "https://gitlab.com", api: "{web}/api/v4",
