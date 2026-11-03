@@ -17,6 +17,7 @@
 //	CODING_JWT_ISSUER           JWT 的 iss，默认 coding-agent
 //	CODING_TOKEN_KEY            第三方平台令牌的加密密钥（32 字节的 base64）；只用 JWT 时必填。没给时沿用由 AR_DEV_SIGNING_KEY 派生的；
 //	                            两者都给时，旧数据读到时用它重新加密，之后可以去掉 AR_DEV_SIGNING_KEY
+//	CODING_TOKEN_KEY_PREVIOUS   轮换 CODING_TOKEN_KEY 时的旧密钥（G-01）：旧数据读到时改用新密钥重新加密，之后去掉
 //	CODING_SESSION_IDLE         浏览器会话的空闲有效期（AUTH-02，Go 的时长写法，默认 24h）：Cookie 里只有会话 id，
 //	CODING_SESSION_MAX_AGE      绝对有效期（默认 168h）；退出登录、“退出所有设备”立即生效，调 Runtime 时现签 5 分钟的令牌
 //	CODING_TENANT_POLICIES_FILE task-service 的开发租户策略文件；给了就在租户首次登录时把 effect 上限设为 write_reversible
@@ -29,6 +30,13 @@
 //	CODING_SIGNUP_MIN_ACCOUNT_AGE_DAYS    开放注册时新注册的平台账号至少注册了多少天（默认 30，0 不查；GitHub、GitLab、Gitee、Gitea）
 //	CODING_SIGNUP_REQUIRE_VERIFIED_EMAIL  新注册要有验证过的邮箱（默认 true；GitHub 读 /user/emails，Google 看 email_verified）
 //	CODING_BLOCKED_LOGINS       逗号分隔的 <平台>:<登录名>：封禁，登录与连接都拒绝（已有的账号也一样）
+//
+// GitHub App（G-01，docs/plan/github-app.md 第 3 节；全不配时关闭，配了一部分时启动失败）：
+//
+//	CODING_GITHUB_APP_ID、CODING_GITHUB_APP_CLIENT_ID、CODING_GITHUB_APP_SLUG   不是密钥
+//	CODING_GITHUB_APP_PRIVATE_KEY_FILE    私钥文件（单独的 Secret 按文件挂进来）；私钥放在环境变量里会被拒绝
+//	CODING_GITHUB_WEBHOOK_SECRET、_PREVIOUS  Webhook secret；_PREVIOUS 只在轮换期间有
+//	CODING_GITHUB_APP_CLIENT_SECRET       用户授权（G-03）要的 Client secret
 //
 // 第三方登录（<平台> 是 GITHUB、GITEE、GITLAB、GITEA、BITBUCKET、GOOGLE；Client ID 与 Secret 都给了才打开这一家）：
 //
@@ -139,14 +147,21 @@ func readKeys(cfg *server.Config, getenv func(string) string) error {
 			*target = d
 		}
 	}
-	if raw := strings.TrimSpace(getenv("CODING_TOKEN_KEY")); raw != "" {
-		key, err := base64.StdEncoding.DecodeString(raw)
-		if err != nil {
-			if key, err = base64.RawURLEncoding.DecodeString(strings.TrimRight(raw, "=")); err != nil {
-				return errors.New("CODING_TOKEN_KEY 要是 base64")
+	for name, target := range map[string]*[]byte{"CODING_TOKEN_KEY": &cfg.TokenKey, "CODING_TOKEN_KEY_PREVIOUS": &cfg.TokenKeyPrevious} {
+		if raw := strings.TrimSpace(getenv(name)); raw != "" {
+			key, err := base64.StdEncoding.DecodeString(raw)
+			if err != nil {
+				if key, err = base64.RawURLEncoding.DecodeString(strings.TrimRight(raw, "=")); err != nil {
+					return fmt.Errorf("%s 要是 base64", name)
+				}
 			}
+			*target = key
 		}
-		cfg.TokenKey = key
 	}
+	app, err := server.GitHubAppFromEnv(getenv)
+	if err != nil {
+		return err
+	}
+	cfg.GitHubApp = app
 	return nil
 }

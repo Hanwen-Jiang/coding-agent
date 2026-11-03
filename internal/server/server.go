@@ -54,6 +54,10 @@ type Config struct {
 	JWTKeyID  string
 	JWTIssuer string
 	TokenKey  []byte
+	// TokenKeyPrevious 是轮换期间的旧 TokenKey（CODING_TOKEN_KEY_PREVIOUS，G-01）：旧数据读到时改用 TokenKey 重新加密。
+	TokenKeyPrevious []byte
+	// GitHubApp 是 GitHub App 的配置（G-01，githubapp.go）；nil 表示没配，功能关闭。
+	GitHubApp *GitHubApp
 	// SessionIdle、SessionMaxAge 是浏览器会话的空闲与绝对有效期（AUTH-02，browser_sessions.go；默认 24 小时、7 天）。Now 只给测试换时钟。
 	SessionIdle   time.Duration
 	SessionMaxAge time.Duration
@@ -120,6 +124,8 @@ func New(cfg Config) (*Server, error) {
 		return nil, errors.New("只用 JWT（没有 AR_DEV_SIGNING_KEY）时要给 CODING_TOKEN_KEY（第三方平台令牌的加密密钥）")
 	case len(cfg.TokenKey) != 0 && len(cfg.TokenKey) != 32:
 		return nil, errors.New("CODING_TOKEN_KEY 要是 32 字节")
+	case len(cfg.TokenKeyPrevious) != 0 && (len(cfg.TokenKeyPrevious) != 32 || len(cfg.TokenKey) == 0):
+		return nil, errors.New("CODING_TOKEN_KEY_PREVIOUS 要是 32 字节，并且要同时给新的 CODING_TOKEN_KEY")
 	}
 	tok, err := newTokens(cfg)
 	if err != nil {
@@ -387,11 +393,16 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 		}
 		providers = append(providers, item)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"dev_login": s.cfg.DevLogin, "github_login": s.providers["github"] != nil, "providers": providers,
 		// 有开发租户策略文件才能按任务设沙箱等级（见 runsettings.go）。
 		"sandbox_control": true, "sandbox": s.cfg.Sandbox,
-	})
+	}
+	if app := s.cfg.GitHubApp; app != nil {
+		// 不是密钥：网页用 slug 拼安装链接（https://github.com/apps/<slug>/installations/new，G-05）。
+		out["github_app"] = map[string]string{"slug": app.Slug}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // setSession 建一个浏览器会话（browser_sessions.go），会话 id 放进 HttpOnly Cookie；返回会话 id。

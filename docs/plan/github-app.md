@@ -62,6 +62,8 @@
 
 ### G-01 密钥与配置
 
+> 2026-11-03 已完成（代码，没部署）：`internal/server/githubapp.go`（配置、Webhook 验签、App 的 JWT），`CODING_TOKEN_KEY_PREVIOUS`。与上面第 3 节不同的一处：私钥**单独放 Secret `coding-github-app`**（键 `private-key.pem`），只按文件挂进 coding-web（0400）。原因是 coding-web 对 `coding-oauth` 用的是 `envFrom`，同一个 Secret 里的私钥也会成为环境变量，并被 coding-web 起的 git 子进程继承。环境变量里出现 `CODING_GITHUB_APP_PRIVATE_KEY` 时 coding-web 拒绝启动。部署前：`kubectl -n agent-runtime create secret generic coding-github-app --from-file=private-key.pem=<PEM>`，再从 `coding-oauth` 删掉那一项（`deploy/k8s/coding-web.yaml` 的注释里也写了）。Client secret 到 G-03 才必填。
+
 1. 全不配时行为与现在相同；只配一部分时启动失败，错误写变量名不写值。
 2. 用带标记的假密钥跑完登录、签令牌、Webhook、失败路径，日志、错误信息、`/api/config`、`/api/me` 与计量里都找不到它们（断言，不靠人看）。
 3. 配了 `_PREVIOUS` 时新旧 Webhook secret 都能过验签；去掉后旧的被拒。

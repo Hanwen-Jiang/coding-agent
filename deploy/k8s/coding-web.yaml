@@ -64,6 +64,13 @@ spec:
             #      CODING_TOKEN_KEY（32 字节的 base64，放 Secret）；
             #   3. AR_DEV_SIGNING_KEY 再留一段时间（第三方令牌读到时改用 CODING_TOKEN_KEY 重新加密），之后连同 Runtime 的
             #      taskService.ingress.devTokens: accept 一起去掉。用户要重新登录一次。
+            # GitHub App（G-01，docs/plan/github-app.md 第 3 节）：App ID、Client ID、Webhook secret 在 coding-oauth 里（envFrom）；
+            # 私钥单独放 Secret coding-github-app（键 private-key.pem），只按文件挂进来，不进环境变量（coding-web 起的 git 会继承
+            # 环境变量）。coding-oauth 里不能再有 CODING_GITHUB_APP_PRIVATE_KEY，有的话 coding-web 拒绝启动：部署前
+            #   kubectl -n agent-runtime create secret generic coding-github-app --from-file=private-key.pem=<PEM 文件>
+            # 再从 coding-oauth 删掉那一项。
+            - {name: CODING_GITHUB_APP_SLUG, value: coding-agent-link}
+            - {name: CODING_GITHUB_APP_PRIVATE_KEY_FILE, value: /etc/coding/github-app/private-key.pem}
           envFrom:
             - secretRef: {name: coding-oauth}
           readinessProbe:
@@ -79,11 +86,18 @@ spec:
           volumeMounts:
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
+            - {name: github-app, mountPath: /etc/coding/github-app, readOnly: true}
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: coding-data}
         - name: tmp
           emptyDir: {}
+        - name: github-app
+          secret:
+            secretName: coding-github-app
+            defaultMode: 0400
+            items:
+              - {key: private-key.pem, path: private-key.pem}
 ---
 apiVersion: v1
 kind: Service

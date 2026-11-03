@@ -86,12 +86,17 @@ func (s *Server) tokenKey() []byte {
 	return legacyTokenKey(s.cfg.SigningKey)
 }
 
-// legacyKey 是迁移期间解旧数据用的密钥：有独立密钥、又还有签名密钥时才有；否则 nil。
-func (s *Server) legacyKey() []byte {
-	if len(s.cfg.TokenKey) == 0 || len(s.cfg.SigningKey) == 0 {
-		return nil
+// oldKeys 是解旧数据用的密钥，按顺序试：轮换期间的 CODING_TOKEN_KEY_PREVIOUS（G-01），以及有独立密钥、又还有签名密钥时
+// 由签名密钥派生的旧密钥（AUTH-01 之前的数据）。都没有时为空。
+func (s *Server) oldKeys() [][]byte {
+	var keys [][]byte
+	if len(s.cfg.TokenKeyPrevious) > 0 {
+		keys = append(keys, s.cfg.TokenKeyPrevious)
 	}
-	return legacyTokenKey(s.cfg.SigningKey)
+	if len(s.cfg.TokenKey) > 0 && len(s.cfg.SigningKey) > 0 {
+		keys = append(keys, legacyTokenKey(s.cfg.SigningKey))
+	}
+	return keys
 }
 
 func legacyTokenKey(signingKey []byte) []byte {
@@ -116,21 +121,29 @@ func (s *Server) seal(plain, aad string) (string, error) {
 	return base64.StdEncoding.EncodeToString(gcm.Seal(nonce, nonce, []byte(plain), []byte(aad))), nil
 }
 
-// open 用当前的密钥解开；迁移期间解不开时再试旧密钥（AUTH-01）。
+// open 用当前的密钥解开；解不开时再试旧密钥（轮换与迁移期间，AUTH-01、G-01）。
 func (s *Server) open(sealed, aad string) (string, error) {
 	plain, err := openWith(s.tokenKey(), sealed, aad)
-	if err != nil && s.legacyKey() != nil {
-		if old, lerr := openWith(s.legacyKey(), sealed, aad); lerr == nil {
+	if err != nil {
+		if old, ok := s.openOld(sealed, aad); ok {
 			return old, nil
 		}
 	}
 	return plain, err
 }
 
+func (s *Server) openOld(sealed, aad string) (string, bool) {
+	for _, key := range s.oldKeys() {
+		if plain, err := openWith(key, sealed, aad); err == nil {
+			return plain, true
+		}
+	}
+	return "", false
+}
+
 // rekey 把账号里用旧密钥加密的令牌改用当前的密钥（读到时就地迁移）；返回是否有改动。调用方持有 s.store.mu。
 func (s *Server) rekey(a *Account, tenant, user string) (bool, error) {
-	legacy := s.legacyKey()
-	if legacy == nil {
+	if len(s.oldKeys()) == 0 {
 		return false, nil
 	}
 	changed := false
@@ -141,10 +154,11 @@ func (s *Server) rekey(a *Account, tenant, user string) (bool, error) {
 		if _, err := openWith(s.tokenKey(), *sealed, aad); err == nil {
 			return nil
 		}
-		plain, err := openWith(legacy, *sealed, aad)
-		if err != nil {
-			return nil // 两把都解不开：原样留着，用到时照常报“令牌记录解不开”
+		plain, ok := s.openOld(*sealed, aad)
+		if !ok {
+			return nil // 哪把都解不开：原样留着，用到时照常报“令牌记录解不开”
 		}
+		var err error
 		if *sealed, err = s.seal(plain, aad); err != nil {
 			return err
 		}
