@@ -59,6 +59,8 @@ type Config struct {
 	// AllowedLogins 是放行的平台账号（"<平台>:<登录名>"，不分大小写）：给了就只有它们（与关联到它们的别家账号）能用平台登录，
 	// 线上还没对外开放时用；空表示谁都能登录。
 	AllowedLogins []string
+	// Signup 是开放注册时新注册要满足的条件与封禁名单（signup.go，F4）。
+	Signup SignupRules
 	// Worker 的 shell_run 在哪里跑（docker 或 host）与 docker 时的镜像；只用来在界面上说明环境。
 	Sandbox      string
 	SandboxImage string
