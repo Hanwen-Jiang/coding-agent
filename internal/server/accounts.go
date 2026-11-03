@@ -25,7 +25,8 @@ import (
 // 账号（docs/plan/coding-agent-mvp.md 第 9 节）：一个账号（租户 + 用户）可以关联多个登录方式。
 // 第一次用哪一家登录就用哪一家建账号（租户 <前缀>-<登录名>）；登录后在“账号与平台”里连接别家，之后用任何一家登录都是这个账号。
 // 平台上的账号按它不变的编号认（identities.json：<平台>:<编号> → 租户、用户），登录名改了不影响。
-// 令牌按（租户、用户、平台）加密存放（AES-256-GCM，密钥由签名密钥派生），不进浏览器、日志与 Git 配置；会过期的令牌用前自动续期。
+// 令牌按（租户、用户、平台）加密存放（AES-256-GCM，密钥是 CODING_TOKEN_KEY；没配时由签名密钥派生，见 tokenKey），不进浏览器、
+// 日志与 Git 配置；会过期的令牌用前自动续期。
 
 // Connection 是账号关联的一个登录方式；Token、Refresh 是密文。
 type Connection struct {
@@ -76,9 +77,25 @@ func identityKey(provider, remoteID string) string { return provider + ":" + rem
 
 // --- 加密 ---
 
-// tokenKey 由开发签名密钥派生（MVP）；生产应换成 SecretStore 签发的密钥。
+// tokenKey 是第三方平台令牌的加密密钥：配了 CODING_TOKEN_KEY 就用它（AUTH-01，与签名密钥无关，签名密钥泄露也解不开）；
+// 没配时沿用由开发签名密钥派生的旧密钥。
 func (s *Server) tokenKey() []byte {
-	mac := hmac.New(sha256.New, s.cfg.SigningKey)
+	if len(s.cfg.TokenKey) > 0 {
+		return s.cfg.TokenKey
+	}
+	return legacyTokenKey(s.cfg.SigningKey)
+}
+
+// legacyKey 是迁移期间解旧数据用的密钥：有独立密钥、又还有签名密钥时才有；否则 nil。
+func (s *Server) legacyKey() []byte {
+	if len(s.cfg.TokenKey) == 0 || len(s.cfg.SigningKey) == 0 {
+		return nil
+	}
+	return legacyTokenKey(s.cfg.SigningKey)
+}
+
+func legacyTokenKey(signingKey []byte) []byte {
+	mac := hmac.New(sha256.New, signingKey)
 	mac.Write([]byte("coding-web/github-token/v1"))
 	return mac.Sum(nil)
 }
@@ -99,12 +116,59 @@ func (s *Server) seal(plain, aad string) (string, error) {
 	return base64.StdEncoding.EncodeToString(gcm.Seal(nonce, nonce, []byte(plain), []byte(aad))), nil
 }
 
+// open 用当前的密钥解开；迁移期间解不开时再试旧密钥（AUTH-01）。
 func (s *Server) open(sealed, aad string) (string, error) {
+	plain, err := openWith(s.tokenKey(), sealed, aad)
+	if err != nil && s.legacyKey() != nil {
+		if old, lerr := openWith(s.legacyKey(), sealed, aad); lerr == nil {
+			return old, nil
+		}
+	}
+	return plain, err
+}
+
+// rekey 把账号里用旧密钥加密的令牌改用当前的密钥（读到时就地迁移）；返回是否有改动。调用方持有 s.store.mu。
+func (s *Server) rekey(a *Account, tenant, user string) (bool, error) {
+	legacy := s.legacyKey()
+	if legacy == nil {
+		return false, nil
+	}
+	changed := false
+	redo := func(sealed *string, aad string) error {
+		if *sealed == "" {
+			return nil
+		}
+		if _, err := openWith(s.tokenKey(), *sealed, aad); err == nil {
+			return nil
+		}
+		plain, err := openWith(legacy, *sealed, aad)
+		if err != nil {
+			return nil // 两把都解不开：原样留着，用到时照常报“令牌记录解不开”
+		}
+		if *sealed, err = s.seal(plain, aad); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	}
+	for provider, c := range a.Connections {
+		if err := redo(&c.Token, tokenAAD(tenant, user, provider)); err != nil {
+			return false, err
+		}
+		if err := redo(&c.Refresh, tokenAAD(tenant, user, provider)+"/refresh"); err != nil {
+			return false, err
+		}
+		a.Connections[provider] = c
+	}
+	return changed, nil
+}
+
+func openWith(key []byte, sealed, aad string) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(sealed)
 	if err != nil {
 		return "", err
 	}
-	block, err := aes.NewCipher(s.tokenKey())
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
@@ -150,6 +214,13 @@ func (s *Server) loadAccount(tenant, user string) (Account, error) {
 		}
 		a.Primary = "github"
 		a.LegacyLogin, a.LegacyID, a.LegacyName, a.LegacyAvatarURL, a.LegacyScopes, a.LegacyToken, a.LegacyUpdatedAt = "", 0, "", "", "", "", time.Time{}
+		if err := writeFileAtomic(s.accountFile(tenant, user), a); err != nil {
+			return Account{}, err
+		}
+	}
+	if changed, err := s.rekey(&a, tenant, user); err != nil {
+		return Account{}, err
+	} else if changed {
 		if err := writeFileAtomic(s.accountFile(tenant, user), a); err != nil {
 			return Account{}, err
 		}

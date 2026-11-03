@@ -11,6 +11,12 @@
 //	CODING_DATA_DIR             项目与任务的元数据目录（必填）
 //	CODING_DEV_LOGIN=1          打开开发登录（租户 + 用户名换令牌，仅供测试）；要同时给 AR_DEV_SIGNING_KEY
 //	AR_DEV_SIGNING_KEY          与 task-service 相同的开发签名密钥
+//	CODING_JWT_KEY_FILE         Ed25519 私钥文件（Runtime 的 task-service keygen 生成，AUTH-01）：给了就签标准 JWT，Runtime 只持公钥；
+//	                            开发令牌不再签发、也不再认（登录过的用户重新登录一次）
+//	CODING_JWT_KID              私钥的 kid（与 Runtime 签发方登记里的一致；给了私钥就必填）
+//	CODING_JWT_ISSUER           JWT 的 iss，默认 coding-agent
+//	CODING_TOKEN_KEY            第三方平台令牌的加密密钥（32 字节的 base64）；只用 JWT 时必填。没给时沿用由 AR_DEV_SIGNING_KEY 派生的；
+//	                            两者都给时，旧数据读到时用它重新加密，之后可以去掉 AR_DEV_SIGNING_KEY
 //	CODING_TENANT_POLICIES_FILE task-service 的开发租户策略文件；给了就在租户首次登录时把 effect 上限设为 write_reversible
 //	                            （只给本机开发；每个任务的沙箱等级经 effect_ceiling 传，集群里租户策略由 Runtime 的 Registry 定）
 //	CODING_GIT                  git 可执行文件，默认 PATH 上的 git
@@ -36,7 +42,9 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -45,6 +53,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/jwtingress"
 	"github.com/agentruntime/coding-agent/internal/server"
 )
 
@@ -72,6 +81,9 @@ func main() {
 		log.Fatal(err)
 	}
 	cfg.Signup = signup
+	if err := readKeys(&cfg, os.Getenv); err != nil {
+		log.Fatalf("coding-web: %v", err)
+	}
 	for _, id := range []string{"github", "gitee", "gitlab", "gitea", "bitbucket", "google"} {
 		env := func(name string) string { return os.Getenv("CODING_" + strings.ToUpper(id) + "_" + name) }
 		if c := (server.ProviderConfig{
@@ -101,4 +113,29 @@ func main() {
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("coding-web: %v", err)
 	}
+}
+
+// readKeys 读 JWT 私钥与第三方令牌的加密密钥（AUTH-01）；错误信息只提变量名，不带密钥。
+func readKeys(cfg *server.Config, getenv func(string) string) error {
+	if path := getenv("CODING_JWT_KEY_FILE"); path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("读不了 CODING_JWT_KEY_FILE：%w", err)
+		}
+		key, err := jwtingress.ParsePrivateKey(raw)
+		if err != nil {
+			return fmt.Errorf("CODING_JWT_KEY_FILE 不是 Ed25519 私钥：%w", err)
+		}
+		cfg.JWTKey, cfg.JWTKeyID, cfg.JWTIssuer = key, getenv("CODING_JWT_KID"), getenv("CODING_JWT_ISSUER")
+	}
+	if raw := strings.TrimSpace(getenv("CODING_TOKEN_KEY")); raw != "" {
+		key, err := base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			if key, err = base64.RawURLEncoding.DecodeString(strings.TrimRight(raw, "=")); err != nil {
+				return errors.New("CODING_TOKEN_KEY 要是 base64")
+			}
+		}
+		cfg.TokenKey = key
+	}
+	return nil
 }

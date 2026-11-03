@@ -8,6 +8,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/jwtingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/dev/localingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/providers/ingress"
 	"github.com/agentruntime/coding-agent/internal/web"
@@ -44,9 +46,16 @@ type Config struct {
 	DataDir       string
 	DevLogin      bool
 	SigningKey    []byte
-	PoliciesFile  string
-	Git           string
-	SecureCookie  bool
+	// JWTKey、JWTKeyID、JWTIssuer（AUTH-01）：给了 Ed25519 私钥就用它签 Runtime 令牌（标准 JWT，iss 默认 coding-agent），
+	// Runtime 只持对应的公钥；SigningKey 的开发令牌不再签发、也不再认。TokenKey 是第三方平台令牌的加密密钥（32 字节），
+	// 与签名密钥无关；没给时沿用由 SigningKey 派生的旧密钥，两者都给时旧数据读到时用新密钥重新加密。
+	JWTKey       ed25519.PrivateKey
+	JWTKeyID     string
+	JWTIssuer    string
+	TokenKey     []byte
+	PoliciesFile string
+	Git          string
+	SecureCookie bool
 	// 登录方式（github、gitee、gitlab、gitea、bitbucket、google，见 oauth.go）：Client ID 与 Secret 都给了才打开；
 	// PublicURL 用来拼回调地址 <PublicURL>/api/auth/<平台>/callback。GitHub 也可以用下面旧的 GitHub* 字段配置。
 	Providers          map[string]ProviderConfig
@@ -69,7 +78,7 @@ type Config struct {
 // Server 是 coding-web。
 type Server struct {
 	cfg       Config
-	ingress   *localingress.Provider
+	ingress   tokens
 	store     *Store
 	api       *TaskAPI
 	git       Git
@@ -97,8 +106,18 @@ func New(cfg Config) (*Server, error) {
 		return nil, errors.New("CODING_WORKSPACES=local 时要给 CODING_WORKSPACE_ROOT")
 	case cfg.DataDir == "":
 		return nil, errors.New("缺少 CODING_DATA_DIR")
-	case len(cfg.SigningKey) == 0:
-		return nil, errors.New("缺少 AR_DEV_SIGNING_KEY（校验与签发 Runtime 令牌）")
+	case len(cfg.SigningKey) == 0 && cfg.JWTKey == nil:
+		return nil, errors.New("缺少 AR_DEV_SIGNING_KEY 或 CODING_JWT_KEY_FILE（校验与签发 Runtime 令牌）")
+	case cfg.JWTKey != nil && cfg.JWTKeyID == "":
+		return nil, errors.New("给了 CODING_JWT_KEY_FILE 也要给 CODING_JWT_KID（与 Runtime 签发方登记里的 kid 一致）")
+	case cfg.JWTKey != nil && len(cfg.SigningKey) == 0 && len(cfg.TokenKey) == 0:
+		return nil, errors.New("只用 JWT（没有 AR_DEV_SIGNING_KEY）时要给 CODING_TOKEN_KEY（第三方平台令牌的加密密钥）")
+	case len(cfg.TokenKey) != 0 && len(cfg.TokenKey) != 32:
+		return nil, errors.New("CODING_TOKEN_KEY 要是 32 字节")
+	}
+	tok, err := newTokens(cfg)
+	if err != nil {
+		return nil, err
 	}
 	if cfg.Git == "" {
 		cfg.Git = "git"
@@ -131,7 +150,7 @@ func New(cfg Config) (*Server, error) {
 	s := &Server{
 		allowed:   allowed,
 		cfg:       cfg,
-		ingress:   localingress.New(localingress.Options{SigningKey: cfg.SigningKey, Limit: 1 << 30, Window: time.Minute}),
+		ingress:   tok,
 		store:     NewStore(cfg.DataDir),
 		api:       api,
 		git:       Git{Bin: cfg.Git, HooksDir: hooks},
@@ -226,6 +245,47 @@ func securityHeaders(next http.Handler) http.Handler {
 }
 
 // --- 认证 ---
+
+// tokens 签发与校验放进 Cookie、转给 Runtime 的令牌。
+type tokens interface {
+	ingress.Ingress
+	IssueToken(tenant, user string, ttl time.Duration) string
+}
+
+// newTokens：给了 JWT 私钥时签 Ed25519 的 JWT、只认自己签的（AUTH-01）；否则是 Runtime 的开发实现（HMAC，与 task-service
+// 共用 AR_DEV_SIGNING_KEY）。
+func newTokens(cfg Config) (tokens, error) {
+	if cfg.JWTKey == nil {
+		return localingress.New(localingress.Options{SigningKey: cfg.SigningKey, Limit: 1 << 30, Window: time.Minute}), nil
+	}
+	issuer := cfg.JWTIssuer
+	if issuer == "" {
+		issuer = "coding-agent"
+	}
+	public := jwtingress.EncodePublicKey(cfg.JWTKey.Public().(ed25519.PublicKey))
+	verify, err := jwtingress.New(jwtingress.Options{
+		Config: jwtingress.Config{Issuers: []jwtingress.Issuer{{Issuer: issuer, Keys: map[string]string{cfg.JWTKeyID: public}}}},
+		Limit:  1 << 30, Window: time.Minute,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return jwtTokens{Provider: verify, signer: jwtingress.NewSigner(issuer, cfg.JWTKeyID, cfg.JWTKey, nil)}, nil
+}
+
+type jwtTokens struct {
+	*jwtingress.Provider
+	signer *jwtingress.Signer
+}
+
+// IssueToken 签一个 JWT；租户与用户已经按 slug 校验过，签不出来时返回空串（Cookie 为空，下一个请求要求重新登录）。
+func (j jwtTokens) IssueToken(tenant, user string, ttl time.Duration) string {
+	token, err := j.signer.Issue(jwtingress.Claims{Tenant: tenant, User: user, TTL: ttl})
+	if err != nil {
+		return ""
+	}
+	return token
+}
 
 type identity struct {
 	ingress.Identity
