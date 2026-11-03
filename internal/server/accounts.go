@@ -450,8 +450,14 @@ func (s *Server) handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 		mode = "link"
 	}
 	state := randomHex(24)
-	http.SetCookie(w, &http.Cookie{Name: stateCookieName(p.id), Value: state + "." + mode, Path: "/api/auth/" + p.id, HttpOnly: true, Secure: s.cfg.SecureCookie, SameSite: http.SameSiteLaxMode, MaxAge: 600})
-	http.Redirect(w, r, p.authorizeURL(s.callbackURL(p.id), state), http.StatusFound)
+	// PKCE（AUTH-03）：code_verifier 与 state 放在同一个只对 /api/auth/<平台> 有效的 HttpOnly Cookie 里，不进授权地址。
+	verifier := p.newPKCEVerifier()
+	value := state + "." + mode
+	if verifier != "" {
+		value += "." + verifier
+	}
+	http.SetCookie(w, &http.Cookie{Name: stateCookieName(p.id), Value: value, Path: "/api/auth/" + p.id, HttpOnly: true, Secure: s.cfg.SecureCookie, SameSite: http.SameSiteLaxMode, MaxAge: 600})
+	http.Redirect(w, r, p.authorizeURL(s.callbackURL(p.id), state, verifier), http.StatusFound)
 }
 
 // currentIdentity 读出请求里已登录的身份（不写错误）。
@@ -495,9 +501,11 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(stateCookieName(p.id))
 	http.SetCookie(w, &http.Cookie{Name: stateCookieName(p.id), Value: "", Path: "/api/auth/" + p.id, HttpOnly: true, Secure: s.cfg.SecureCookie, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 	state := r.URL.Query().Get("state")
-	var want string
+	var want, verifier string
 	if err == nil {
-		want, mode, _ = strings.Cut(cookie.Value, ".")
+		var rest string
+		want, rest, _ = strings.Cut(cookie.Value, ".")
+		mode, verifier, _ = strings.Cut(rest, ".")
 	}
 	if err != nil || state == "" || subtle.ConstantTimeCompare([]byte(want), []byte(state)) != 1 {
 		mode = "login"
@@ -510,7 +518,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := ctxTimeout(r, 30*time.Second)
 	defer cancel()
-	t, err := p.exchange(ctx, r.URL.Query().Get("code"), s.callbackURL(p.id))
+	t, err := p.exchange(ctx, r.URL.Query().Get("code"), s.callbackURL(p.id), verifier)
 	if err != nil {
 		why, ok := err.(*Msg) // 换令牌的说明自己带着平台名
 		if !ok {

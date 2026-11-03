@@ -3,6 +3,9 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,22 +48,24 @@ type providerSpec struct {
 	basicClient bool
 	// queryToken：API 的令牌放 access_token 查询参数（Gitee）。
 	queryToken bool
-	extra      url.Values
+	// pkce：授权码流程加 PKCE（S256，AUTH-03）。只给确认支持的平台打开；Gitee、Bitbucket 没核实，照旧不带。
+	pkce  bool
+	extra url.Values
 }
 
 var providerSpecs = []providerSpec{
 	{id: "github", name: "GitHub", prefix: "gh", git: true, web: "https://github.com", api: "https://api.github.com",
-		authorize: "/login/oauth/authorize", token: "/login/oauth/access_token", scopes: "repo read:user user:email", extra: url.Values{"allow_signup": {"false"}}},
+		authorize: "/login/oauth/authorize", token: "/login/oauth/access_token", scopes: "repo read:user user:email", pkce: true, extra: url.Values{"allow_signup": {"false"}}},
 	{id: "gitee", name: "Gitee", prefix: "gitee", git: true, web: "https://gitee.com", api: "{web}/api/v5",
 		authorize: "/oauth/authorize", token: "/oauth/token", scopes: "user_info projects pull_requests", queryToken: true},
 	{id: "gitlab", name: "GitLab", prefix: "gl", git: true, web: "https://gitlab.com", api: "{web}/api/v4",
-		authorize: "/oauth/authorize", token: "/oauth/token", scopes: "api read_user"},
+		authorize: "/oauth/authorize", token: "/oauth/token", scopes: "api read_user", pkce: true},
 	{id: "gitea", name: "Gitea", prefix: "gitea", git: true, web: "https://codeberg.org", api: "{web}/api/v1",
-		authorize: "/login/oauth/authorize", token: "/login/oauth/access_token"},
+		authorize: "/login/oauth/authorize", token: "/login/oauth/access_token", pkce: true},
 	{id: "bitbucket", name: "Bitbucket", prefix: "bb", git: true, web: "https://bitbucket.org", api: "https://api.bitbucket.org/2.0",
 		authorize: "/site/oauth2/authorize", token: "/site/oauth2/access_token", basicClient: true},
 	{id: "google", name: "Google", prefix: "google", web: "https://accounts.google.com", api: "https://openidconnect.googleapis.com/v1",
-		authorize: "https://accounts.google.com/o/oauth2/v2/auth", token: "https://oauth2.googleapis.com/token", scopes: "openid email profile",
+		authorize: "https://accounts.google.com/o/oauth2/v2/auth", token: "https://oauth2.googleapis.com/token", scopes: "openid email profile", pkce: true,
 		extra: url.Values{"prompt": {"select_account"}}},
 }
 
@@ -125,10 +130,16 @@ func newProviders(cfg Config) map[string]*Provider {
 	return out
 }
 
-func (p *Provider) authorizeURL(redirect, state string) string {
+// authorizeURL 是去平台授权的地址；verifier 非空时带上它的 S256 code_challenge（PKCE）。
+func (p *Provider) authorizeURL(redirect, state, verifier string) string {
 	q := url.Values{"client_id": {p.ClientID}, "redirect_uri": {redirect}, "response_type": {"code"}, "state": {state}}
 	if p.Scopes != "" {
 		q.Set("scope", p.Scopes)
+	}
+	if verifier != "" {
+		sum := sha256.Sum256([]byte(verifier))
+		q.Set("code_challenge", base64.RawURLEncoding.EncodeToString(sum[:]))
+		q.Set("code_challenge_method", "S256")
 	}
 	for k, v := range p.extra {
 		q[k] = v
@@ -142,8 +153,25 @@ type tokenSet struct {
 	ExpiresAt              time.Time
 }
 
-func (p *Provider) exchange(ctx context.Context, code, redirect string) (tokenSet, error) {
-	return p.tokenRequest(ctx, url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}})
+// exchange 用授权码换令牌；verifier 是登录时生成的 PKCE code_verifier（没用 PKCE 时为空）。
+func (p *Provider) exchange(ctx context.Context, code, redirect, verifier string) (tokenSet, error) {
+	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect}}
+	if verifier != "" {
+		form.Set("code_verifier", verifier)
+	}
+	return p.tokenRequest(ctx, form)
+}
+
+// newPKCEVerifier 生成 PKCE 的 code_verifier（32 字节随机数的 base64url，43 个字符）；平台不用 PKCE 时为空。
+func (p *Provider) newPKCEVerifier() string {
+	if !p.pkce {
+		return ""
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
 func (p *Provider) refresh(ctx context.Context, refresh string) (tokenSet, error) {

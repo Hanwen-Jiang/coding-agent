@@ -178,6 +178,7 @@ func New(cfg Config) (*Server, error) {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /.well-known/jwks.json", s.handleJWKS)
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
@@ -305,6 +306,20 @@ type identity struct {
 	ingress.Identity
 	token   string
 	session string
+}
+
+// handleJWKS 发布签 Runtime 令牌用的公钥（AUTH-03）：RFC 8037 的 OKP Ed25519 JWK，只有公钥。Runtime 或网关可以按它登记
+// 这个签发方（task-service 的登记文件现在是手写的，keygen 打印同一个公钥）。没有 JWT 私钥时 404。
+func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.JWTKey == nil {
+		writeMsg(w, r, http.StatusNotFound, "没有配置 JWT 私钥")
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	writeJSON(w, http.StatusOK, map[string]any{"keys": []map[string]string{{
+		"kty": "OKP", "crv": "Ed25519", "x": jwtingress.EncodePublicKey(s.cfg.JWTKey.Public().(ed25519.PublicKey)),
+		"kid": s.cfg.JWTKeyID, "alg": "EdDSA", "use": "sig",
+	}}})
 }
 
 // sessionIdentity 是会话对应的身份，带这个会话现签的 Runtime 短期令牌。

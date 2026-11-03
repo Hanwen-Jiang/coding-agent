@@ -16,6 +16,7 @@ var english = map[string]string{
 	"建会话失败：%v":      "Couldn't create the sign-in session: %v",
 	"读会话失败：%v":      "Couldn't read the sign-in session: %v",
 	"删会话失败：%v":      "Couldn't delete the sign-in session: %v",
+	"没有配置 JWT 私钥":   "No JWT signing key is configured",
 	"租户策略文件格式不对：%v": "The tenant policy file is malformed: %v",
 
 	// 第三方登录与账号
