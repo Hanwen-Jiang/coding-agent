@@ -146,6 +146,7 @@ task-service（Task API、Session 与 Task 工作流）→ Worker（Planner、to
 - **界面**：登录页（GitHub 主按钮、“其他 Git 平台”副按钮展开 Gitee/GitLab/Gitea/Bitbucket、Google、开发登录；开发环境里没配置的也列出来、不可点）；左下角菜单“账号与平台”（连接、断开）；新建工作区按已连接的平台选仓库；推送卡片与下一步按平台改叫法（GitLab 叫 Merge Request）。各家用自己的标志（GitHub、Gitee、GitLab、Gitea、Codeberg、Forgejo、Bitbucket 取自 Simple Icons，Google 用它规定的四色 G）。
 - **验证**：各家都只对着替身服务测过（`oauth_test.go`：换令牌的 client 认证方式、Gitee 的查询参数与 User-Agent、续期、关联与冲突、旧账号迁移、各家的 PR/MR 请求）。没在真平台上验：Gitee 推送时用登录名作用户名、Bitbucket 创建草稿 PR 的字段都是按文档与常见做法推的。
 - **还没做**：同一家接多个实例（例如两个自建 GitLab）；GitHub App（按仓库授权，计划见 [github-app.md](github-app.md)）；Bitbucket Server / Data Center；把 Google 等身份与企业 SSO 打通。
+- **令牌的问题与计划（2026-11-03 草案，待确认）**：现在的登录令牌是 Runtime 开发实现 `localingress` 签的 HMAC 令牌，与 task-service 共用一把对称密钥，12 小时内撤销不了，没有受众与密钥编号，第三方令牌的加密密钥也从它派生。工作项 AUTH-01（Ed25519、本应用持私钥、Runtime 只持公钥、加密密钥独立）、AUTH-02（浏览器只拿可撤销的会话 id，调 Runtime 时现签短期令牌）、AUTH-03（身份服务、网关、PKCE）记在 Runtime 仓库的 `docs/plan/auth-tokens-2026-11-03.md`；签发与会话两部分在本仓库实现。
 
 ## 10. 与 Runtime 的关系
 
