@@ -58,9 +58,22 @@ func TestEnvironmentConfigurationInBrowser(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	// 同 internal/web 的浏览器用例：不用 t.TempDir 放浏览器的资料目录，浏览器的子进程在主进程结束后才陆续退出，目录一时删不掉不该让测试失败。
+	profile, err := os.MkdirTemp("", "coding-web-browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for range 50 {
+			if os.RemoveAll(profile) == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, browser, "--headless=new", "--disable-gpu", "--no-sandbox", "--no-first-run", "--no-default-browser-check", "--window-size=1440,1000", "--user-data-dir="+t.TempDir(), server.URL+"/#/environments")
+	cmd := exec.CommandContext(ctx, browser, "--headless=new", "--disable-gpu", "--no-sandbox", "--no-first-run", "--no-default-browser-check", "--window-size=1440,1000", "--user-data-dir="+profile, server.URL+"/#/environments")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +178,8 @@ try {
     input.dispatchEvent(new Event('input', {bubbles:true}));
     $('.send').click();
     await wait(() => /\/s\//.test(location.hash) && $('[data-environment-select]').disabled, 'session binding');
-    await wait(() => !$('.send').disabled, 'session submission');
+    // 发出后输入框清空，发送按钮按原来的做法变灰；任务提交完成的标志是对话里出现这一轮（不再是“提交中”）。
+    await wait(() => document.querySelector('section.turn[id^="turn-"]') && !document.querySelector('section.turn.pending'), 'session submission');
   }
   location.hash = '#/environments';
   await wait(() => $('[data-environment-id="' + id + '"]'), 'list after sessions');

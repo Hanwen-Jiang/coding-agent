@@ -57,9 +57,11 @@ const state = {
   projects: [], // 工作区
   sessions: [], // 全部会话，最近活动的在前
   samples: [],
+  environments: null, // 自己的环境配置（与仓库无关，开会话时选用）；null 是还没读到
+  draftEnvironment: ls.get("cw_environment") || "", // 草稿选的环境配置；空是默认环境
   project: null, // 当前工作区
   session: null, // 当前会话；为空时是草稿（第一条消息发出时才开会话）
-  view: "session", // session、workspaces 或 activity
+  view: "session", // session、workspaces、activity 或 environments
   groupsClosed: new Set((ls.get("cw_groups_closed") || "").split(",").filter(Boolean)),
   groupsAll: new Set(), // 展开了全部会话的工作区
   tasks: [], // 旧 → 新
@@ -71,6 +73,7 @@ const state = {
   guidance: new Map(), // taskId → 这个任务的纠偏（发出的顺序）：{ id, text, mode, state, reason, editing, draft }
   queuedEdit: null, // 正在修改的排队消息：{ taskId, draft }
   ctxToolsOpen: false, // 右栏：展开了每个工具占多少
+  envOlderOpen: false, // 右栏：展开了更早的沙箱环境记录
   detailsOpen: false, // 右栏：展开了任务详情
   rawOpen: new Set(), // 展开了“原始事件”的步骤（taskId:eventId）：重画时保持展开
   shownSteps: new Map(), // taskId → 已经画过的步骤（eventId）：只给新来的步骤进场动画
@@ -734,6 +737,7 @@ async function logout() {
 async function enterApp() {
   [state.projects, state.samples, state.sessions] = await Promise.all([api("GET", "/api/projects"), api("GET", "/api/samples"), api("GET", "/api/sessions")]);
   loadActive();
+  loadEnvironments();
   await route();
 }
 
@@ -745,7 +749,7 @@ function findSession(pid, sid) {
   return state.sessions.find((s) => s.project_id === pid && s.id === sid) || null;
 }
 
-// 地址：#/w/<工作区>/s/<会话>、#/w/<工作区>/new（新会话草稿）、#/workspaces、#/activity。
+// 地址：#/w/<工作区>/s/<会话>、#/w/<工作区>/new（新会话草稿）、#/workspaces、#/activity、#/environments。
 async function route() {
   const hash = location.hash;
   let m;
@@ -753,6 +757,7 @@ async function route() {
   if ((m = hash.match(/^#\/w\/([^/?]+)\/new/)) && findProject(m[1])) return openDraft(m[1]);
   if (hash.startsWith("#/workspaces")) return go("workspaces");
   if (hash.startsWith("#/activity")) return go("activity");
+  if (hash.startsWith("#/environments")) return go("environments");
   return landing();
 }
 
@@ -875,6 +880,7 @@ function renderApp() {
   renderTopbar();
   if (state.view === "workspaces") renderWorkspaces();
   else if (state.view === "activity") renderActivity();
+  else if (state.view === "environments") renderEnvironments();
   else renderThread(true);
   if (composing) updateComposer(true);
   renderStatus();
@@ -893,6 +899,7 @@ function updateTitle() {
   const live = inSession() && currentTask();
   const name = state.view === "workspaces" ? t("nav.workspaces")
     : state.view === "activity" ? t("nav.activity")
+      : state.view === "environments" ? t("nav.environments")
       : state.session ? state.session.title || t("session.untitled")
         : state.project ? t("session.newIn", { name: state.project.name }) : "";
   document.title = `${live ? "● " : ""}${name ? name + " · " : ""}Coding Agent`;
@@ -969,6 +976,7 @@ function renderSide() {
       nav("search", t("nav.search"), openSearch, { kbd: "Ctrl K" }),
       nav("grid", t("nav.workspaces"), () => go("workspaces"), { active: state.view === "workspaces", count: state.projects.length || null }),
       nav("activity", t("nav.activity"), () => go("activity"), { active: state.view === "activity", count: state.active.length || null, live: state.active.length > 0 }),
+      nav("server", t("nav.environments"), () => go("environments"), { active: state.view === "environments", count: (state.environments || []).length || null }),
     ),
     h("div", { class: "side-label" }, t("side.sessions")),
     h("div", { class: "side-list" },
@@ -1097,6 +1105,7 @@ function renderTopbar() {
   ];
   if (state.view === "workspaces") parts.push(h("span", { class: "title" }, t("nav.workspaces")));
   else if (state.view === "activity") parts.push(h("span", { class: "title" }, t("nav.activity")));
+  else if (state.view === "environments") parts.push(h("span", { class: "title" }, t("nav.environments")));
   else if (p) {
     parts.push(h("button", { class: "crumb ellipsis", title: t("ws.overview"), onclick: () => go("workspaces") }, p.name));
     parts.push(h("span", { class: "crumb-sep" }, "/"));
@@ -1165,6 +1174,273 @@ function renderActivity() {
       : h("div", { class: "empty-page" }, icon("check", "lg"), h("div", {}, t("activity.empty")),
         h("button", { class: "btn sm", onclick: newSession }, icon("compose", "sm"), t("nav.newSession"))),
   ));
+}
+
+// ---------------------------------------------------------------- 环境配置
+
+// 环境配置与仓库无关（人工验收 Q16–37）：名称、描述、安装脚本、启动命令、.env 变量与联网需求，只有自己看得到；开新会话时选用。
+// 这里只编辑配置；就绪、复用、到期这类运行状态只来自 Runtime 的记录（右栏“环境”），这里不显示也不推断。
+// 字节上限与服务端一致（UTF-8 字节，不是字数）：先在本地挡住，免得几十 KB 的脚本白传一趟；其余（.env 的格式、域名）由服务端说。
+const ENV_LIMITS = { name: 80, description: 4096, setup_script: 65536, start_command: 65536, env: 65536 };
+const ENV_LIMIT_ERRORS = { name: "envcfg.err.name", description: "envcfg.err.description", setup_script: "envcfg.err.setup", start_command: "envcfg.err.start", env: "envcfg.err.env" };
+const NETWORK_MODES = [
+  { id: "deny", icon: "shield" },
+  { id: "allowlist", icon: "list" },
+  { id: "open", icon: "globe" },
+];
+const MAX_HOSTS = 100;
+
+function utf8Bytes(text) {
+  return new TextEncoder().encode(text).length;
+}
+
+async function loadEnvironments() {
+  try {
+    state.environments = await api("GET", "/api/environments");
+    if (state.view === "environments") renderEnvironments();
+    renderSide();
+    scheduleChrome();
+  } catch { /* 下次再取 */ }
+  return state.environments || [];
+}
+
+function findEnvironment(id) {
+  return (state.environments || []).find((e) => e.id === id) || null;
+}
+
+// draftEnvironment 是草稿要用的环境配置：记住的那份已经删掉（列表里没有）时回到默认环境。
+function draftEnvironment() {
+  const id = state.draftEnvironment;
+  if (!id || (state.environments && !findEnvironment(id))) return "";
+  return id;
+}
+
+function setDraftEnvironment(id) {
+  state.draftEnvironment = id;
+  ls.set("cw_environment", id);
+  updateComposer(true);
+}
+
+function envVarCount(env) {
+  return String(env.env || "").split("\n").filter((l) => l.trim() && !l.trim().startsWith("#")).length;
+}
+
+function networkOf(env) {
+  const n = env.network || {};
+  return { mode: NETWORK_MODES.some((m) => m.id === n.mode) ? n.mode : "deny", hosts: n.allowed_hosts || [] };
+}
+
+function networkLabel(env) {
+  const n = networkOf(env);
+  return n.mode === "allowlist" ? t("envcfg.net.hosts", { n: n.hosts.length }) : t("envcfg.net." + n.mode);
+}
+
+function environmentSessions(env) {
+  return state.sessions.filter((s) => s.environment_id === env.id);
+}
+
+function renderEnvironments() {
+  if (!ui.scroll || state.view !== "environments") return;
+  const list = state.environments;
+  const cards = (list || []).map((env) => {
+    const n = networkOf(env);
+    const used = environmentSessions(env).length;
+    return h("div", { class: "ws-card env-card", "data-environment-id": env.id },
+      h("div", { class: "row" },
+        h("span", { class: "ws-icon" }, icon("server", "sm")),
+        h("div", { class: "grow" }, h("div", { class: "name ellipsis" }, env.name), env.description ? h("div", { class: "env-desc" }, env.description) : null)),
+      h("div", { class: "chip-row" },
+        h("span", { class: "chip", title: t("envcfg.privacy") }, icon("user", "xs"), t("envcfg.onlyMe")),
+        h("span", { class: "chip" + (n.mode === "open" ? " warn" : "") }, icon((NETWORK_MODES.find((m) => m.id === n.mode) || NETWORK_MODES[0]).icon, "xs"), networkLabel(env)),
+        env.setup_script ? h("span", { class: "chip" }, icon("terminal", "xs"), t("envcfg.setupChip")) : null,
+        env.start_command ? h("span", { class: "chip" }, icon("play", "xs"), t("envcfg.startChip")) : null,
+        envVarCount(env) ? h("span", { class: "chip mono" }, t("envcfg.vars", { n: envVarCount(env) })) : null),
+      h("div", { class: "stats" }, h("span", { class: "muted" }, used ? t("envcfg.used", { n: used }) : t("envcfg.unused"))),
+      h("div", { class: "actions" },
+        h("button", { class: "btn sm", "data-environment-edit": "", onclick: () => openEnvironmentEditor(env) }, icon("edit", "sm"), t("envcfg.edit")),
+        h("span", { class: "grow" }),
+        h("button", { class: "btn ghost sm danger", "data-environment-delete": "", onclick: () => deleteEnvironment(env) }, icon("trash", "sm"), t("envcfg.delete"))),
+    );
+  });
+  ui.scroll.replaceChildren(h("div", { class: "page" },
+    h("div", { class: "page-head" },
+      h("div", { class: "grow" }, h("h1", {}, t("nav.environments")), h("p", {}, t("envcfg.lead"))),
+      h("button", { class: "btn primary", "data-environment-create": "", onclick: () => openEnvironmentEditor(null) }, icon("plus", "sm"), t("envcfg.create"))),
+    list === null ? h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading"))
+      : cards.length ? h("div", { class: "ws-grid" }, cards)
+        : h("div", { class: "empty-page" }, icon("server", "lg"), h("div", {}, t("envcfg.empty"))),
+  ));
+}
+
+// openEnvironmentEditor 新建（env 为空）或编辑一份环境配置。保存失败时对话框不关、填的内容都留着。
+function openEnvironmentEditor(env) {
+  closePop();
+  for (const old of document.querySelectorAll("dialog.environment-editor")) { old.close(); old.remove(); }
+  const net = env ? networkOf(env) : { mode: "deny", hosts: [] };
+  let mode = net.mode;
+  const counters = {};
+  const field = (name, tag, value, attrs = {}) => {
+    const el = h(tag, { class: "field" + (tag === "textarea" ? " mono" : ""), name, value: value || "", ...attrs });
+    if (ENV_LIMITS[name]) {
+      counters[name] = h("span", { class: "env-bytes" });
+      el.addEventListener("input", () => countBytes(name, el));
+    }
+    return el;
+  };
+  const fields = {
+    name: field("name", "input", env && env.name, { placeholder: t("envcfg.namePh"), autocomplete: "off" }),
+    description: field("description", "textarea", env && env.description, { rows: 2, placeholder: t("envcfg.descriptionPh") }),
+    setup_script: field("setup_script", "textarea", env && env.setup_script, { rows: 5, spellcheck: "false", placeholder: "pip install -r requirements.txt" }),
+    start_command: field("start_command", "textarea", env && env.start_command, { rows: 2, spellcheck: "false", placeholder: "python -m http.server 8000" }),
+    env: field("env", "textarea", env && env.env, { rows: 4, spellcheck: "false", placeholder: "MODE=dev\nPORT=8080" }),
+    allowed_hosts: field("allowed_hosts", "textarea", net.hosts.join("\n"), { rows: 3, spellcheck: "false", placeholder: t("envcfg.hostsPh") }),
+  };
+  fields.description.classList.remove("mono");
+  const countBytes = (name, el) => {
+    const max = ENV_LIMITS[name];
+    const n = utf8Bytes(name === "name" || name === "description" ? el.value.trim() : el.value);
+    const near = n > max * 0.8;
+    counters[name].textContent = near ? t("envcfg.bytes", { n, max }) : "";
+    counters[name].classList.toggle("over", n > max);
+  };
+  for (const name of Object.keys(counters)) countBytes(name, fields[name]);
+  const err = h("div", { class: "err-text", role: "alert" });
+  const seg = h("div", { class: "seg", role: "radiogroup", "aria-label": t("envcfg.network") });
+  const netHint = h("div", { class: "muted small" });
+  const hostsBox = h("div", {}, h("label", { class: "lbl" }, t("envcfg.hosts")), fields.allowed_hosts);
+  const drawNetwork = () => {
+    seg.replaceChildren(...NETWORK_MODES.map((m) => h("button", {
+      type: "button", class: mode === m.id ? "active" : "", role: "radio", "aria-checked": String(mode === m.id), "data-network-mode": m.id,
+      onclick: () => { mode = m.id; drawNetwork(); },
+    }, icon(m.icon, "sm"), t("envcfg.net." + m.id))));
+    netHint.textContent = t("envcfg.netHint." + mode);
+    hostsBox.classList.toggle("hidden", mode !== "allowlist");
+  };
+  drawNetwork();
+  const block = (label, hint, el, name) => h("div", {},
+    h("div", { class: "env-label" }, h("label", { class: "lbl grow" }, label), name ? counters[name] : null),
+    el, hint ? h("div", { class: "muted small env-hint" }, hint) : null);
+  const save = h("button", { class: "btn primary", type: "submit" }, t("envcfg.save"));
+  const cancel = h("button", { class: "btn ghost", type: "button" }, t("common.cancel"));
+  const form = h("form", { novalidate: true },
+    h("div", { class: "d-head" }, h("h2", {}, env ? t("envcfg.editTitle") : t("envcfg.newTitle")),
+      h("div", { class: "muted small" }, t("envcfg.pendingNote"))),
+    h("div", { class: "d-body" },
+      h("div", { class: "row env-row" },
+        h("div", { class: "grow" }, block(t("envcfg.name"), null, fields.name, "name")),
+        h("div", {}, h("label", { class: "lbl" }, t("envcfg.privacy")), h("span", { class: "chip" }, icon("user", "xs"), t("envcfg.onlyMe")))),
+      block(t("envcfg.description"), null, fields.description, "description"),
+      block(t("envcfg.setup"), t("envcfg.setupHint"), fields.setup_script, "setup_script"),
+      block(t("envcfg.start"), t("envcfg.startHint"), fields.start_command, "start_command"),
+      block(t("envcfg.env"), t("envcfg.envHint"), fields.env, "env"),
+      h("div", { class: "col env-network" }, h("label", { class: "lbl" }, t("envcfg.network")), seg, netHint, hostsBox),
+      err),
+    h("div", { class: "d-foot" }, cancel, save),
+  );
+  const dialog = h("dialog", { class: "environment-editor" }, form);
+  // 本地先挡字节上限（与服务端同一个数）；挡下时指到那一栏。
+  const tooLarge = () => {
+    for (const [name, max] of Object.entries(ENV_LIMITS)) {
+      const value = name === "name" || name === "description" ? fields[name].value.trim() : fields[name].value;
+      const n = utf8Bytes(value);
+      if (n > max || (name === "name" && !n)) return { name, text: t(ENV_LIMIT_ERRORS[name], { max, n }) };
+    }
+    return null;
+  };
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    err.textContent = "";
+    const bad = tooLarge();
+    if (bad) {
+      err.textContent = bad.text;
+      fields[bad.name].focus();
+      return;
+    }
+    const hosts = mode === "allowlist" ? fields.allowed_hosts.value.split(/[\s,]+/).filter(Boolean) : [];
+    if (hosts.length > MAX_HOSTS) {
+      err.textContent = t("envcfg.err.hosts", { max: MAX_HOSTS });
+      return;
+    }
+    const body = {
+      name: fields.name.value, description: fields.description.value, privacy: "only_me",
+      setup_script: fields.setup_script.value, start_command: fields.start_command.value, env: fields.env.value,
+      network: { mode, allowed_hosts: hosts },
+    };
+    save.disabled = true;
+    save.textContent = t("envcfg.saving");
+    try {
+      const saved = env ? await api("PUT", `/api/environments/${env.id}`, body) : await api("POST", "/api/environments", body);
+      const list = (state.environments || []).filter((x) => x.id !== saved.id);
+      state.environments = env ? (state.environments || []).map((x) => (x.id === saved.id ? saved : x)) : [saved, ...list];
+      dialog.close();
+      dialog.remove(); // close 事件要等下一轮才到：先拿掉，列表画出来时对话框已经不在了
+      toast(t("envcfg.saved", { name: saved.name }));
+      renderEnvironments();
+      renderSide();
+      scheduleChrome();
+    } catch (ex) {
+      if (ex.message !== "unauthorized") err.textContent = ex.message;
+    } finally {
+      save.disabled = false;
+      save.textContent = t("envcfg.save");
+    }
+  });
+  cancel.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  fields.name.focus();
+}
+
+async function deleteEnvironment(env) {
+  const n = environmentSessions(env).length;
+  if (!confirm(t(n ? "envcfg.deleteConfirmUsed" : "envcfg.deleteConfirm", { name: env.name, n }))) return;
+  try {
+    await api("DELETE", `/api/environments/${env.id}`);
+    state.environments = (state.environments || []).filter((x) => x.id !== env.id);
+    toast(t("envcfg.deleted"));
+    renderEnvironments();
+    renderSide();
+    scheduleChrome();
+  } catch (ex) { report(ex); }
+}
+
+// environmentTool 是输入框下的“环境”：草稿时可以选（默认环境或自己的一份配置），开出会话后固定为当时选的。
+function environmentTool() {
+  const fixed = !!state.session;
+  const id = fixed ? state.session.environment_id || "" : draftEnvironment();
+  const env = id ? findEnvironment(id) : null;
+  const bound = fixed && state.env && state.env.environment;
+  const label = !id ? t("envcfg.default") : env ? env.name : bound && bound.name ? bound.name : t("envcfg.missing");
+  const open = async (anchor) => {
+    if (state.environments === null) await loadEnvironments();
+    openPop(anchor, (close) => {
+      const option = (envId, ic, title, desc) => {
+        const el = popItem(ic, title, desc, draftEnvironment() === envId, () => { close(); setDraftEnvironment(envId); });
+        el.dataset.environmentOption = envId;
+        return el;
+      };
+      return [
+        h("div", { class: "pop-title" }, t("envcfg.heading")),
+        option("", "box", t("envcfg.default"), t("envcfg.defaultDesc")),
+        ...(state.environments || []).map((e) => option(e.id, "server", e.name, e.description || networkLabel(e))),
+        h("div", { class: "pop-sep" }),
+        popItem("edit", t("envcfg.manage"), null, false, () => { close(); go("environments"); }),
+        h("div", { class: "pop-note" }, t("envcfg.pendingNote")),
+      ];
+    });
+  };
+  return h("button", {
+    class: "tool", "data-environment-select": "", disabled: fixed,
+    title: fixed ? t("envcfg.fixedTitle") : t("envcfg.selectTitle"),
+    onclick: (e) => open(e.currentTarget),
+  }, icon("server", "sm"), h("span", { class: "v" }, label), fixed ? null : icon("chevDown", "caret"));
+}
+
+function environmentKey() {
+  const id = state.session ? state.session.environment_id || "" : draftEnvironment();
+  const bound = state.env && state.env.environment ? state.env.environment.name : "";
+  return [id, bound, (state.environments || []).map((e) => `${e.id}:${e.name}`).join(",")].join("/");
 }
 
 // openSearch 是搜索面板（Ctrl/⌘ K）：按标题与工作区名找会话，按名字与来源找工作区。
@@ -2153,7 +2429,7 @@ function updateComposer(force = false) {
   const m = meter();
   const key = [ph.mode, ph.ask && ph.ask.qid, state.settings.sandbox, state.settings.model, meterText(m),
     state.changes ? state.changes.files.length : -1, ph.mode === "failed" || ph.mode === "done" ? ph.last.id : "",
-    state.env && state.env.sandbox ? state.env.sandbox.mode : ""].join("|");
+    state.env && state.env.sandbox ? state.env.sandbox.mode : "", environmentKey()].join("|");
   if (!force && key !== ui.barKey && pop && ui.tools.contains(pop.anchor)) {
     ui.barDirty = true; // 菜单开着：等它关上再重画
   } else if (force || key !== ui.barKey) {
@@ -2172,7 +2448,7 @@ function updateComposer(force = false) {
       ui.cOpts.className = "hidden";
       ui.cOpts.replaceChildren();
     }
-    ui.tools.replaceChildren(sandboxTool(), modelTool(), meterTool(m), h("span", { class: "grow" }), h("div", { class: "c-hint" }, hint(ph)));
+    ui.tools.replaceChildren(environmentTool(), sandboxTool(), modelTool(), meterTool(m), h("span", { class: "grow" }), h("div", { class: "c-hint" }, hint(ph)));
     ui.next.replaceChildren(...nextSteps(ph));
   }
   refreshSend();
@@ -2338,7 +2614,7 @@ async function submit(text) {
   try {
     if (!state.session) {
       const p = state.project;
-      const sess = await api("POST", `/api/projects/${p.id}/sessions`, { title: message });
+      const sess = await api("POST", `/api/projects/${p.id}/sessions`, { title: message, environment_id: draftEnvironment() || undefined });
       state.sessions.unshift(sess);
       state.session = sess;
       state.pending = { ...state.pending, phase: "submit", session: sess.id };
@@ -2436,7 +2712,9 @@ function envBody() {
   const p = state.project;
   const s = state.session;
   const sb = e.sandbox || {};
-  const git = e.git || {};
+  // 分支、HEAD 与改动取自“改动”（/env 不调 Workspace API：那要借沙箱环境）。
+  const c = state.changes || {};
+  const dirty = c.files ? c.files.length : null;
   const se = e.session || {};
   const level = SANDBOX.find((x) => x.id === state.settings.sandbox) || SANDBOX[1];
   const sandboxText = sb.mode === "docker" ? t("env.docker", { image: sb.image || t("env.defaultImage") }) : sb.mode === "host" ? t("env.host") : t("env.unknown");
@@ -2444,21 +2722,82 @@ function envBody() {
   return [
     kv([
       ["Runtime", [h("span", { class: "dot " + (e.runtime && e.runtime.ok ? "ok" : "err") }), e.runtime && e.runtime.ok ? t("env.taskOk") : t("env.taskDown")]],
+      [t("env.config"), envConfigValue(e.environment)],
       [t("env.sandbox"), sandboxText],
       [t("env.permission"), [h("span", { class: "chip" + (level.id === "read" ? " info" : "") }, icon(level.icon, "xs"), level.label), h("span", { class: "muted small" }, t("env.nextTask"))]],
       [t("env.copy"), se.own_copy ? [h("span", {}, t("env.ownCopy")), h("span", { class: "mono small muted", title: se.workspace_id }, se.workspace_id)] : t("env.sharedCopy")],
-      [t("env.branch"), git.branch ? [h("span", { class: "chip mono" }, icon("branch", "xs"), git.branch), git.head ? h("span", { class: "mono small muted" }, git.head.slice(0, 7)) : null] : "—"],
-      git.subject ? [t("env.lastCommit"), h("span", { class: "muted" }, git.subject)] : null,
-      [t("sp.changes"), git.dirty ? t("env.dirty", { n: git.dirty }) : t("env.clean")],
+      [t("env.branch"), c.branch ? [h("span", { class: "chip mono" }, icon("branch", "xs"), c.branch), c.head ? h("span", { class: "mono small muted" }, c.head.slice(0, 7)) : null] : "—"],
+      [t("sp.changes"), dirty === null ? "—" : dirty ? t("env.dirty", { n: dirty }) : t("env.clean")],
       [t("env.workspace"), [h("span", {}, p.name), p.repo ? null : h("span", { class: "muted small" }, sourceLabel(p))]],
       p.repo ? [t("env.repo"), [badge(p.git_provider, "xs"), h("a", { href: repoURL(p), target: "_blank", rel: "noopener" }, p.repo),
         connection(p.git_provider) ? null : h("span", { class: "muted small" }, t("env.notConnected", { name: providerInfo(p.git_provider).name }))]] : null,
       rsid ? ["Session", h("span", { class: "mono small", title: rsid }, rsid.slice(0, 16) + "…")] : null,
     ]),
+    runtimeEnvBlock(e.runtime_environments),
     h("div", { class: "sp-actions" },
       h("button", { class: "btn xs", onclick: () => openDrawer("files") }, icon("folder", "xs"), t("env.browse")),
       s.branch ? h("button", { class: "btn xs", title: t("env.resetTitle", { base: p.base_branch }), onclick: resetBranch }, icon("refresh", "xs"), t("env.reset", { base: p.base_branch })) : null,
       h("button", { class: "btn ghost xs", title: t("common.reload"), onclick: loadEnv }, icon("refresh", "xs"))),
+  ];
+}
+
+// envConfigValue 是会话选定的环境配置：名字（删掉的标出来）与还没交给 Runtime 的提示。
+function envConfigValue(cfg) {
+  if (!cfg) return h("span", { class: "muted" }, t("env.configDefault"));
+  const env = findEnvironment(cfg.id);
+  const name = (env && env.name) || cfg.name || t("envcfg.missing");
+  return [
+    env ? h("button", { class: "link-btn", onclick: () => openEnvironmentEditor(env) }, name) : h("span", {}, name),
+    cfg.deleted ? h("span", { class: "muted small" }, t("env.configDeleted")) : null,
+    cfg.handoff === "pending" ? h("span", { class: "chip warn", title: t("envcfg.pendingNote") }, t("env.handoffPending")) : null,
+  ];
+}
+
+// envStateChip：就绪只看 Runtime 给的 ready（ledger 为 READY、健康已确认、两个期限都没到）；READY 而 ready 为假是“未确认就绪”。
+function envStateChip(r) {
+  if (r.ready) return h("span", { class: "chip ok" }, h("span", { class: "dot ok" }), t("env.state.ready"));
+  if (r.state === "ready") return h("span", { class: "chip warn", title: t("env.unconfirmedTitle") }, t("env.state.unconfirmed"));
+  const kind = { creating: "run", destroying: "", destroyed: "", failed: "err", lost: "err" }[r.state];
+  const key = ["creating", "destroying", "destroyed", "failed", "lost"].includes(r.state) ? r.state : "unknown";
+  return h("span", { class: "chip" + (kind ? " " + kind : "") }, t("env.state." + key));
+}
+
+// runtimeEnvBlock 是 Runtime 记下的沙箱环境（EnvironmentService 的只读投影）：最新的一条详细列出，更早的收起来。
+// 没有的时间写“未知”，不按最近活动或别的时间去推。
+function runtimeEnvBlock(re) {
+  const head = h("div", { class: "sp-sub" }, t("env.runtimeEnv"));
+  if (!re) return [head, h("div", { class: "empty-line" }, t("env.statusUnknown", { reason: "—" }))];
+  const reasonText = (code) => { const k = "env.reason." + code; const v = t(k); return v === k ? code : v; };
+  if (re.status === "blocked_external") {
+    return [head, h("div", { class: "env-status", "data-env-status": re.status },
+      h("span", { class: "chip err mono" }, "blocked_external"), h("span", { class: "muted small" }, t("env.statusBlocked"), " · ", reasonText(re.reason || "unreachable")))];
+  }
+  if (re.status !== "ok") {
+    return [head, h("div", { class: "env-status", "data-env-status": re.status },
+      h("span", { class: "chip mono" }, "unknown"),
+      h("span", { class: "muted small" }, re.reason === "no_runtime_session" ? t("env.noRuntimeSession") : t("env.statusUnknown", { reason: reasonText(re.reason || "—") })))];
+  }
+  const records = re.records || [];
+  if (!records.length) return [head, h("div", { class: "empty-line", "data-env-status": "ok" }, t("env.noRecords"))];
+  const [cur, ...older] = records;
+  const when = (iso) => (iso ? fmtTime(iso) : h("span", { class: "muted" }, t("env.unknownValue")));
+  const backend = [cur.backend, cur.isolation, cur.runtime].filter(Boolean).join(" · ");
+  return [
+    head,
+    h("div", { class: "env-record", "data-env-status": "ok", "data-env-ref": cur.env_ref },
+      kv([
+        [t("env.runtimeEnv"), [envStateChip(cur), h("span", { class: "mono small muted", title: cur.env_ref }, cur.env_ref)]],
+        [t("env.reused"), cur.reused ? t("env.reusedYes", { at: fmtTime(cur.reused_at) || "—" }) : t("env.reusedNo")],
+        [t("env.healthAt"), when(cur.health_confirmed_at)],
+        [t("env.expires"), when(cur.expires_at)],
+        [t("env.maxUntil"), when(cur.max_until)],
+        cur.destroyed_at ? [t("env.destroyedAt"), fmtTime(cur.destroyed_at)] : null,
+        backend ? [t("env.backend"), h("span", { class: "small" }, backend)] : null,
+      ])),
+    older.length ? toggled("env-older", state.envOlderOpen, (v) => { state.envOlderOpen = v; }, t("env.earlier", { n: older.length }),
+      h("div", { class: "env-older" }, older.map((r) => h("div", { class: "env-older-row" }, envStateChip(r),
+        h("span", { class: "mono small muted ellipsis grow", title: r.env_ref }, r.env_ref), h("span", { class: "muted small" }, fmtTime(r.created_at)))))) : null,
+    re.truncated ? h("div", { class: "muted small" }, t("env.truncated")) : null,
   ];
 }
 
