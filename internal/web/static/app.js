@@ -1039,6 +1039,7 @@ function sessionItem(p, s, isLive) {
 function sessionMenu(p, s, close) {
   return [
     popItem("edit", t("session.rename"), null, false, () => { close(); renameSession(p, s); }),
+    popItem("copy", t("session.duplicate"), t("session.duplicateDesc"), false, () => { close(); duplicateSession(p, s); }),
     popItem("trash", t("session.delete"), s.workspace_id !== p.id ? t("session.deleteCopy") : t("session.deleteRecord"), false, () => { close(); deleteSession(p, s); }),
   ];
 }
@@ -1056,6 +1057,17 @@ async function renameSession(p, s) {
     renderSide();
     renderTopbar();
     updateTitle();
+  } catch (ex) { report(ex); }
+}
+
+// duplicateSession 复制会话：新会话的工作副本从这个会话复制（Workspace API 的 copy），环境配置沿用，对话不带过去。
+async function duplicateSession(p, s) {
+  toast(t("session.duplicating"));
+  try {
+    const dup = await api("POST", `${sessionURL(p.id, s.id)}/duplicate`, { title: t("session.copyTitle", { title: s.title || t("session.untitled") }) });
+    state.sessions.unshift(dup);
+    toast(t("session.duplicated"));
+    openSession(p.id, dup.id);
   } catch (ex) { report(ex); }
 }
 
@@ -2737,8 +2749,29 @@ function envBody() {
     h("div", { class: "sp-actions" },
       h("button", { class: "btn xs", onclick: () => openDrawer("files") }, icon("folder", "xs"), t("env.browse")),
       s.branch ? h("button", { class: "btn xs", title: t("env.resetTitle", { base: p.base_branch }), onclick: resetBranch }, icon("refresh", "xs"), t("env.reset", { base: p.base_branch })) : null,
+      canSync(p, s) ? h("button", { class: "btn xs", "data-action": "sync", title: t("sync.title", { base: p.base_branch }), onclick: syncSession }, icon("download", "xs"), t("sync.btn", { base: p.base_branch })) : null,
       h("button", { class: "btn ghost xs", title: t("common.reload"), onclick: loadEnv }, icon("refresh", "xs"))),
   ];
+}
+
+// 拉取基线分支的最新提交（Workspace API 的 sync）：只给有远端、还没推送到自己分支的会话；推送过的用“回到基线分支”。
+function canSync(p, s) {
+  return !!(p && s && !s.branch && p.base_branch && String(p.source || "").startsWith("https://"));
+}
+
+async function syncSession() {
+  const p = state.project;
+  const base = sbase();
+  toast(t("sync.running", { base: p.base_branch }));
+  try {
+    const r = await api("POST", `${base}/sync`);
+    setSession(r.session);
+    if (sbase() !== base) return;
+    toast(t("sync.done", { base: p.base_branch, head: String(r.head || "").slice(0, 7) }));
+    loadChanges();
+    loadEnv();
+    if (state.drawer) renderDrawer();
+  } catch (ex) { report(ex); }
 }
 
 // envConfigValue 是会话选定的环境配置：名字（删掉的标出来）与还没交给 Runtime 的提示。
@@ -3241,6 +3274,11 @@ function renderDiff(text) {
   });
 }
 
+// changedPaths 是“改动”里列出的文件（文件树上标出来；改名的按新路径）。
+function changedPaths() {
+  return new Set((state.changes ? state.changes.files : []).map((f) => String(f.path).replace(/^.* => /, "")));
+}
+
 async function loadFiles(body, path) {
   state.filesPath = path;
   let entries;
@@ -3252,14 +3290,21 @@ async function loadFiles(body, path) {
   }
   const parts = path ? path.split("/") : [];
   const viewer = h("div", {});
+  const changes = changedPaths();
   body.replaceChildren(
     h("div", { class: "card" },
       h("div", { class: "crumbs" }, h("button", { onclick: () => loadFiles(body, "") }, state.session.workspace_id),
         parts.map((p, i) => [h("span", {}, "/"), h("button", { onclick: () => loadFiles(body, parts.slice(0, i + 1).join("/")) }, p)])),
-      entries.length ? h("div", {}, entries.map((e) => h("button", {
-        class: "tree-item",
-        onclick: () => (e.dir ? loadFiles(body, join(path, e.name)) : showFile(viewer, join(path, e.name))),
-      }, icon(e.dir ? "folder" : "file", "sm"), e.name, e.dir ? null : h("span", { class: "size" }, fmtSize(e.size))))) : h("div", { class: "muted" }, t("files.empty")),
+      entries.length ? h("div", {}, entries.map((e) => {
+        const full = join(path, e.name);
+        const changed = e.dir ? [...changes].some((c) => c.startsWith(full + "/")) : changes.has(full);
+        return h("button", {
+          class: "tree-item" + (changed ? " changed" : ""), "data-path": full,
+          onclick: () => (e.dir ? loadFiles(body, full) : showFile(viewer, full)),
+        }, icon(e.dir ? "folder" : "file", "sm"), e.name,
+        changed ? h("span", { class: "chip run tree-mark", title: t("files.changedTitle") }, e.dir ? "•" : t("files.changed")) : null,
+        e.dir ? null : h("span", { class: "size" }, fmtSize(e.size)));
+      })) : h("div", { class: "muted" }, t("files.empty")),
     ),
     viewer,
   );
@@ -3273,7 +3318,9 @@ async function showFile(viewer, path) {
   viewer.replaceChildren(h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading")));
   try {
     const f = await api("GET", `${sbase()}/file?path=${encodeURIComponent(path)}`);
-    const head = h("div", { class: "row" }, icon("file", "sm"), h("strong", { class: "mono grow ellipsis" }, path), h("span", { class: "muted" }, fmtSize(f.size || 0)));
+    const head = h("div", { class: "row" }, icon("file", "sm"), h("strong", { class: "mono grow ellipsis" }, path),
+      changedPaths().has(path) ? h("button", { class: "btn xs", "data-action": "file-diff", onclick: () => openDrawer("changes", { focus: path }) }, icon("diff", "xs"), t("files.viewDiff")) : null,
+      h("span", { class: "muted" }, fmtSize(f.size || 0)));
     const content = f.binary ? h("div", { class: "muted" }, t("files.binary"))
       : f.too_large ? h("div", { class: "muted" }, t("files.tooLarge"))
         : h("pre", { class: "code-view" }, f.content.replace(/\n$/, "").split("\n").map((l) => h("span", {}, l || " ")));
@@ -3283,13 +3330,25 @@ async function showFile(viewer, path) {
   }
 }
 
-async function loadHistory(body) {
+// 提交记录：最近的 limit 个（Workspace API 的 GetLog 最多 200 个，没有游标），“显示更早的”时多取。会话开始时的提交标为“会话起点”，
+// 在它之后的是这个会话自己的提交（起点不在这一页里时不标，免得猜错）。
+const HISTORY_STEP = 30;
+const HISTORY_MAX = 200;
+
+async function loadHistory(body, limit = HISTORY_STEP) {
   try {
-    const commits = await api("GET", `${sbase()}/log`);
-    body.replaceChildren(h("div", { class: "card" }, commits.length ? commits.map((c) => h("div", { class: "commit-row" },
+    const commits = await api("GET", `${sbase()}/log?limit=${limit}`);
+    const start = state.session.base_commit || "";
+    const at = start ? commits.findIndex((c) => c.hash === start) : -1;
+    const rows = commits.map((c, i) => h("div", { class: "commit-row", "data-hash": c.hash },
       h("span", { class: "hash" }, c.hash.slice(0, 7)),
       h("div", { class: "grow" }, h("div", {}, c.subject), h("div", { class: "muted small" }, `${c.author} · ${fmtTime(c.date)}`)),
-    )) : h("div", { class: "muted" }, t("history.none"))));
+      i < at ? h("span", { class: "chip run", "data-own": "" }, t("history.own")) : i === at ? h("span", { class: "chip", "data-start": "" }, t("history.start")) : null,
+    ));
+    const more = commits.length >= limit && limit < HISTORY_MAX
+      ? h("button", { class: "btn ghost sm", "data-action": "history-more", onclick: () => loadHistory(body, Math.min(limit + HISTORY_STEP, HISTORY_MAX)) }, t("history.more"))
+      : commits.length >= HISTORY_MAX ? h("div", { class: "muted small" }, t("history.capped", { n: HISTORY_MAX })) : null;
+    body.replaceChildren(h("div", { class: "card" }, commits.length ? rows : h("div", { class: "muted" }, t("history.none")), more));
   } catch (ex) {
     body.replaceChildren(h("div", { class: "error-box" }, ex.message));
   }

@@ -896,6 +896,9 @@ dialog.palette { width: min(620px, calc(100vw - 32px)); margin-top: 12vh; paddin
 .tree-item:hover { background: var(--sunken); }
 .tree-item .icon { color: var(--muted); }
 .tree-item .size { margin-left: auto; color: var(--faint); font-size: 12px; }
+.tree-item .tree-mark { padding: 0 6px; font-size: 11px; }
+.tree-item .tree-mark + .size { margin-left: 8px; }
+.tree-item.changed .tree-mark { margin-left: auto; }
 .code-view { margin: 0; padding: 12px 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); overflow: auto; font: 12.5px/1.6 var(--font-mono); counter-reset: ln; }
 .code-view span { display: block; padding: 0 14px 0 56px; position: relative; white-space: pre; }
 .code-view span::before { counter-increment: ln; content: counter(ln); position: absolute; left: 0; width: 42px; text-align: right; color: var(--faint); }
