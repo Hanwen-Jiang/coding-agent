@@ -43,10 +43,10 @@ func TestDuplicatingASessionCopiesItsWorkingCopy(t *testing.T) {
 	if data, err := os.ReadFile(copied); err != nil || string(data) != "kept\n" {
 		t.Fatalf("副本里应有原会话提交的文件：%q %v", data, err)
 	}
-	// 删掉的环境配置不沿用。
+	// 环境配置删掉之后，副本照样沿用原会话的快照（2026-11-03 人定：会话只用快照，只是没有密钥）。
 	c.do("DELETE", "/api/environments/"+env["id"].(string), nil)
-	if code, dup2, raw := c.do("POST", api+"/duplicate", map[string]string{}); code != http.StatusCreated || dup2["environment_id"] != nil || dup2["title"] != "原来的" {
-		t.Fatalf("没给标题时沿用原来的、删掉的环境不沿用：%d %s", code, raw)
+	if code, dup2, raw := c.do("POST", api+"/duplicate", map[string]string{}); code != http.StatusCreated || dup2["environment_id"] != env["id"] || dup2["title"] != "原来的" {
+		t.Fatalf("没给标题时沿用原来的；删掉的环境照用快照：%d %s", code, raw)
 	}
 	other := newClient(t, ts.URL)
 	other.do("POST", "/api/login", map[string]string{"tenant": "globex", "user": "bob"})

@@ -82,10 +82,16 @@ func (s *Server) handleEnv(w http.ResponseWriter, r *http.Request, id identity) 
 	}
 	var config map[string]any
 	if sess.EnvironmentID != "" {
-		// 删掉的配置留着墓碑：会话仍显示它选的是哪一份。别人的配置（不该有）只给 id。
+		// 会话用的是开会话时的快照（名字也取快照的）；删掉的配置留着墓碑，标出来：会话照用快照，密钥已经删掉。
+		// 别人的配置（不该有）只给 id。快照的内容不在这里给：只有配置的主人看得到它们。
 		config = map[string]any{"id": sess.EnvironmentID, "handoff": sess.EnvironmentHandoff}
+		snap, hasSnap, _ := s.store.Snapshot(id.TenantID, sess.WorkspaceID)
 		if env, found, err := s.store.Environment(id.TenantID, sess.EnvironmentID); err == nil && found && env.CreatedBy == id.UserID {
 			config["name"], config["deleted"] = env.Name, env.DeletedAt != nil
+			if hasSnap {
+				config["name"], config["snapshot"], config["version"] = snap.Name, true, snap.Version
+				config["changed_since"] = env.DeletedAt == nil && env.Version > snap.Version
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

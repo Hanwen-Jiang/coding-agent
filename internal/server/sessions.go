@@ -180,25 +180,42 @@ func (s *Server) createSession(r *http.Request, id identity, p Project, title st
 	if from != nil && from.BaseCommit != "" {
 		sess.BaseCommit = from.BaseCommit
 	}
+	// 环境配置的快照：新会话取选定配置的这一刻；复制的会话沿用原会话的快照（不是活的配置，删掉了也照用）。
+	var snap *EnvironmentSnapshot
+	if env != nil {
+		taken := snapshotOf(*env, now)
+		snap = &taken
+	} else if from != nil {
+		if old, ok, err := s.store.Snapshot(id.TenantID, from.WorkspaceID); err == nil && ok {
+			snap = &old
+		}
+	}
 	if from == nil && p.Repo != "" && strings.HasPrefix(p.Source, "https://") && s.providers[p.Provider] != nil && p.BaseBranch != "" {
 		if head, err := s.ws.Sync(ctx, id, sess.WorkspaceID, p.BaseBranch, s.gitCredentials(r, id, p)); err == nil {
 			sess.BaseCommit = head
 		}
 	}
-	if env != nil {
-		sess.EnvironmentID, sess.EnvironmentHandoff = env.ID, handoffPending
-		if state, err := s.handoff.Bind(ctx, id, sess, *env); err == nil && state != "" {
-			sess.EnvironmentHandoff = state
+	if snap != nil {
+		sess.EnvironmentID, sess.EnvironmentHandoff = snap.EnvironmentID, handoffPending
+		if err := s.store.PutSnapshot(id.TenantID, sess.WorkspaceID, *snap); err != nil {
+			_ = s.ws.Delete(ctx, id, sess.WorkspaceID)
+			return Session{}, err
+		}
+		if in, ok, err := s.environmentHandoffInput(id.TenantID, sess); err == nil && ok {
+			if state, err := s.handoff.Bind(ctx, id, sess, in); err == nil && state != "" {
+				sess.EnvironmentHandoff = state
+			}
 		}
 	}
 	if err := s.store.UpdateSessions(id.TenantID, func(all []Session) ([]Session, error) { return append(all, sess), nil }); err != nil {
 		_ = s.ws.Delete(ctx, id, sess.WorkspaceID)
+		_ = s.store.DeleteSession(id.TenantID, sess)
 		return Session{}, err
 	}
 	return sess, nil
 }
 
-// handleDuplicateSession 复制会话（Workspace API 的 copy）：新会话的工作副本从这个会话的工作副本复制，环境配置沿用（删掉的不沿用），
+// handleDuplicateSession 复制会话（Workspace API 的 copy）：新会话的工作副本从这个会话的工作副本复制，环境配置的快照沿用（配置删掉了也照用，没有密钥），
 // 对话、分支与 PR 不带过去（新会话推送时有自己的 agent/* 分支）。在跑任务时不复制：拿到的会是半截的改动。
 func (s *Server) handleDuplicateSession(w http.ResponseWriter, r *http.Request, id identity) {
 	p, src, ok := s.session(w, r, id)
@@ -219,13 +236,7 @@ func (s *Server) handleDuplicateSession(w http.ResponseWriter, r *http.Request, 
 	if title == "" {
 		title = src.Title
 	}
-	var env *Environment
-	if src.EnvironmentID != "" {
-		if found, ok, err := s.environmentForUser(id.TenantID, id.UserID, src.EnvironmentID); err == nil && ok {
-			env = &found
-		}
-	}
-	sess, err := s.createSession(r, id, p, title, env, &src)
+	sess, err := s.createSession(r, id, p, title, nil, &src)
 	if err != nil {
 		writeMsg(w, r, statusOf(err, http.StatusInternalServerError), "复制会话失败：%v", err)
 		return

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -24,18 +25,73 @@ const (
 	handoffPending = "pending"
 )
 
-// environmentHandoff 是把会话选定的环境配置交给 Runtime 的接缝。在会话的工作副本建好之后、第一个任务之前调用；
+// EnvironmentHandoffInput 是交给 Runtime 的东西（2026-11-03 人定）：会话开出时的快照（不是活的配置），配置还在时再加上密钥的值；
+// 配置删掉之后没有密钥。密钥只在这里解开，不写日志、不回给浏览器。
+type EnvironmentHandoffInput struct {
+	Snapshot EnvironmentSnapshot
+	// Secrets 是快照里列着名字、配置里现在还有的密钥（轮换过的取新值）；配置删掉时为空。
+	Secrets map[string]string
+	// ConfigDeleted：配置已经删掉（会话照用快照，没有密钥）。
+	ConfigDeleted bool
+}
+
+// environmentHandoff 是把会话的环境配置交给 Runtime 的接缝。在会话的工作副本建好之后、第一个任务之前调用；
 // 返回交接状态（记在 Session.EnvironmentHandoff）。返回错误时会话照开，状态记 pending，下次可以再交。
+// 输入用 environmentHandoffInput 现算：以后每次起沙箱前再交一次时，密钥按那时的配置取（删掉了就没有）。
 type environmentHandoff interface {
-	Bind(ctx context.Context, id identity, sess Session, env Environment) (string, error)
+	Bind(ctx context.Context, id identity, sess Session, in EnvironmentHandoffInput) (string, error)
 }
 
 // pendingHandoff 是 ENV-02 契约定下之前的实现：不调 Runtime。
 // TODO(ENV-02)：换成调 Runtime 的工作区绑定（Runtime 仓库 docs/plan/environment-config.md 第 4、5 节）。
 type pendingHandoff struct{}
 
-func (pendingHandoff) Bind(context.Context, identity, Session, Environment) (string, error) {
+func (pendingHandoff) Bind(context.Context, identity, Session, EnvironmentHandoffInput) (string, error) {
 	return handoffPending, nil
+}
+
+// environmentHandoffInput 按会话的快照算出交给 Runtime 的输入。没有快照（没选环境，或快照之前开的会话）时 ok 为 false。
+// 密钥只取快照里列着名字的，而且只在配置还在、仍是开会话的人的时候取；解不开的密钥报错（不拿空值顶替）。
+func (s *Server) environmentHandoffInput(tenant string, sess Session) (EnvironmentHandoffInput, bool, error) {
+	snap, ok, err := s.store.Snapshot(tenant, sess.WorkspaceID)
+	if err != nil || !ok {
+		return EnvironmentHandoffInput{}, false, err
+	}
+	in := EnvironmentHandoffInput{Snapshot: snap, Secrets: map[string]string{}}
+	env, found, err := s.store.Environment(tenant, snap.EnvironmentID)
+	if err != nil {
+		return EnvironmentHandoffInput{}, false, err
+	}
+	if !found || env.DeletedAt != nil || env.CreatedBy != sess.CreatedBy {
+		in.ConfigDeleted = true
+		return in, true, nil
+	}
+	for _, sec := range env.Secrets {
+		if !slices.Contains(snap.SecretNames, sec.Name) {
+			continue
+		}
+		value, err := s.openSecret(tenant, env.CreatedBy, env.ID, sec.Name, sec.Sealed)
+		if err != nil {
+			return EnvironmentHandoffInput{}, false, err
+		}
+		in.Secrets[sec.Name] = value
+	}
+	return in, true, nil
+}
+
+// snapshotOf 是开会话那一刻环境配置的快照：不是机密的设置与密钥的名字。
+func snapshotOf(env Environment, now time.Time) EnvironmentSnapshot {
+	snap := EnvironmentSnapshot{
+		EnvironmentID: env.ID, Name: env.Name, Version: env.Version, UpdatedAt: env.UpdatedAt,
+		SetupScript: env.SetupScript, StartCommand: env.StartCommand, Env: env.Env, Network: env.Network, TakenAt: now,
+	}
+	if snap.Network.Mode == "" {
+		snap.Network.Mode = networkDeny
+	}
+	for _, sec := range env.Secrets {
+		snap.SecretNames = append(snap.SecretNames, sec.Name)
+	}
+	return snap
 }
 
 // --- 读 Runtime 的 EnvironmentService ---

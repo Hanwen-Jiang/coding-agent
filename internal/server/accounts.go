@@ -83,8 +83,32 @@ func (s *Server) tokenKey() []byte {
 	return mac.Sum(nil)
 }
 
-func (s *Server) seal(plain, aad string) (string, error) {
-	block, err := aes.NewCipher(s.tokenKey())
+// secretKey 是环境配置里密钥的加密密钥，与令牌的分开派生。
+func (s *Server) secretKey() []byte {
+	mac := hmac.New(sha256.New, s.cfg.SigningKey)
+	mac.Write([]byte("coding-web/environment-secret/v1"))
+	return mac.Sum(nil)
+}
+
+func secretAAD(tenant, user, envID, name string) string {
+	return "environment-secret/" + tenant + "/" + user + "/" + envID + "/" + name
+}
+
+// sealSecret、openSecret 加密、解开环境配置的一个密钥：绑定（租户、用户、环境、名字），换到别处解不开。
+func (s *Server) sealSecret(tenant, user, envID, name, value string) (string, error) {
+	return sealWith(s.secretKey(), value, secretAAD(tenant, user, envID, name))
+}
+
+func (s *Server) openSecret(tenant, user, envID, name, sealed string) (string, error) {
+	return openWith(s.secretKey(), sealed, secretAAD(tenant, user, envID, name))
+}
+
+func (s *Server) seal(plain, aad string) (string, error) { return sealWith(s.tokenKey(), plain, aad) }
+
+func (s *Server) open(sealed, aad string) (string, error) { return openWith(s.tokenKey(), sealed, aad) }
+
+func sealWith(key []byte, plain, aad string) (string, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
@@ -99,12 +123,12 @@ func (s *Server) seal(plain, aad string) (string, error) {
 	return base64.StdEncoding.EncodeToString(gcm.Seal(nonce, nonce, []byte(plain), []byte(aad))), nil
 }
 
-func (s *Server) open(sealed, aad string) (string, error) {
+func openWith(key []byte, sealed, aad string) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(sealed)
 	if err != nil {
 		return "", err
 	}
-	block, err := aes.NewCipher(s.tokenKey())
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
