@@ -72,6 +72,8 @@
 
 ### G-02 Webhook 收件与对账
 
+> 2026-11-03 已完成（代码，没部署）：`internal/github`（收件箱、后台处理、对账、清理），路由 `POST /api/webhooks/github`，`coding-web github-replay <delivery>`，`CODING_GITHUB_DSN`（配了 App 而没有它时 Webhook 回 503）。第 1～8 条有测试（Postgres 用 Runtime 的 pgtest）。还要等后面的：第 6 条“每个处理函数执行两次结果相同”要等 G-04 有了处理函数才测得了；第 8 条的告警指标现在只是计数（`Stats`），G-05 接进 Telemetry 与 Grafana；第 9 条要上线后看。
+
 1. 签名错或缺：401，不落盘，不解析 JSON。只认 `X-Hub-Signature-256`，常量时间比较。
 2. 目标 App ID 不符：拒绝。
 3. 超过上限：413，不留临时文件；大请求不把内存吃满。

@@ -37,6 +37,10 @@
 //	CODING_GITHUB_APP_PRIVATE_KEY_FILE    私钥文件（单独的 Secret 按文件挂进来）；私钥放在环境变量里会被拒绝
 //	CODING_GITHUB_WEBHOOK_SECRET、_PREVIOUS  Webhook secret；_PREVIOUS 只在轮换期间有
 //	CODING_GITHUB_APP_CLIENT_SECRET       用户授权（G-03）要的 Client secret
+//	CODING_GITHUB_DSN                     收件箱的 Postgres（G-02，internal/github）；配了 App 而没有它时 Webhook 回 503
+//	CODING_GITHUB_API_URL                 对账调的 API，默认 https://api.github.com
+//
+//	coding-web github-replay <delivery>   把收件箱里的一条投递重新入队（死信修好之后用）
 //
 // 第三方登录（<平台> 是 GITHUB、GITEE、GITLAB、GITEA、BITBUCKET、GOOGLE；Client ID 与 Secret 都给了才打开这一家）：
 //
@@ -64,10 +68,19 @@ import (
 	"time"
 
 	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/jwtingress"
+	"github.com/agentruntime/coding-agent/internal/github"
 	"github.com/agentruntime/coding-agent/internal/server"
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "github-replay":
+			os.Exit(githubReplay(os.Args[2:]))
+		default:
+			log.Fatalf("不认识的子命令 %s（只有 github-replay <delivery>）", os.Args[1])
+		}
+	}
 	cfg := server.Config{
 		TaskAPI:       os.Getenv("CODING_TASK_API"),
 		Workspaces:    os.Getenv("CODING_WORKSPACES"),
@@ -102,6 +115,21 @@ func main() {
 			cfg.Providers[id] = c
 		}
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if cfg.GitHubApp != nil {
+		if os.Getenv("CODING_GITHUB_DSN") == "" {
+			log.Printf("配了 GitHub App 但没有 CODING_GITHUB_DSN：Webhook 回 503，配上库之后对账会补投 3 天内失败的")
+		} else {
+			inbox, err := newInbox(ctx, cfg.GitHubApp)
+			if err != nil {
+				log.Fatalf("coding-web: %v", err)
+			}
+			defer inbox.Close()
+			cfg.Webhook = inbox
+			go inbox.Run(ctx)
+		}
+	}
 	srv, err := server.New(cfg)
 	if err != nil {
 		log.Fatalf("coding-web: %v", err)
@@ -111,8 +139,6 @@ func main() {
 		addr = "127.0.0.1:8095"
 	}
 	httpServer := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -123,6 +149,36 @@ func main() {
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("coding-web: %v", err)
 	}
+}
+
+// newInbox 连上 GitHub App 的收件箱（G-02）：库是 CODING_GITHUB_DSN，对账调的 API 是 CODING_GITHUB_API_URL（默认 api.github.com）。
+func newInbox(ctx context.Context, app *server.GitHubApp) (*github.Service, error) {
+	return github.New(ctx, github.Options{DSN: os.Getenv("CODING_GITHUB_DSN"), App: app, AppID: app.AppID, APIURL: os.Getenv("CODING_GITHUB_API_URL")})
+}
+
+// githubReplay 把收件箱里的一条投递重新入队（死信修好之后用）：coding-web github-replay <delivery>。
+func githubReplay(args []string) int {
+	if len(args) != 1 {
+		log.Print("用法：coding-web github-replay <delivery>")
+		return 2
+	}
+	app, err := server.GitHubAppFromEnv(os.Getenv)
+	if err != nil || app == nil || os.Getenv("CODING_GITHUB_DSN") == "" {
+		log.Printf("github-replay 要 GitHub App 的配置与 CODING_GITHUB_DSN：%v", err)
+		return 2
+	}
+	inbox, err := newInbox(context.Background(), app)
+	if err != nil {
+		log.Print(err)
+		return 1
+	}
+	defer inbox.Close()
+	if err := inbox.Replay(context.Background(), args[0]); err != nil {
+		log.Print(err)
+		return 1
+	}
+	log.Printf("投递 %s 已重新入队，coding-web 的后台会处理它", args[0])
+	return 0
 }
 
 // readKeys 读 JWT 私钥、第三方令牌的加密密钥（AUTH-01）与会话的有效期（AUTH-02）；错误信息只提变量名，不带密钥。

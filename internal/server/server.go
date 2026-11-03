@@ -58,6 +58,8 @@ type Config struct {
 	TokenKeyPrevious []byte
 	// GitHubApp 是 GitHub App 的配置（G-01，githubapp.go）；nil 表示没配，功能关闭。
 	GitHubApp *GitHubApp
+	// Webhook 是 GitHub App 的收件箱（G-02，internal/github），挂在 POST /api/webhooks/github；配了 App 而它为 nil 时那里回 503。
+	Webhook http.Handler
 	// SessionIdle、SessionMaxAge 是浏览器会话的空闲与绝对有效期（AUTH-02，browser_sessions.go；默认 24 小时、7 天）。Now 只给测试换时钟。
 	SessionIdle   time.Duration
 	SessionMaxAge time.Duration
@@ -185,6 +187,13 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /.well-known/jwks.json", s.handleJWKS)
+	// GitHub App 的 Webhook（G-02）：不要登录与 X-Coding-Web 头，签名由收件箱验。
+	switch {
+	case s.cfg.Webhook != nil:
+		mux.Handle("POST /api/webhooks/github", s.cfg.Webhook)
+	case s.cfg.GitHubApp != nil:
+		mux.HandleFunc("POST /api/webhooks/github", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) })
+	}
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
