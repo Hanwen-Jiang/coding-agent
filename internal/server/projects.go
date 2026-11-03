@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -296,9 +297,14 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request, id identity) 
 	if !ok {
 		return
 	}
+	// 默认最近 30 个，“显示更早的”时多取；Workspace API 最多给 200 个（GetLog 没有游标：窗口就是最近的 limit 个）。
+	limit := 30
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
+		limit = min(n, 200)
+	}
 	ctx, cancel := ctxTimeout(r, 2*time.Minute)
 	defer cancel()
-	commits, err := s.ws.Log(ctx, id, sess.WorkspaceID, 30, "")
+	commits, err := s.ws.Log(ctx, id, sess.WorkspaceID, limit, "")
 	if err != nil {
 		writeWorkspaceError(w, r, err, http.StatusInternalServerError)
 		return

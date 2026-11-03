@@ -187,3 +187,58 @@ func (s *Server) handleResetBranch(w http.ResponseWriter, r *http.Request, id id
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"session": updated, "head": head})
 }
+
+// handleSync 把还没有自己分支的会话拉到基线分支在远端的最新提交（Workspace API 的 SyncWorkspace）。要求没有任务在跑、
+// 没有未提交的改动，也没有还没推送的提交（会话开始以来自己的提交：拉取会切走它们）；已经推送到 agent/* 分支的会话用“回到基线分支”。
+func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, id identity) {
+	p, sess, ok := s.session(w, r, id)
+	if !ok {
+		return
+	}
+	switch {
+	case !strings.HasPrefix(p.Source, "https://"):
+		writeMsg(w, r, http.StatusBadRequest, "这个工作区没有远端仓库，没有可拉取的")
+		return
+	case p.BaseBranch == "":
+		writeMsg(w, r, http.StatusBadRequest, "不知道基线分支")
+		return
+	case sess.Branch != "":
+		writeMsg(w, r, http.StatusConflict, "这个会话已经推送到 %s：用“回到基线分支”", sess.Branch)
+		return
+	}
+	if s.busy(r, id, sess.WorkspaceID) {
+		writeMsg(w, r, http.StatusConflict, "还有任务在跑，等它结束再拉取")
+		return
+	}
+	ctx, cancel := ctxTimeout(r, 10*time.Minute)
+	defer cancel()
+	if changes, err := s.ws.Changes(ctx, id, sess.WorkspaceID); err != nil {
+		writeWorkspaceError(w, r, err, http.StatusInternalServerError)
+		return
+	} else if len(changes.Files) > 0 {
+		writeMsg(w, r, http.StatusConflict, "还有未提交的改动：先提交或丢弃")
+		return
+	}
+	base := sess.BaseCommit
+	if base == "" {
+		base = "origin/" + p.BaseBranch
+	}
+	if own, err := s.ws.Log(ctx, id, sess.WorkspaceID, 1, base); err != nil {
+		writeWorkspaceError(w, r, err, http.StatusInternalServerError)
+		return
+	} else if len(own) > 0 {
+		writeMsg(w, r, http.StatusConflict, "这个会话有还没推送的提交：先推送，拉取会切走它们")
+		return
+	}
+	head, err := s.ws.Sync(ctx, id, sess.WorkspaceID, p.BaseBranch, s.gitCredentials(r, id, p))
+	if err != nil {
+		writeMsg(w, r, statusOf(err, http.StatusBadGateway), "拉取失败：%v", err)
+		return
+	}
+	updated, err := s.updateSession(id.TenantID, sess, func(x *Session) { x.BaseCommit = head })
+	if err != nil {
+		writeErr(w, r, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"session": updated, "head": head})
+}

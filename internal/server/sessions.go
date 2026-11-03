@@ -151,7 +151,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 		}
 		env = &found
 	}
-	sess, err := s.createSession(r, id, p, sessionTitle(req.Title), env)
+	sess, err := s.createSession(r, id, p, sessionTitle(req.Title), env, nil)
 	if err != nil {
 		writeMsg(w, r, http.StatusInternalServerError, "开会话失败：%v", err)
 		return
@@ -160,19 +160,27 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 }
 
 // createSession 从工作区的基线仓库复制出会话的工作副本（Workspaces.Create 的 From），Git 平台的工作区再尽量切到基线分支
-// 在远端的最新提交（拉不到时照用复制来的）。选了环境配置时记在会话上，再经接缝交给 Runtime（envhandoff.go）。
-func (s *Server) createSession(r *http.Request, id identity, p Project, title string, env *Environment) (Session, error) {
+// 在远端的最新提交（拉不到时照用复制来的）。给了 from 时改从那个会话的工作副本复制（复制会话：连同未提交的改动，不拉取），
+// 基线提交沿用它的。选了环境配置时记在会话上，再经接缝交给 Runtime（envhandoff.go）。
+func (s *Server) createSession(r *http.Request, id identity, p Project, title string, env *Environment, from *Session) (Session, error) {
 	now := time.Now().UTC()
 	sess := Session{ID: newSessionID(), ProjectID: p.ID, Title: title, CreatedAt: now, CreatedBy: id.UserID, UpdatedAt: now}
 	sess.WorkspaceID = p.ID + "--" + sess.ID
 	ctx, cancel := ctxTimeout(r, 10*time.Minute)
 	defer cancel()
-	info, err := s.ws.Create(ctx, id, sess.WorkspaceID, CreateSpec{From: p.ID})
+	source := p.ID
+	if from != nil {
+		source = from.WorkspaceID
+	}
+	info, err := s.ws.Create(ctx, id, sess.WorkspaceID, CreateSpec{From: source})
 	if err != nil {
 		return Session{}, err
 	}
 	sess.BaseCommit = info.Head
-	if p.Repo != "" && strings.HasPrefix(p.Source, "https://") && s.providers[p.Provider] != nil && p.BaseBranch != "" {
+	if from != nil && from.BaseCommit != "" {
+		sess.BaseCommit = from.BaseCommit
+	}
+	if from == nil && p.Repo != "" && strings.HasPrefix(p.Source, "https://") && s.providers[p.Provider] != nil && p.BaseBranch != "" {
 		if head, err := s.ws.Sync(ctx, id, sess.WorkspaceID, p.BaseBranch, s.gitCredentials(r, id, p)); err == nil {
 			sess.BaseCommit = head
 		}
@@ -188,6 +196,41 @@ func (s *Server) createSession(r *http.Request, id identity, p Project, title st
 		return Session{}, err
 	}
 	return sess, nil
+}
+
+// handleDuplicateSession 复制会话（Workspace API 的 copy）：新会话的工作副本从这个会话的工作副本复制，环境配置沿用（删掉的不沿用），
+// 对话、分支与 PR 不带过去（新会话推送时有自己的 agent/* 分支）。在跑任务时不复制：拿到的会是半截的改动。
+func (s *Server) handleDuplicateSession(w http.ResponseWriter, r *http.Request, id identity) {
+	p, src, ok := s.session(w, r, id)
+	if !ok {
+		return
+	}
+	var req struct {
+		Title string `json:"title"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	if s.busy(r, id, src.WorkspaceID) {
+		writeMsg(w, r, http.StatusConflict, "还有任务在跑，等它结束再复制")
+		return
+	}
+	title := sessionTitle(req.Title)
+	if title == "" {
+		title = src.Title
+	}
+	var env *Environment
+	if src.EnvironmentID != "" {
+		if found, ok, err := s.environmentForUser(id.TenantID, id.UserID, src.EnvironmentID); err == nil && ok {
+			env = &found
+		}
+	}
+	sess, err := s.createSession(r, id, p, title, env, &src)
+	if err != nil {
+		writeMsg(w, r, statusOf(err, http.StatusInternalServerError), "复制会话失败：%v", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, sess)
 }
 
 func (s *Server) handleRenameSession(w http.ResponseWriter, r *http.Request, id identity) {

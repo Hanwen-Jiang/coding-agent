@@ -175,6 +175,7 @@ func (s *Server) Handler() http.Handler {
 	const sess = "/api/projects/{project}/sessions/{session}"
 	mux.HandleFunc("DELETE "+sess, s.authed(s.handleDeleteSession))
 	mux.HandleFunc("POST "+sess+"/rename", s.authed(s.handleRenameSession))
+	mux.HandleFunc("POST "+sess+"/duplicate", s.authed(s.handleDuplicateSession))
 	mux.HandleFunc("GET "+sess+"/env", s.authed(s.handleEnv))
 	mux.HandleFunc("GET "+sess+"/tree", s.authed(s.handleTree))
 	mux.HandleFunc("GET "+sess+"/file", s.authed(s.handleFile))
@@ -185,6 +186,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+sess+"/discard", s.authed(s.handleDiscard))
 	mux.HandleFunc("POST "+sess+"/publish", s.authed(s.handlePublish))
 	mux.HandleFunc("POST "+sess+"/reset-branch", s.authed(s.handleResetBranch))
+	mux.HandleFunc("POST "+sess+"/sync", s.authed(s.handleSync))
 	mux.HandleFunc("GET "+sess+"/tasks", s.authed(s.handleListTasks))
 	mux.HandleFunc("POST "+sess+"/tasks", s.authed(s.handleSubmitTask))
 	mux.HandleFunc("GET "+sess+"/tasks/{task}", s.authed(s.handleQueryTask))
