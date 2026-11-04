@@ -144,9 +144,10 @@ func (s *Server) onInstallation(ctx context.Context, d github.Delivery) error {
 	s.github.mu.Lock()
 	s.github.perms = nil // 权限可能变了：下次重新查
 	s.github.mu.Unlock()
+	now := s.now().UTC()
 	changed, err := s.updateGitHubProjects(func(p Project) bool { return p.InstallationID == e.Installation.ID }, func(p *Project) {
 		if state != "" || p.RemoteState == "app_suspended" || p.RemoteState == "app_removed" {
-			p.RemoteState = state
+			markRemoteState(p, state, now)
 		}
 	})
 	if err != nil || state == "" {

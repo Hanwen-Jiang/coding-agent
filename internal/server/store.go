@@ -29,6 +29,8 @@ type Project struct {
 	// （仓库从安装里移除）、remote_deleted（仓库删了）；空表示正常。不正常时不签发令牌。RemoteUpdated 是基线分支在远端有新提交。
 	RemoteState   string `json:"remote_state,omitempty"`
 	RemoteUpdated bool   `json:"remote_updated,omitempty"`
+	// RemovedAt 是看到 App 被卸载（app_removed）的时间：30 天后对账去掉 InstallationID（G-05，github-app.md 第 5 节第 6 条）。
+	RemovedAt time.Time `json:"removed_at,omitzero"`
 	// 多平台之前只有 GitHub：读到时转成 Provider、Repo。
 	GitHubRepo string `json:"github_repo,omitempty"`
 	// 克隆时的分支（PR 的目标分支）。

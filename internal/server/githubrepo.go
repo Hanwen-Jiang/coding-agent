@@ -205,10 +205,10 @@ func (s *Server) authorizeRepo(r *http.Request, id identity, p *Project, need re
 	}
 	if removed != nil && p.ID != "" {
 		// 签得出来：重新装好了或仓库加回来了。只清这两种标记，不覆盖期间事件记下的别的状况。
-		p.RemoteState = ""
+		p.RemoteState, p.RemovedAt = "", time.Time{}
 		_, _ = s.updateProject(id.TenantID, p.ID, func(x *Project) {
 			if x.RemoteState == "app_removed" || x.RemoteState == "repo_removed" {
-				x.RemoteState = ""
+				x.RemoteState, x.RemovedAt = "", time.Time{}
 			}
 		})
 	}

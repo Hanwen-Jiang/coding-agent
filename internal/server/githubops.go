@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/agentruntime/coding-agent/internal/github"
 )
@@ -107,6 +108,7 @@ func (s *Server) ReconcileGitHubInstallations(ctx context.Context) error {
 			moved[p.Repo] = cur.ID
 		}
 	}
+	now := s.now().UTC()
 	_, err = s.updateGitHubProjects(func(p Project) bool { return p.InstallationID != 0 }, func(p *Project) {
 		if inst := moved[p.Repo]; inst != 0 {
 			p.InstallationID = inst
@@ -114,18 +116,36 @@ func (s *Server) ReconcileGitHubInstallations(ctx context.Context) error {
 		suspended, ok := installs[p.InstallationID]
 		switch {
 		case !ok:
-			p.RemoteState = "app_removed"
+			markRemoteState(p, "app_removed", now)
 		case suspended:
-			p.RemoteState = "app_suspended"
+			markRemoteState(p, "app_suspended", now)
 		case p.RepoID != 0 && !repos[p.InstallationID][p.RepoID]:
 			if p.RemoteState != "remote_deleted" {
-				p.RemoteState = "repo_removed"
+				markRemoteState(p, "repo_removed", now)
 			}
 		case p.RemoteState != "remote_deleted":
-			p.RemoteState = ""
+			markRemoteState(p, "", now)
+		}
+		// 安装记录保留到卸载后 30 天（第 5 节第 6 条）：之后去掉安装 ID，卸载的标记留着（重新安装时 authorizeRepo 按 API 再查）。
+		if p.RemoteState == "app_removed" && !p.RemovedAt.IsZero() && now.Sub(p.RemovedAt) > installationRetention {
+			p.InstallationID = 0
 		}
 	})
 	return err
+}
+
+// installationRetention 是卸载之后项目上还留着安装 ID 的时间。
+const installationRetention = 30 * 24 * time.Hour
+
+// markRemoteState 改项目的远端状况：进入 app_removed 时记下时间（已经是 app_removed 的不改），离开时清掉。
+func markRemoteState(p *Project, state string, now time.Time) {
+	switch {
+	case state == "app_removed" && (p.RemoteState != "app_removed" || p.RemovedAt.IsZero()):
+		p.RemovedAt = now
+	case state != "app_removed":
+		p.RemovedAt = time.Time{}
+	}
+	p.RemoteState = state
 }
 
 func (s *Server) installationRepos(ctx context.Context, prov *Provider, jwt string, inst int64) (map[int64]bool, error) {
