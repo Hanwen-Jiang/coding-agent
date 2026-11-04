@@ -571,6 +571,10 @@ async function openAccount() {
   );
   // 配了 GitHub App 时连接列表下面另有一段（G-05）：只取一次，断开重画时原样留着。
   const github = state.config.github_app ? h("div", { class: "github-app-slot" }) : null;
+  // 服务端打开了网络密钥（WEB-SEC）时的入口；D-23 第二阶段之前默认关着。
+  const secrets = state.config.network_secrets
+    ? h("div", { class: "secrets-entry" }, h("button", { class: "btn sm secrets-open", onclick: () => openSecrets() }, t("secrets.open")))
+    : null;
   const draw = (acct) => {
     const conns = acct.connections || [];
     const rows = providerList().filter((p) => p.configured || state.config.dev_login || conns.some((c) => c.provider === p.id)).map((p) => {
@@ -585,13 +589,65 @@ async function openAccount() {
         c ? h("button", { class: "btn sm", onclick: () => disconnect(p, draw) }, t("account.disconnect"))
           : p.configured ? h("a", { class: "btn sm primary", href: `/api/auth/${p.id}/login?link=1` }, t("account.connect")) : null);
     });
-    body.replaceChildren(...[h("div", { class: "conn-list" }, rows), github].filter(Boolean));
+    body.replaceChildren(...[h("div", { class: "conn-list" }, rows), github, secrets].filter(Boolean));
   };
   dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();
   try { draw(await api("GET", "/api/account")); } catch (ex) { report(ex); }
   if (github) drawGitHubApp(github);
+}
+
+// openSecrets 是“网络密钥”（WEB-SEC，/api/secrets；值存在 Runtime 的 SecretStore 里）：只列名字与时间，值只进不出——
+// 编辑不回显旧值，保存之后清空输入框，关掉对话框时也清空。环境现在还不能引用它们（D-23 第二阶段），页上写明。
+async function openSecrets() {
+  if (document.querySelector("dialog.secrets")) return;
+  const list = h("div", { class: "secret-list" }, h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading")));
+  const name = h("input", { class: "secret-name", placeholder: t("secrets.name"), maxlength: 128, autocomplete: "off", spellcheck: "false" });
+  const value = h("input", { class: "secret-value", type: "password", placeholder: t("secrets.value"), autocomplete: "new-password", spellcheck: "false" });
+  const save = h("button", { class: "btn sm primary secret-save", onclick: () => saveSecret() }, t("secrets.save"));
+  const dialog = h("dialog", { class: "secrets" },
+    h("div", { class: "d-head" }, h("h2", {}, t("secrets.title"))),
+    h("div", { class: "d-body" },
+      h("div", { class: "secrets-note" }, t("secrets.note")),
+      list,
+      h("div", { class: "secret-form" }, name, value, save)),
+    h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))),
+  );
+  const draw = (items) => {
+    list.replaceChildren(items.length
+      ? h("div", { class: "conn-list" }, items.map((s) => h("div", { class: "conn-row secret-row", "data-name": s.name },
+        h("div", { class: "grow" }, h("div", { class: "t" }, s.name), h("div", { class: "m" }, t("secrets.updated", { time: fmtTime(s.updated_at || s.created_at) }))),
+        h("button", { class: "btn sm secret-delete", onclick: () => removeSecret(s.name) }, t("secrets.delete")))))
+      : h("div", { class: "muted" }, t("secrets.empty")));
+  };
+  const reload = async () => {
+    try { draw((await api("GET", "/api/secrets")).secrets || []); } catch (ex) { report(ex); }
+  };
+  async function saveSecret() {
+    const n = name.value.trim();
+    if (!n || !value.value) return;
+    save.disabled = true;
+    try {
+      await api("PUT", `/api/secrets/${encodeURIComponent(n)}`, { value: value.value });
+      value.value = "";
+      name.value = "";
+      toast(t("secrets.saved", { name: n }));
+      await reload();
+    } catch (ex) { report(ex); } finally { save.disabled = false; }
+  }
+  async function removeSecret(n) {
+    if (!confirm(t("secrets.deleteConfirm", { name: n }))) return;
+    try {
+      await api("DELETE", `/api/secrets/${encodeURIComponent(n)}`);
+      toast(t("secrets.deleted", { name: n }));
+      await reload();
+    } catch (ex) { report(ex); }
+  }
+  dialog.addEventListener("close", () => { value.value = ""; dialog.remove(); });
+  document.body.append(dialog);
+  dialog.showModal();
+  await reload();
 }
 
 // drawGitHubApp 是账号页里的 GitHub App 一段（G-05，/api/github/status）：旧 OAuth 连接的提示、安装或调整的入口、

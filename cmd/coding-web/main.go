@@ -30,6 +30,8 @@
 //	CODING_SIGNUP_MIN_ACCOUNT_AGE_DAYS    开放注册时新注册的平台账号至少注册了多少天（默认 30，0 不查；GitHub、GitLab、Gitee、Gitea）
 //	CODING_SIGNUP_REQUIRE_VERIFIED_EMAIL  新注册要有验证过的邮箱（默认 true；GitHub 读 /user/emails，Google 看 email_verified）
 //	CODING_BLOCKED_LOGINS       逗号分隔的 <平台>:<登录名>：封禁，登录与连接都拒绝（已有的账号也一样）
+//	CODING_NETWORK_SECRETS=1    打开网络密钥页（WEB-SEC：经 Runtime 的 UserSecretService 存取用户自己的密钥，值只进不出）；
+//	                            环境还不能引用它们（D-23 第二阶段），所以默认关着
 //
 // GitHub App（G-01，docs/plan/github-app.md 第 3 节；全不配时关闭，配了一部分时启动失败）：
 //
@@ -105,6 +107,8 @@ func main() {
 
 		Sandbox:      os.Getenv("CODING_SANDBOX"),
 		SandboxImage: os.Getenv("CODING_SANDBOX_IMAGE"),
+
+		NetworkSecrets: os.Getenv("CODING_NETWORK_SECRETS") == "1",
 	}
 	signup, err := server.SignupRulesFromEnv(os.Getenv)
 	if err != nil {

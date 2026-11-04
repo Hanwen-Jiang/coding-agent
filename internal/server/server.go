@@ -63,6 +63,8 @@ type Config struct {
 	Webhook http.Handler
 	// Metrics 是 GitHub App 一侧的计数（G-05，经 libs/go-core 的 Telemetry）；nil 时不记。
 	Metrics github.Metrics
+	// NetworkSecrets 打开网络密钥页（WEB-SEC，user_secrets.go）；D-23 第二阶段之前默认关着。
+	NetworkSecrets bool
 	// SessionIdle、SessionMaxAge 是浏览器会话的空闲与绝对有效期（AUTH-02，browser_sessions.go；默认 24 小时、7 天）。Now 只给测试换时钟。
 	SessionIdle   time.Duration
 	SessionMaxAge time.Duration
@@ -229,6 +231,10 @@ func (s *Server) Handler() http.Handler {
 	// GitHub App 的 Setup URL（G-03）：安装或调整之后跳回这里，核对过才关联。
 	mux.HandleFunc("GET /api/github/setup", s.authed(s.handleGitHubSetup))
 	mux.HandleFunc("GET /api/github/status", s.authed(s.handleGitHubStatus))
+	// 网络密钥（WEB-SEC）：转调 Runtime 的 UserSecretService，值只进不出；没打开时 404。
+	mux.HandleFunc("GET /api/secrets", s.authed(s.handleListSecrets))
+	mux.HandleFunc("PUT /api/secrets/{name}", s.authed(s.handlePutSecret))
+	mux.HandleFunc("DELETE /api/secrets/{name}", s.authed(s.handleDeleteSecret))
 
 	mux.HandleFunc("GET /api/samples", s.authed(s.handleSamples))
 	// 环境配置与项目解耦；这里仅保存普通配置，不报告 Runtime 生命周期状态。
@@ -436,6 +442,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 	if app := s.cfg.GitHubApp; app != nil {
 		// 不是密钥：网页用 slug 拼安装链接（https://github.com/apps/<slug>/installations/new，G-05）。
 		out["github_app"] = map[string]string{"slug": app.Slug}
+	}
+	if s.cfg.NetworkSecrets {
+		out["network_secrets"] = true
 	}
 	writeJSON(w, http.StatusOK, out)
 }
