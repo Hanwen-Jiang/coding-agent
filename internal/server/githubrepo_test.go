@@ -42,6 +42,9 @@ type fakeAppGitHub struct {
 	failRevoke  bool
 	jwts        map[string]bool
 	names       map[int]string // 仓库 ID → 当前全名（改名用）
+	// pr 是 GET /repos/{repo}/pulls/{n} 的当前状态（G-04）；run 是 GET /repos/{repo}/actions/runs/{id}，nil 时回 403（App 没有 Actions 权限）。
+	pr  map[string]any
+	run map[string]any
 }
 
 func newFakeAppGitHub(t *testing.T) *fakeAppGitHub {
@@ -121,6 +124,15 @@ func (f *fakeAppGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		default:
 			notFound()
 		}
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/") && strings.Contains(path, "/pulls/"):
+		_ = json.NewEncoder(w).Encode(f.pr)
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/") && strings.Contains(path, "/actions/runs/"):
+		if f.run == nil {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "Resource not accessible by integration"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(f.run)
 	case strings.HasPrefix(path, "/repos/") && r.Method == http.MethodGet:
 		name := strings.TrimPrefix(path, "/repos/")
 		id, ok := f.repoByName(name)
