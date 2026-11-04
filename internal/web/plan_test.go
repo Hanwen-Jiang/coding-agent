@@ -52,12 +52,19 @@ func TestThePlanTextIsInBothLanguages(t *testing.T) {
 	}
 }
 
-// planSite 是真正的页面、注入的探针、假的 API，以及可以随时往 t1 的事件流里推事件的通道。
-type planSite struct {
+// streamSite 是真正的页面、注入的探针、假的 API，以及 t1 的事件流：先发 initial，之后可以随时经 /__push 往里推（WEB-PLAN、WEB-SUB 共用）。
+type streamSite struct {
 	t       *testing.T
+	probe   string
+	initial []streamEvent
 	pushes  chan string
 	seq     int
 	results chan planResult
+}
+
+type streamEvent struct {
+	name  string
+	value map[string]any
 }
 
 type planResult struct {
@@ -65,7 +72,7 @@ type planResult struct {
 	Steps  map[string]any `json:"steps"`
 }
 
-func (s *planSite) frame(name string, value map[string]any) string {
+func (s *streamSite) frame(name string, value map[string]any) string {
 	s.seq++
 	data, _ := json.Marshal(params{"event_id": s.seq, "emitted_at": "2026-11-03T08:00:00Z", "payload": params{"value": value}})
 	return fmt.Sprintf("id: %d\nevent: %s\ndata: %s\n\n", s.seq, name, data)
@@ -79,7 +86,7 @@ func planUpdated(round int, current string, steps ...params) params {
 	return out
 }
 
-func (s *planSite) handler() http.Handler {
+func (s *streamSite) handler() http.Handler {
 	const base = "/api/projects/p1/sessions/s1"
 	running := params{"id": "t1", "status": "TASK_STATUS_RUNNING", "message": "修一下测试", "created_at": "2026-11-03T08:00:00Z"}
 	fast := params{"id": "t0", "status": "TASK_STATUS_DONE", "message": "你好", "created_at": "2026-11-03T07:00:00Z"}
@@ -109,7 +116,7 @@ func (s *planSite) handler() http.Handler {
 	})
 	mux.HandleFunc("GET /__probe.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript")
-		_, _ = w.Write([]byte(planProbe))
+		_, _ = w.Write([]byte(s.probe))
 	})
 	mux.HandleFunc("POST /__push", func(w http.ResponseWriter, r *http.Request) {
 		var ev struct {
@@ -140,19 +147,7 @@ func (s *planSite) handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		switch r.PathValue("task") {
 		case "t1":
-			first := planUpdated(1, "locate",
-				params{"id": "locate", "title": "找到出错的测试", "status": "active", "round": 1},
-				params{"id": "fix", "title": "修改代码", "status": "pending", "round": 1},
-				params{"id": "verify", "title": "跑测试确认", "status": "pending", "round": 1})
-			for _, f := range []struct {
-				name  string
-				value map[string]any
-			}{
-				{"task_accepted", params{}},
-				{"round_started", params{"round_seq": 1, "rerun": false}},
-				{"plan_updated", first},
-				{"stage_started", params{"round_seq": 1, "goal": "定位", "exit_when": "找到原因", "nodes": []any{}}},
-			} {
+			for _, f := range s.initial {
 				_, _ = fmt.Fprint(w, s.frame(f.name, f.value))
 			}
 			w.(http.Flusher).Flush()
@@ -204,6 +199,39 @@ try {
 await fetch("/__result", { method: "POST", body: JSON.stringify(out) });
 `
 
+// runStreamProbe 起 streamSite，用 headless 的浏览器打开会话页，等探针交回结果。找不到浏览器时跳过。
+func runStreamProbe(t *testing.T, probe string, initial []streamEvent) planResult {
+	t.Helper()
+	browser := findBrowser()
+	if browser == "" {
+		t.Skip("找不到浏览器（CODING_TEST_BROWSER 可以指定）")
+	}
+	site := &streamSite{t: t, probe: probe, initial: initial, pushes: make(chan string, 16), results: make(chan planResult, 1)}
+	srv := httptest.NewServer(site.handler())
+	t.Cleanup(srv.Close)
+	dir, err := os.MkdirTemp("", "coding-web-stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for range 50 {
+			if os.RemoveAll(dir) == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+	ctx, stop := openPage(t, browser, dir, srv.URL+"/#/w/p1/s/s1")
+	defer stop()
+	select {
+	case res := <-site.results:
+		return res
+	case <-ctx.Done():
+		t.Fatal("等不到页面的结果")
+		return planResult{}
+	}
+}
+
 type planStep struct {
 	Text    string `json:"text"`
 	Status  string `json:"status"`
@@ -225,33 +253,16 @@ func planOf(t *testing.T, raw any) (string, []planStep) {
 
 func TestThePlanAreaInBrowser(t *testing.T) {
 	requirePlanArea(t)
-	browser := findBrowser()
-	if browser == "" {
-		t.Skip("找不到浏览器（CODING_TEST_BROWSER 可以指定）")
-	}
-	site := &planSite{t: t, pushes: make(chan string, 16), results: make(chan planResult, 1)}
-	srv := httptest.NewServer(site.handler())
-	t.Cleanup(srv.Close)
-	dir, err := os.MkdirTemp("", "coding-web-plan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		for range 50 {
-			if os.RemoveAll(dir) == nil {
-				return
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
+	first := planUpdated(1, "locate",
+		params{"id": "locate", "title": "找到出错的测试", "status": "active", "round": 1},
+		params{"id": "fix", "title": "修改代码", "status": "pending", "round": 1},
+		params{"id": "verify", "title": "跑测试确认", "status": "pending", "round": 1})
+	res := runStreamProbe(t, planProbe, []streamEvent{
+		{"task_accepted", params{}},
+		{"round_started", params{"round_seq": 1, "rerun": false}},
+		{"plan_updated", first},
+		{"stage_started", params{"round_seq": 1, "goal": "定位", "exit_when": "找到原因", "nodes": []any{}}},
 	})
-	ctx, stop := openPage(t, browser, dir, srv.URL+"/#/w/p1/s/s1")
-	defer stop()
-	var res planResult
-	select {
-	case res = <-site.results:
-	case <-ctx.Done():
-		t.Fatal("等不到页面的结果")
-	}
 	if len(res.Errors) != 0 {
 		t.Fatalf("页面报错：%v", res.Errors)
 	}
