@@ -50,7 +50,8 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, id identi
 		writeMsg(w, r, http.StatusBadRequest, "只有从已配置的 Git 平台克隆的工作区能推送并开 PR")
 		return
 	}
-	conn, token, err := s.connToken(r, id, prov)
+	// 推送经 GitHub App 时用只含这个仓库、contents:write 的安装令牌（推完吊销）；开 PR 用用户令牌，记在这个人名下（G-03）。
+	grant, err := s.authorizeRepo(r, id, &p, repoWrite)
 	if errors.Is(err, errNotConnected) {
 		writeMsg(w, r, http.StatusForbidden, "先在“账号与平台”里连接 %s，才能推送到 %[1]s", prov.Name)
 		return
@@ -58,6 +59,8 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, id identi
 		writeGitError(w, r, err)
 		return
 	}
+	defer grant.Done()
+	conn, token := grant.Conn, grant.UserToken
 	var req struct {
 		Title string `json:"title"`
 		Body  string `json:"body"`
@@ -78,8 +81,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, id identi
 	}
 	ctx, cancel := ctxTimeout(r, 10*time.Minute)
 	defer cancel()
-	gitUser, gitPass := prov.gitAuth(conn, token)
-	auth := GitAuth{Host: prov.Web + "/", User: gitUser, Pass: gitPass}
+	auth := grant.Auth
 	name, email := prov.commitAuthor(conn)
 	base := p.BaseBranch
 	if base == "" {
@@ -175,7 +177,13 @@ func (s *Server) handleResetBranch(w http.ResponseWriter, r *http.Request, id id
 		return
 	}
 	// 取远端基线分支的最新提交并切过去（没有未提交的改动时；远端是建工作区时的仓库地址）。
-	head, err := s.ws.Sync(ctx, id, sess.WorkspaceID, base, s.gitCredentials(r, id, p))
+	grant, err := s.authorizeRepo(r, id, &p, repoRead)
+	if err != nil {
+		writeGitError(w, r, err)
+		return
+	}
+	defer grant.Done()
+	head, err := s.ws.Sync(ctx, id, sess.WorkspaceID, base, grant.Auth)
 	if err != nil {
 		writeMsg(w, r, statusOf(err, http.StatusBadGateway), "拉取失败：%v", err)
 		return
@@ -230,7 +238,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, id identity)
 		writeMsg(w, r, http.StatusConflict, "这个会话有还没推送的提交：先推送，拉取会切走它们")
 		return
 	}
-	head, err := s.ws.Sync(ctx, id, sess.WorkspaceID, p.BaseBranch, s.gitCredentials(r, id, p))
+	grant, err := s.authorizeRepo(r, id, &p, repoRead)
+	if err != nil {
+		writeGitError(w, r, err)
+		return
+	}
+	defer grant.Done()
+	head, err := s.ws.Sync(ctx, id, sess.WorkspaceID, p.BaseBranch, grant.Auth)
 	if err != nil {
 		writeMsg(w, r, statusOf(err, http.StatusBadGateway), "拉取失败：%v", err)
 		return

@@ -42,6 +42,8 @@ type Connection struct {
 	ExpiresAt   time.Time `json:"expires_at,omitzero"`
 	ConnectedAt time.Time `json:"connected_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// App 表示这个 GitHub 连接是经 GitHub App 授权的（G-03）；旧 OAuth App 的连接为 false，切换期内照用并提示重新连接。
+	App bool `json:"app,omitempty"`
 }
 
 // Account 是一个用户的账号记录（<数据目录>/<租户>/users/<用户>.json）。
@@ -49,6 +51,8 @@ type Account struct {
 	// Primary 是建账号时用的登录方式（头像、名字优先取它的）。
 	Primary     string                `json:"primary,omitempty"`
 	Connections map[string]Connection `json:"connections,omitempty"`
+	// GitHubInstallations 是经 Setup URL 核对过、关联到这个账号的 App 安装（G-03）。
+	GitHubInstallations []int64 `json:"github_installations,omitempty"`
 
 	// 多平台之前的格式：只有一个 GitHub 账号，令牌按（租户、用户）加密。读到时迁移成 Connections["github"]。
 	LegacyLogin     string    `json:"login,omitempty"`
@@ -297,11 +301,28 @@ func (s *Server) connToken(r *http.Request, id identity, p *Provider) (Connectio
 	if err != nil {
 		return Connection{}, "", err
 	}
-	if c.ExpiresAt.IsZero() || time.Until(c.ExpiresAt) > 2*time.Minute {
+	fresh := func(c Connection) bool { return c.ExpiresAt.IsZero() || c.ExpiresAt.Sub(s.now()) > 2*time.Minute }
+	if fresh(c) {
 		return c, token, nil
 	}
 	if c.Refresh == "" {
 		return c, token, nil // 没有续期令牌：照用，过期了平台会回 401，提示重新连接
+	}
+	// 按用户串行续期（G-03）：续期令牌是一次性的，并发的请求只能有一个去续；拿到锁之后重读，别人刚续过就直接用。
+	l := s.refreshLock(id.TenantID + "/" + id.UserID + "/" + p.id)
+	l.Lock()
+	defer l.Unlock()
+	if a, err = s.readAccount(id.TenantID, id.UserID); err != nil {
+		return Connection{}, "", err
+	}
+	if c, ok = a.Connections[p.id]; !ok || c.Token == "" {
+		return Connection{}, "", errNotConnected
+	}
+	if token, err = s.open(c.Token, tokenAAD(id.TenantID, id.UserID, p.id)); err != nil {
+		return Connection{}, "", err
+	}
+	if fresh(c) || c.Refresh == "" {
+		return c, token, nil
 	}
 	refresh, err := s.open(c.Refresh, tokenAAD(id.TenantID, id.UserID, p.id)+"/refresh")
 	if err != nil {
@@ -568,6 +589,8 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	conn := Connection{Provider: p.id, RemoteID: u.ID, Login: u.Login, Name: u.Name, AvatarURL: u.AvatarURL, Email: u.Email, ConnectedAt: now}
+	// 配了 App 的 Client secret 时 GitHub 的授权走的是 App（G-03）：新连接记为 App 的，旧 OAuth 的令牌随这次连接被替换掉。
+	conn.App = p.id == "github" && s.cfg.GitHubApp != nil && s.cfg.GitHubApp.clientSecret != ""
 
 	var ref identityRef
 	if mode == "link" {
@@ -771,18 +794,4 @@ func (s *Server) providerOfURL(raw string) (*Provider, string) {
 		}
 	}
 	return nil, ""
-}
-
-// gitCredentials 是对这个工作区的平台做 git 操作要带的认证；没有连接时为空，按公开仓库处理。
-func (s *Server) gitCredentials(r *http.Request, id identity, p Project) GitAuth {
-	prov := s.providers[p.Provider]
-	if prov == nil {
-		return GitAuth{}
-	}
-	c, token, err := s.connToken(r, id, prov)
-	if err != nil {
-		return GitAuth{}
-	}
-	user, pass := prov.gitAuth(c, token)
-	return GitAuth{Host: prov.Web + "/", User: user, Pass: pass}
 }

@@ -121,7 +121,14 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request, id 
 		// 已配置的 Git 平台上的仓库：记下平台与仓库路径；连接了这一家就带令牌克隆（私有仓库要），令牌只用这一次。
 		if prov, repo := s.providerOfURL(req.GitURL); prov != nil {
 			p.Provider, p.Repo = prov.id, repo
-			spec.Auth = s.gitCredentials(r, id, p)
+			// 经 GitHub App 时是只读、只含这个仓库的安装令牌，克隆完吊销（G-03）。
+			grant, err := s.authorizeRepo(r, id, &p, repoRead)
+			if err != nil {
+				writeGitError(w, r, err)
+				return
+			}
+			defer grant.Done()
+			spec.Auth = grant.Auth
 		}
 	case req.Sample != "":
 		files, err := samples.Files(req.Sample)

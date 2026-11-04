@@ -86,6 +86,8 @@
 
 ### G-03 身份、安装与令牌
 
+> 2026-11-03 coding-agent 一侧已完成（代码，没部署）：`internal/server/githubrepo.go`（`authorizeRepo`、Setup URL `GET /api/github/setup`、App 的 JWT 复用、按用户串行续期），克隆、拉取、推送与开 PR 都经它；配了 Client secret 后 GitHub 的登录与连接走 App 的 OAuth，旧 OAuth 的连接切换期内照用（`legacyGitHub` 给界面用）。第 1～7、10、11 条有测试。第 8 条（Workspace 操作的环境与 Agent 的命令不共用）是 Runtime 已有的做法；第 9 条在 Runtime 仓库验（见那边的总表）。没装 App 的**公开**仓库照旧不带凭据克隆、拉取；私有的提示去安装。上线要 `CODING_GITHUB_APP_CLIENT_SECRET`。
+
 1. 伪造 Setup URL 的 `installation_id`（用户看不到这个安装）：不关联。
 2. 安装覆盖了仓库、但用户本人没权限：拒绝，不调签发接口。
 3. 只有读权限的用户：能克隆，推送与开 PR 被拒，提示写清原因与去哪儿调整。

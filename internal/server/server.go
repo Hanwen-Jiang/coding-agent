@@ -88,9 +88,11 @@ type Config struct {
 
 // Server 是 coding-web。
 type Server struct {
-	cfg       Config
-	ingress   tokens
-	sessions  *sessions
+	cfg      Config
+	ingress  tokens
+	sessions *sessions
+	// github 是 GitHub App 一侧的进程内状态（G-03，githubrepo.go）。
+	github    githubState
 	store     *Store
 	api       *TaskAPI
 	git       Git
@@ -142,6 +144,21 @@ func New(cfg Config) (*Server, error) {
 	hooks := filepath.Join(cfg.DataDir, "empty-hooks")
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
 		return nil, err
+	}
+	if app := cfg.GitHubApp; app != nil && app.clientSecret != "" {
+		// G-03：配了 App 的 Client secret 之后，GitHub 的登录与连接都走 App 的 OAuth（用户令牌会过期、可续期）；旧 OAuth App
+		// 的连接在切换期内照用（2026-11-03 人定，第 5 节第 3 条）。网页与 API 地址沿用 GitHub 一项的配置。
+		providers := map[string]ProviderConfig{}
+		for k, v := range cfg.Providers {
+			providers[k] = v
+		}
+		gh := providers["github"]
+		if gh.ClientID == "" && cfg.GitHubClientID != "" {
+			gh = ProviderConfig{URL: cfg.GitHubURL, APIURL: cfg.GitHubAPI, Scopes: cfg.GitHubScopes}
+		}
+		gh.ClientID, gh.ClientSecret = app.ClientID, app.clientSecret
+		providers["github"] = gh
+		cfg.Providers = providers
 	}
 	providers := newProviders(cfg)
 	if len(providers) > 0 && cfg.PublicURL == "" {
@@ -206,6 +223,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/account/connections/{provider}/disconnect", s.authed(s.handleDisconnect))
 	mux.HandleFunc("GET /api/git/{provider}/repos", s.authed(s.handleRepos))
 	mux.HandleFunc("GET /api/github/repos", s.authed(s.handleRepos))
+	// GitHub App 的 Setup URL（G-03）：安装或调整之后跳回这里，核对过才关联。
+	mux.HandleFunc("GET /api/github/setup", s.authed(s.handleGitHubSetup))
 
 	mux.HandleFunc("GET /api/samples", s.authed(s.handleSamples))
 	// 环境配置与项目解耦；这里仅保存普通配置，不报告 Runtime 生命周期状态。

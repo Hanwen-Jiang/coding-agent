@@ -22,6 +22,9 @@ type Project struct {
 	// 只有这样的工作区能推送、开 PR/MR。
 	Provider string `json:"git_provider,omitempty"`
 	Repo     string `json:"repo,omitempty"`
+	// RepoID、InstallationID 是 GitHub 的仓库 ID 与 App 的安装 ID（G-03）：第一次经 App 操作时补上；按 ID 取当前名字，改名后照常工作。
+	RepoID         int64 `json:"repo_id,omitempty"`
+	InstallationID int64 `json:"installation_id,omitempty"`
 	// 多平台之前只有 GitHub：读到时转成 Provider、Repo。
 	GitHubRepo string `json:"github_repo,omitempty"`
 	// 克隆时的分支（PR 的目标分支）。

@@ -181,8 +181,12 @@ func (s *Server) createSession(r *http.Request, id identity, p Project, title st
 		sess.BaseCommit = from.BaseCommit
 	}
 	if from == nil && p.Repo != "" && strings.HasPrefix(p.Source, "https://") && s.providers[p.Provider] != nil && p.BaseBranch != "" {
-		if head, err := s.ws.Sync(ctx, id, sess.WorkspaceID, p.BaseBranch, s.gitCredentials(r, id, p)); err == nil {
-			sess.BaseCommit = head
+		// 尽力而为：拿不到授权或拉不下来时照用复制来的基线。
+		if grant, err := s.authorizeRepo(r, id, &p, repoRead); err == nil {
+			if head, err := s.ws.Sync(ctx, id, sess.WorkspaceID, p.BaseBranch, grant.Auth); err == nil {
+				sess.BaseCommit = head
+			}
+			grant.Done()
 		}
 	}
 	if env != nil {

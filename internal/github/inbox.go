@@ -447,27 +447,38 @@ func nextLink(header string) string {
 
 // --- 后台 ---
 
-// Run 是后台循环：有新投递或每 5 秒处理一次；启动时与每 10 分钟对账；每小时清一次过期的负载。ctx 结束时返回。
+// Run 是后台循环：有新投递或每 5 秒处理一次；每小时清一次过期的负载。对账在自己的 goroutine 里（启动时与每 10 分钟），
+// 调 GitHub 慢的时候不耽误处理。ctx 结束时返回。
 func (s *Service) Run(ctx context.Context) {
-	reconcile := func() {
-		if n, err := s.Reconcile(ctx); err != nil {
-			log.Printf("GitHub 投递对账失败：%v", err)
-		} else if n > 0 {
-			log.Printf("GitHub 投递对账：重投 %d 条", n)
+	go func() {
+		reconcile := func() {
+			if n, err := s.Reconcile(ctx); err != nil {
+				if ctx.Err() == nil {
+					log.Printf("GitHub 投递对账失败：%v", err)
+				}
+			} else if n > 0 {
+				log.Printf("GitHub 投递对账：重投 %d 条", n)
+			}
 		}
-	}
-	reconcile()
-	poll, recon, prune := time.NewTicker(5*time.Second), time.NewTicker(10*time.Minute), time.NewTicker(time.Hour)
+		reconcile()
+		t := time.NewTicker(10 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				reconcile()
+			}
+		}
+	}()
+	poll, prune := time.NewTicker(5*time.Second), time.NewTicker(time.Hour)
 	defer poll.Stop()
-	defer recon.Stop()
 	defer prune.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-recon.C:
-			reconcile()
-			continue
 		case <-prune.C:
 			if _, err := s.Prune(ctx); err != nil {
 				log.Printf("清 GitHub 投递的负载失败：%v", err)
