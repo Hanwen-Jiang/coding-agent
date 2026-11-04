@@ -569,6 +569,8 @@ async function openAccount() {
     body,
     h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))),
   );
+  // 配了 GitHub App 时连接列表下面另有一段（G-05）：只取一次，断开重画时原样留着。
+  const github = state.config.github_app ? h("div", { class: "github-app-slot" }) : null;
   const draw = (acct) => {
     const conns = acct.connections || [];
     const rows = providerList().filter((p) => p.configured || state.config.dev_login || conns.some((c) => c.provider === p.id)).map((p) => {
@@ -583,12 +585,39 @@ async function openAccount() {
         c ? h("button", { class: "btn sm", onclick: () => disconnect(p, draw) }, t("account.disconnect"))
           : p.configured ? h("a", { class: "btn sm primary", href: `/api/auth/${p.id}/login?link=1` }, t("account.connect")) : null);
     });
-    body.replaceChildren(h("div", { class: "conn-list" }, rows));
+    body.replaceChildren(...[h("div", { class: "conn-list" }, rows), github].filter(Boolean));
   };
   dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();
   try { draw(await api("GET", "/api/account")); } catch (ex) { report(ex); }
+  if (github) drawGitHubApp(github);
+}
+
+// drawGitHubApp 是账号页里的 GitHub App 一段（G-05，/api/github/status）：旧 OAuth 连接的提示、安装或调整的入口、
+// 各仓库的远端状况（暂停、卸载、移除、删除时写明怎么办）。
+async function drawGitHubApp(slot) {
+  let st;
+  try { st = await api("GET", "/api/github/status"); } catch (ex) { report(ex); return; }
+  const external = { target: "_blank", rel: "noopener" };
+  const installs = st.installations || [];
+  const lines = [];
+  if (!st.connected) lines.push(h("div", { class: "m" }, t("github.notConnected")));
+  else if (st.legacy) lines.push(h("div", { class: "gh-note" }, h("span", {}, t("github.legacy")), h("a", { class: "btn sm gh-reconnect", href: "/api/auth/github/login?link=1" }, t("github.reconnect"))));
+  lines.push(installs.length
+    ? h("div", { class: "gh-line" }, h("span", { class: "m" }, t("github.installed", { n: installs.length })), h("a", { class: "btn sm gh-adjust", href: st.install_url, ...external }, t("github.adjust")))
+    : h("div", { class: "gh-line" }, h("span", { class: "m" }, t("github.notInstalled")), h("a", { class: "btn sm primary gh-install", href: st.install_url, ...external }, t("github.install"))));
+  const repos = (st.projects || []).map((p) => {
+    const s = p.remote_state || "ok";
+    return h("div", { class: "gh-repo" + (p.remote_updated ? " gh-updated" : ""), "data-repo": p.repo, "data-state": s },
+      h("span", { class: "t" }, p.repo),
+      h("span", { class: "m" }, t("github.state." + s), p.remote_updated ? " · " + t("github.remoteUpdated") : null));
+  });
+  slot.replaceChildren(h("div", { class: "github-app" },
+    h("div", { class: "gh-head" }, t("github.title")),
+    lines,
+    h("div", { class: "gh-sub" }, t("github.repos")),
+    repos.length ? h("div", { class: "gh-repos" }, repos) : h("div", { class: "m" }, t("github.noRepos"))));
 }
 
 async function disconnect(p, draw) {
