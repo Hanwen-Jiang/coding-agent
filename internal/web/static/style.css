@@ -725,6 +725,16 @@ textarea.field { height: auto; padding: 8px 11px; resize: vertical; line-height:
 .plan-step[data-status="blocked"] .plan-mark { border-color: var(--err); }
 .plan-step[data-status="blocked"] { color: var(--err); }
 .plan-step.current { font-weight: 600; color: var(--text); }
+/* 并行的子 Agent（N-16）：每个一行，圆点表示状态，后面是调用次数与最近一次调用。 */
+.subagents { margin: 2px 0 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.subagents-title { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.subagent { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.subagent-mark { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--accent); flex: none; }
+.subagent[data-state="running"] .subagent-mark { background: var(--accent-soft); }
+.subagent[data-state="succeeded"] .subagent-mark { border-color: var(--ok); background: var(--ok); }
+.subagent[data-state="failed"] .subagent-mark { border-color: var(--err); background: var(--err); }
+.subagent-name { font-weight: 600; }
+.subagent-last { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .out-path { display: block; max-width: 100%; padding: 0; border: 0; background: none; color: var(--accent); text-align: left; cursor: pointer; word-break: break-all; }
 .out-path:hover { text-decoration: underline; }
 .out-why { line-height: 1.4; }

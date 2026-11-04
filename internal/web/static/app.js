@@ -1680,7 +1680,7 @@ function turn(task) {
     ),
     h("div", { class: "msg-agent" },
       h("div", { class: "agent-mark" + (running ? " live" : ""), title: running ? t("turn.working") : null }, logo()),
-      h("div", { class: "agent-body" }, planArea(events), worklog(task, events, running, finished), asks(events), guidanceList(task), tail),
+      h("div", { class: "agent-body" }, planArea(events), subAgentArea(events), worklog(task, events, running, finished), asks(events), guidanceList(task), tail),
     ),
   );
 }
@@ -1701,6 +1701,35 @@ function planArea(events) {
       return h("li", { class: "plan-step" + (current ? " current" : ""), "data-status": status, title: t("plan.status." + status) },
         h("span", { class: "plan-mark" }), h("span", { class: "plan-text" }, s.title || s.id));
     })));
+}
+
+// 并行的子 Agent（N-16）：node_started 的 mode 为 sub_agent 的 Goal Node 各一行，按开始的先后；之后 node_id 是它的 tool_status
+// 是它的进度（几个子 Agent 的事件交错到达）。调用次数按 step 算；node_finished 之后按 status 定成功或失败。同一个 id 在不同轮里各算各的。
+function subAgentArea(events) {
+  const agents = new Map();
+  for (const e of events) {
+    const v = e.value || {};
+    const key = v.round_seq + ":" + v.node_id;
+    if (e.type === "node_started" && v.mode === "sub_agent" && !agents.has(key)) {
+      agents.set(key, { node: v.node_id, steps: new Set(), last: null, state: "running" });
+    } else if (agents.has(key)) {
+      const a = agents.get(key);
+      if (e.type === "tool_status") {
+        a.steps.add(v.step);
+        a.last = v.tool + (v.target ? " · " + v.target : "");
+      } else if (e.type === "node_finished") {
+        a.state = v.status === "succeeded" ? "succeeded" : "failed";
+      }
+    }
+  }
+  if (!agents.size) return null;
+  return h("div", { class: "subagents" },
+    h("div", { class: "subagents-title" }, t("subagent.title")),
+    [...agents.values()].map((a) => h("div", { class: "subagent", "data-node": a.node, "data-state": a.state, title: t("subagent.state." + a.state) },
+      h("span", { class: "subagent-mark" }),
+      h("span", { class: "subagent-name" }, a.node),
+      h("span", { class: "subagent-steps muted" }, t("subagent.steps", { n: a.steps.size })),
+      a.last ? h("span", { class: "subagent-last" }, a.last) : null)));
 }
 
 function waitingLine(task) {
