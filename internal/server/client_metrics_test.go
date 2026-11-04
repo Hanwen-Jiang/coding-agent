@@ -60,12 +60,18 @@ func TestHistoryLoadIsRecorded(t *testing.T) {
 	if code, _, raw := c.do("POST", historyLoadPath, map[string]any{"mode": "replay", "duration_ms": 0, "requests": 0}); code != http.StatusNoContent {
 		t.Fatalf("零也是合法的取值：%d %s", code, raw)
 	}
+	// HIST-01-WEB：取不到快照时先批量取事件，mode 是 events。
+	if code, _, raw := c.do("POST", historyLoadPath, map[string]any{"mode": "events", "duration_ms": 80, "requests": 3}); code != http.StatusNoContent {
+		t.Fatalf("mode events：%d %s", code, raw)
+	}
 	mode := func(m string) map[string]string { return map[string]string{"mode": m} }
 	want := []observation{
 		{"coding.history_load.duration_ms", 1234.5, mode("snapshot")},
 		{"coding.history_load.requests", 3, mode("snapshot")},
 		{"coding.history_load.duration_ms", 0, mode("replay")},
 		{"coding.history_load.requests", 0, mode("replay")},
+		{"coding.history_load.duration_ms", 80, mode("events")},
+		{"coding.history_load.requests", 3, mode("events")},
 	}
 	if got := rec.all(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("记下的：%v\n应为：%v", got, want)

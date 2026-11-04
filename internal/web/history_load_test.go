@@ -96,7 +96,12 @@ func TestTheReplayedHistoryLoadIsReportedInBrowser(t *testing.T) {
 	probe := strings.Replace(historyLoadProbe, "__WANT__", "你好！", 1)
 	_, res := runStreamProbe(t, probe, nil)
 	report := historyReport(t, res)
-	if report["mode"] != "replay" || report["requests"] != float64(3) {
-		t.Errorf("没有快照：mode 是 replay，请求是取快照一次加 t0、t1 的事件流各一条：%v", report)
+	// 批量取事件（HIST-01-WEB）接上之后，退回逐个回放之前还试过一次批量取（这里 404）。
+	want := float64(3)
+	if _, app := getFrom(t, Handler(), "/assets/app.js"); strings.Contains(string(app), `base + "/events"`) {
+		want = 4
+	}
+	if report["mode"] != "replay" || report["requests"] != want {
+		t.Errorf("没有快照：mode 是 replay，请求是取快照（与批量取）各一次加 t0、t1 的事件流各一条：%v", report)
 	}
 }

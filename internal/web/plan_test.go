@@ -63,7 +63,10 @@ type streamSite struct {
 	results chan planResult
 	// snapshot 给了就在 <会话>/snapshot 返回它（WEB-SNAP）；没给时 404，同还没有快照端点的 Runtime。
 	snapshot any
-	mu       sync.Mutex
+	// sessionEvents 给了就在 POST <会话>/events 返回它（HIST-01 的批量取；是 func(请求体) any 时按请求算）；没给时 404，
+	// 同还没有这个方法的 Runtime。
+	sessionEvents any
+	mu            sync.Mutex
 	// requests 是页面取快照与事件流的请求（路径?查询），按到达的先后。
 	requests []string
 }
@@ -175,6 +178,21 @@ func (s *streamSite) handler() http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(s.snapshot)
+	})
+	mux.HandleFunc("POST "+base+"/events", func(w http.ResponseWriter, r *http.Request) {
+		s.note(r)
+		if s.sessionEvents == nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		reply := s.sessionEvents
+		if answer, ok := reply.(func(map[string]any) any); ok {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			reply = answer(body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(reply)
 	})
 	mux.HandleFunc("GET "+base+"/tasks/{task}/events", func(w http.ResponseWriter, r *http.Request) {
 		s.note(r)
