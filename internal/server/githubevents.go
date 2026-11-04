@@ -28,6 +28,7 @@ func (s *Server) GitHubHandlers() map[string]github.Handler {
 		"workflow_run":              s.onWorkflowRun,
 		"pull_request_review":       s.onPullRequestReview,
 		"github_app_authorization":  s.onAppAuthorization,
+		"issue_comment":             s.onIssueComment, // G-06 的自动触发（githubtrigger.go）
 	}
 }
 
@@ -45,8 +46,21 @@ type ghEvent struct {
 	Ref        string `json:"ref"`
 	Number     int    `json:"number"`
 	Sender     struct {
-		ID int64 `json:"id"`
+		ID    int64  `json:"id"`
+		Login string `json:"login"`
+		Type  string `json:"type"`
 	} `json:"sender"`
+	// issue_comment（G-06）：评论与它所在的 Issue（PR 的普通评论也是 Issue 评论，这时 pull_request 不为空）。
+	Comment struct {
+		ID   int64  `json:"id"`
+		Body string `json:"body"`
+	} `json:"comment"`
+	Issue struct {
+		Number      int       `json:"number"`
+		Title       string    `json:"title"`
+		Body        string    `json:"body"`
+		PullRequest *struct{} `json:"pull_request"`
+	} `json:"issue"`
 	ReposAdded   []ghRepo `json:"repositories_added"`
 	ReposRemoved []ghRepo `json:"repositories_removed"`
 	PullRequest  struct {
@@ -255,25 +269,9 @@ func (s *Server) updateRepoSessions(repoID int64, match func(Session) bool, fn f
 
 // installationGet 用一个只读、只含这个仓库的安装令牌调 GET path（PR、CI 的当前状态），用完吊销。
 func (s *Server) installationGet(ctx context.Context, installation, repoID int64, perms map[string]string, path string, out any) error {
-	prov := s.providers["github"]
-	if s.cfg.GitHubApp == nil || prov == nil || installation == 0 {
-		return fmt.Errorf("没有配置 GitHub App")
-	}
-	jwt, err := s.appJWT()
-	if err != nil {
-		return err
-	}
-	var issued struct {
-		Token string `json:"token"`
-	}
-	body := map[string]any{"repository_ids": []int64{repoID}, "permissions": perms}
-	if err := prov.api(ctx, jwt, http.MethodPost, "/app/installations/"+strconv.FormatInt(installation, 10)+"/access_tokens", body, &issued); err != nil {
-		return err
-	}
-	defer func() {
-		_ = prov.api(context.Background(), issued.Token, http.MethodDelete, "/installation/token", nil, nil)
-	}()
-	return prov.api(ctx, issued.Token, http.MethodGet, path, nil, out)
+	return s.withInstallationToken(ctx, installation, repoID, perms, "event", func(prov *Provider, token string) error {
+		return prov.api(ctx, token, http.MethodGet, path, nil, out)
+	})
 }
 
 func (s *Server) onPullRequest(ctx context.Context, d github.Delivery) error {

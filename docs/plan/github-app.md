@@ -133,6 +133,17 @@
 
 ### G-06 自动触发（2026-11-03 人定一起做）
 
+> 2026-11-03 已完成（代码，没部署）：`internal/server/githubtrigger.go`，经收件箱登记 `issue_comment`，后台每 10 秒推进一次（`AdvanceGitHubTriggers`）；记录在 `<数据目录>/github-triggers.json`，按触发评论的 ID。下面 8 条都有测试（`githubtrigger_test.go`，每个事件投递两次）。计划没写死、实现时定的（都取保守的一边，要改告诉我）：
+> 1. 触发评论以 `@coding-agent-link` 开头（后面跟空白或冒号、逗号），后面的文字是指令；确认是 `@coding-agent-link confirm`（或“确认”）开头的评论。只认 `issue_comment` 的 created，编辑过的评论不算。
+> 2. GitHub 一侧全用安装令牌：核对权限（`metadata: read`）、拉基线分支（`contents: read`）、推送与开 PR（`contents`、`pull_requests: write`）、回复（`issues: write`），每个都只含这个仓库、用完吊销。PR 由 App 开（草稿），正文写明谁触发的；提交的作者是触发者（noreply 地址）。不用触发者的用户令牌。
+> 3. 触发者要关联着 Coding Agent 的账号（按 GitHub 用户 ID），这个账号下要已经有这个仓库的项目；Task 记在这个账号下、花它的额度，每次开一个新会话。没有账号或项目时回复一次说明，不启动。
+> 4. 每个仓库每小时最多 3 次、花费 5 美元（按这些 Task 记下的花费），所有租户合计；超了回复说明。数字现在写死在代码里。
+> 5. fork 来的 PR 一律不运行（比“不用安装令牌跑它的代码”更严）。
+> 6. 改了 `.github/workflows/`，或 Agent 自己做了提交（列不出文件）时请求确认；24 小时没有确认就结束。推送或开 PR 失败、推到一半进程没了，都不重试，回复里让人在 Coding Agent 里手动推。
+> 7. Issue 的标题与正文放进 `<github-issue>` 资料块（正文里的结束标记换掉），指令只取触发评论；提交之后记录里不再留评论与 Issue 的内容。
+>
+> 还要人做的：在 App 设置里加 Issues 读写与 `issue_comment` 事件（各安装要重新同意）；第 5 条“带注入样本的回归进评测集”没做（评测集的标注要人确认，现在只有单元测试核对资料块）；本仓库 CLAUDE.md 里“由人点按钮触发”那句按第 5 节第 7 条由人改。
+
 授权的规则（人定）：有写权限的成员在 Issue 或 PR 里发出触发评论，就算授权**这一次**推到 `agent/*` 并开 PR；改了 `.github/workflows/` 下的文件时，推送前先在那个 PR 或 Issue 里再问一次，等触发者回复确认。
 
 1. 过滤本 App 与其他 Bot 产生的事件（`sender.type`、本 App 的 `<slug>[bot]`）：测试里不会形成循环。

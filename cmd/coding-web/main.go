@@ -43,6 +43,8 @@
 //	                                      （投递、处理、积压、死信、续期与签发失败），不给时不记
 //
 //	配了 App 时每小时按 GitHub 的安装列表对账一次项目的远端状况（G-05），覆盖收件箱对账补不到的超过 3 天的停机。
+//	有收件箱时，Issue 与 PR 里以 @<slug> 开头的评论触发自动运行（G-06，internal/server/githubtrigger.go），每 10 秒推进一次；
+//	App 要有 Issues 读写权限并订阅 issue_comment。
 //
 //	coding-web github-replay <delivery>   把收件箱里的一条投递重新入队（死信修好之后用）
 //
@@ -156,6 +158,7 @@ func main() {
 			inbox.Handle(event, h)
 		}
 		go inbox.Run(ctx)
+		go advanceTriggers(ctx, srv)
 	}
 	if cfg.GitHubApp != nil {
 		go reconcileInstallations(ctx, srv)
@@ -196,6 +199,22 @@ func reconcileInstallations(ctx context.Context, srv *server.Server) {
 			log.Printf("GitHub App 的安装对账失败（一小时后再试）：%v", err)
 		}
 		timer.Reset(time.Hour)
+	}
+}
+
+// advanceTriggers 每 10 秒把 GitHub 评论触发的自动运行往前推一步（G-06）：建会话、提交 Task、等它结束、推送或请求确认。
+func advanceTriggers(ctx context.Context, srv *server.Server) {
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if err := srv.AdvanceGitHubTriggers(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("推进 GitHub 的自动运行失败：%v", err)
+		}
 	}
 }
 
