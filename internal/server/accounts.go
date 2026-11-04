@@ -332,6 +332,7 @@ func (s *Server) connToken(r *http.Request, id identity, p *Provider) (Connectio
 	defer cancel()
 	t, err := p.refresh(ctx, refresh)
 	if err != nil {
+		s.metrics().Count("coding.github.token_refresh_failures", 1, map[string]string{"provider": p.id})
 		return Connection{}, "", &GitError{Provider: p.Name, Status: http.StatusUnauthorized, Note: msg("授权过期且续不上：%v", err)}
 	}
 	if t.Refresh == "" {

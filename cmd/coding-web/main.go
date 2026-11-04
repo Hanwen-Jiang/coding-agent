@@ -39,6 +39,10 @@
 //	CODING_GITHUB_APP_CLIENT_SECRET       用户授权（G-03）要的 Client secret
 //	CODING_GITHUB_DSN                     收件箱的 Postgres（G-02，internal/github）；配了 App 而没有它时 Webhook 回 503
 //	CODING_GITHUB_API_URL                 对账调的 API，默认 https://api.github.com
+//	OTEL_EXPORTER_OTLP_ENDPOINT           Collector 的 OTLP/HTTP 地址（G-05）：给了就经 Telemetry 发 coding.github.* 指标
+//	                                      （投递、处理、积压、死信、续期与签发失败），不给时不记
+//
+//	配了 App 时每小时按 GitHub 的安装列表对账一次项目的远端状况（G-05），覆盖收件箱对账补不到的超过 3 天的停机。
 //
 //	coding-web github-replay <delivery>   把收件箱里的一条投递重新入队（死信修好之后用）
 //
@@ -68,6 +72,7 @@ import (
 	"time"
 
 	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/jwtingress"
+	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/oteltelemetry"
 	"github.com/agentruntime/coding-agent/internal/github"
 	"github.com/agentruntime/coding-agent/internal/server"
 )
@@ -117,12 +122,24 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if strings.TrimSpace(os.Getenv(oteltelemetry.EnvEndpoint)) != "" {
+		tel, err := oteltelemetry.FromEnv("coding-web", os.Getenv, os.Stderr)
+		if err != nil {
+			log.Fatalf("coding-web: Telemetry 配置不合法：%v", err)
+		}
+		defer tel.Close()
+		platform, err := tel.BindPlatform("coding-web")
+		if err != nil {
+			log.Fatalf("coding-web: %v", err)
+		}
+		cfg.Metrics = github.TelemetryMetrics(platform)
+	}
 	var inbox *github.Service
 	if cfg.GitHubApp != nil {
 		if os.Getenv("CODING_GITHUB_DSN") == "" {
 			log.Printf("配了 GitHub App 但没有 CODING_GITHUB_DSN：Webhook 回 503，配上库之后对账会补投 3 天内失败的")
 		} else {
-			if inbox, err = newInbox(ctx, cfg.GitHubApp); err != nil {
+			if inbox, err = newInbox(ctx, cfg.GitHubApp, cfg.Metrics); err != nil {
 				log.Fatalf("coding-web: %v", err)
 			}
 			defer inbox.Close()
@@ -139,6 +156,9 @@ func main() {
 			inbox.Handle(event, h)
 		}
 		go inbox.Run(ctx)
+	}
+	if cfg.GitHubApp != nil {
+		go reconcileInstallations(ctx, srv)
 	}
 	addr := os.Getenv("CODING_ADDR")
 	if addr == "" {
@@ -158,8 +178,25 @@ func main() {
 }
 
 // newInbox 连上 GitHub App 的收件箱（G-02）：库是 CODING_GITHUB_DSN，对账调的 API 是 CODING_GITHUB_API_URL（默认 api.github.com）。
-func newInbox(ctx context.Context, app *server.GitHubApp) (*github.Service, error) {
-	return github.New(ctx, github.Options{DSN: os.Getenv("CODING_GITHUB_DSN"), App: app, AppID: app.AppID, APIURL: os.Getenv("CODING_GITHUB_API_URL")})
+func newInbox(ctx context.Context, app *server.GitHubApp, metrics github.Metrics) (*github.Service, error) {
+	return github.New(ctx, github.Options{DSN: os.Getenv("CODING_GITHUB_DSN"), App: app, AppID: app.AppID, APIURL: os.Getenv("CODING_GITHUB_API_URL"), Metrics: metrics})
+}
+
+// reconcileInstallations 启动后一分钟、之后每小时按 GitHub 的安装列表对账一次（G-05）；失败只记日志，下一轮再来。
+func reconcileInstallations(ctx context.Context, srv *server.Server) {
+	timer := time.NewTimer(time.Minute)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		if err := srv.ReconcileGitHubInstallations(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("GitHub App 的安装对账失败（一小时后再试）：%v", err)
+		}
+		timer.Reset(time.Hour)
+	}
 }
 
 // githubReplay 把收件箱里的一条投递重新入队（死信修好之后用）：coding-web github-replay <delivery>。
@@ -173,7 +210,7 @@ func githubReplay(args []string) int {
 		log.Printf("github-replay 要 GitHub App 的配置与 CODING_GITHUB_DSN：%v", err)
 		return 2
 	}
-	inbox, err := newInbox(context.Background(), app)
+	inbox, err := newInbox(context.Background(), app, nil)
 	if err != nil {
 		log.Print(err)
 		return 1

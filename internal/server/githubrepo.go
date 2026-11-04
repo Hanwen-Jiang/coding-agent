@@ -111,14 +111,15 @@ func (s *Server) authorizeRepo(r *http.Request, id identity, p *Project, need re
 	if prov == nil || p.Repo == "" {
 		return repoGrant{Done: noop}, nil
 	}
-	// Webhook 记下的远端状况（G-04）：不正常时不签发，提示写清原因。
+	// Webhook 记下的远端状况（G-04）：不正常时不签发，提示写清原因。卸载、移除仓库之后不直接拒绝：重新安装（安装 ID 会变）
+	// 或加回仓库的事件可能丢了，下面按 API 再查一次这个仓库现在的安装，查不到才拒（事件只当提示）。
+	removed := map[string]*Msg{
+		"app_removed":  msg("GitHub App 已从 %s 卸载：重新安装后才能操作这个仓库", p.Repo),
+		"repo_removed": msg("%s 已从 GitHub App 的安装里移除：在 GitHub 上把它加回安装后才能操作，工作区还在", p.Repo),
+	}[p.RemoteState]
 	switch p.RemoteState {
 	case "app_suspended":
 		return repoGrant{}, &GitError{Provider: prov.Name, Status: http.StatusForbidden, Note: msg("GitHub App 在 %s 上的安装已暂停，暂时不能操作这个仓库", p.Repo)}
-	case "app_removed":
-		return repoGrant{}, &GitError{Provider: prov.Name, Status: http.StatusForbidden, Note: msg("GitHub App 已从 %s 卸载：重新安装后才能操作这个仓库", p.Repo)}
-	case "repo_removed":
-		return repoGrant{}, &GitError{Provider: prov.Name, Status: http.StatusForbidden, Note: msg("%s 已从 GitHub App 的安装里移除：在 GitHub 上把它加回安装后才能操作，工作区还在", p.Repo)}
 	case "remote_deleted":
 		return repoGrant{}, &GitError{Provider: prov.Name, Status: http.StatusGone, Note: msg("%s 在 GitHub 上已经不存在了，工作区还在", p.Repo)}
 	}
@@ -138,6 +139,9 @@ func (s *Server) authorizeRepo(r *http.Request, id identity, p *Project, need re
 		return repoGrant{}, err
 	}
 	if !s.viaApp(conn) {
+		if removed != nil {
+			return repoGrant{}, &GitError{Provider: prov.Name, Status: http.StatusForbidden, Note: removed}
+		}
 		user, pass := prov.gitAuth(conn, token)
 		return repoGrant{Auth: GitAuth{Host: prov.Web + "/", User: user, Pass: pass}, UserToken: token, Conn: conn, Done: noop}, nil
 	}
@@ -164,6 +168,9 @@ func (s *Server) authorizeRepo(r *http.Request, id identity, p *Project, need re
 	}
 	switch err := prov.api(ctx, jwt, http.MethodGet, "/repos/"+p.Repo+"/installation", nil, &inst); {
 	case errors.As(err, &ge) && ge.Status == http.StatusNotFound:
+		if removed != nil {
+			return repoGrant{}, &GitError{Provider: prov.Name, Status: http.StatusForbidden, Note: removed}
+		}
 		if need == repoRead && !perm.private {
 			return repoGrant{Conn: conn, UserToken: token, Done: noop}, nil // 公开仓库：不带凭据也能克隆、拉取
 		}
@@ -188,10 +195,20 @@ func (s *Server) authorizeRepo(r *http.Request, id identity, p *Project, need re
 	}
 	body := map[string]any{"repository_ids": []int64{perm.id}, "permissions": map[string]string{"contents": contents}}
 	if err := prov.api(ctx, jwt, http.MethodPost, fmt.Sprintf("/app/installations/%d/access_tokens", inst.ID), body, &issued); err != nil {
+		s.metrics().Count("coding.github.issue_failures", 1, map[string]string{"use": "operation"})
 		return repoGrant{}, err
 	}
 	if issued.Token == "" {
 		return repoGrant{}, &GitError{Provider: prov.Name, Status: http.StatusBadGateway, Note: msg("GitHub 没有签出安装令牌")}
+	}
+	if removed != nil && p.ID != "" {
+		// 签得出来：重新装好了或仓库加回来了。只清这两种标记，不覆盖期间事件记下的别的状况。
+		p.RemoteState = ""
+		_, _ = s.updateProject(id.TenantID, p.ID, func(x *Project) {
+			if x.RemoteState == "app_removed" || x.RemoteState == "repo_removed" {
+				x.RemoteState = ""
+			}
+		})
 	}
 	done := func() {
 		rctx, rcancel := context.WithTimeout(context.Background(), 10*time.Second)

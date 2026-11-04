@@ -54,6 +54,8 @@ spec:
             # 还没对外开放时只放行这些平台账号（逗号分隔的 <平台>:<登录名>）；删掉这一行就谁都能登录。
             - {name: CODING_ALLOWED_LOGINS, value: "<放行的账号>"}
             - {name: CODING_SANDBOX, value: sandbox}
+            # G-05：coding.github.* 指标经 Runtime 的 Collector 写进 VictoriaMetrics（Grafana 的告警读它）。
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://ar-agent-runtime-otel-collector:4318"}
             - name: AR_DEV_SIGNING_KEY
               valueFrom:
                 secretKeyRef: {name: agent-runtime-secrets, key: dev-signing-key}

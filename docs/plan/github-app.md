@@ -117,6 +117,14 @@
 
 ### G-05 运维与界面
 
+> 2026-11-03 服务端已完成（代码，没部署；界面等 WEB-SUB 放开 `app.js`、`i18n.js`）：
+> - 第 1 条：`internal/github` 计 `coding.github.deliveries`（`event`、`result`：accepted、signature_failed、wrong_app、too_large、bad_request、unavailable；验签之前 `event` 记 `unverified`）、`coding.github.processed`（done、retry、dead），每 5 秒报一次 `coding.github.backlog` 与 `coding.github.dead_letters`；服务端计 `coding.github.token_refresh_failures`、`coding.github.issue_failures`（`use`：operation、reconcile）。设了 `OTEL_EXPORTER_OTLP_ENDPOINT` 时经 `libs/go-core` 的 Telemetry 发出（平台作用域，不带负载；`deploy/k8s/coding-web.yaml` 指向 Runtime 的 Collector）。Grafana 的告警在 Runtime 仓库的 `deploy/data/values/grafana.yaml`（“Coding Web” 组：一小时内有新死信、积压持续 15 分钟超过 50 条、15 分钟内签名失败超过 10 次；阈值是起步值）。
+> - 第 2 条：`internal/server/githubops.go` 的 `ReconcileGitHubInstallations`，coding-web 启动后一分钟、之后每小时跑一次。记着的安装没了、或仓库不在它里面时，按仓库查一次现在的安装（卸载后重新安装、仓库转到别的安装之后安装 ID 会变）。
+> - 第 3 条的服务端：`GET /api/github/status`（连接状态、是不是旧 OAuth 的连接、关联的安装、安装入口、各项目的远端状况）。
+> - 第 4 条：卸载时关联到各账号的这个安装立即去掉。安装令牌本来就不存（每次签发、用完吊销）；用户令牌在 `github_app_authorization` revoked 时删（G-04）。
+> - 顺带修了 G-04 的一处：卸载后重新安装、移除后又加回仓库，而事件丢了时，项目会一直停在 `app_removed`、`repo_removed`。现在 `authorizeRepo` 遇到这两种标记先按 API 再查一次这个仓库现在的安装，签得出来就改记新的安装 ID、清掉标记，查不到才按原来的提示拒绝。
+> - 没做：第 3 条的界面；第 5 条的测试 App 要人注册；第 4 条“安装记录保留到卸载后 30 天”（第 5 节第 6 条）现在没有到期清理，项目上留着安装 ID 与 `app_removed`。
+
 1. 指标（经 `libs/go-core` 的 Telemetry，不带负载）：投递数与结果、积压、死信数、签名失败、令牌续期失败、签发失败。Grafana 上死信、积压、签名失败突增会告警。
 2. 对账：每小时用 `GET /app/installations` 与仓库列表纠正记录，覆盖超过 3 天的停机。
 3. 界面：连接状态、已授权仓库、“去 GitHub 调整权限”的入口、没装时的安装入口、权限不足时的明确提示。两种语言（`i18n.js`、`messages_en.go`）。

@@ -138,6 +138,12 @@ func (s *Server) onInstallation(ctx context.Context, d github.Delivery) error {
 	if err != nil || state == "" {
 		return err
 	}
+	if state == "app_removed" {
+		// 卸载：关联到账号的这个安装立即去掉（G-05 第 4 条）。
+		if err := s.unlinkInstallation(e.Installation.ID); err != nil {
+			return err
+		}
+	}
 	for tenant, ps := range changed {
 		for _, p := range ps {
 			s.cancelProjectTasks(ctx, tenant, p, msg("GitHub App 在这个仓库上的安装已暂停或卸载").In(langEN))

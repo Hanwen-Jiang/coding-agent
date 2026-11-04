@@ -25,6 +25,7 @@ import (
 	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/jwtingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/dev/localingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/providers/ingress"
+	"github.com/agentruntime/coding-agent/internal/github"
 	"github.com/agentruntime/coding-agent/internal/web"
 )
 
@@ -60,6 +61,8 @@ type Config struct {
 	GitHubApp *GitHubApp
 	// Webhook 是 GitHub App 的收件箱（G-02，internal/github），挂在 POST /api/webhooks/github；配了 App 而它为 nil 时那里回 503。
 	Webhook http.Handler
+	// Metrics 是 GitHub App 一侧的计数（G-05，经 libs/go-core 的 Telemetry）；nil 时不记。
+	Metrics github.Metrics
 	// SessionIdle、SessionMaxAge 是浏览器会话的空闲与绝对有效期（AUTH-02，browser_sessions.go；默认 24 小时、7 天）。Now 只给测试换时钟。
 	SessionIdle   time.Duration
 	SessionMaxAge time.Duration
@@ -225,6 +228,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/github/repos", s.authed(s.handleRepos))
 	// GitHub App 的 Setup URL（G-03）：安装或调整之后跳回这里，核对过才关联。
 	mux.HandleFunc("GET /api/github/setup", s.authed(s.handleGitHubSetup))
+	mux.HandleFunc("GET /api/github/status", s.authed(s.handleGitHubStatus))
 
 	mux.HandleFunc("GET /api/samples", s.authed(s.handleSamples))
 	// 环境配置与项目解耦；这里仅保存普通配置，不报告 Runtime 生命周期状态。

@@ -43,6 +43,17 @@ type Delivery struct {
 // Handler 处理一类事件；要能重复执行（同一条可能因租约到期被处理两次）。返回错误时按退避重试。
 type Handler func(ctx context.Context, d Delivery) error
 
+// Metrics 是计数与读数（G-05；coding-web 接到 libs/go-core 的 Telemetry）。标签只有事件名与结果，不带负载。
+type Metrics interface {
+	Count(name string, n int64, labels map[string]string)
+	Observe(name string, value float64, labels map[string]string)
+}
+
+type noMetrics struct{}
+
+func (noMetrics) Count(string, int64, map[string]string)     {}
+func (noMetrics) Observe(string, float64, map[string]string) {}
+
 // Options 是构造参数；零值的字段用默认值。
 type Options struct {
 	DSN      string
@@ -63,6 +74,8 @@ type Options struct {
 	ReconcileWindow time.Duration
 	ReconcileLimit  int
 	HTTP            *http.Client
+	// Metrics 为 nil 时不记。
+	Metrics Metrics
 }
 
 // Stats 是计数（G-05 接进 Telemetry）。
@@ -131,6 +144,9 @@ func New(ctx context.Context, opts Options) (*Service, error) {
 	if opts.HTTP == nil {
 		opts.HTTP = &http.Client{Timeout: 30 * time.Second}
 	}
+	if opts.Metrics == nil {
+		opts.Metrics = noMetrics{}
+	}
 	pool, err := pgxpool.New(ctx, opts.DSN)
 	if err != nil {
 		// 不带原始错误：连接串里可能有口令。
@@ -193,31 +209,40 @@ func (s *Service) Stats() Stats {
 // --- 接收 ---
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 计数（G-05）：验签之前事件名不可信，记成 unverified，免得标签被随便填。
+	event := "unverified"
+	reply := func(status int, result string) {
+		s.opts.Metrics.Count("coding.github.deliveries", 1, map[string]string{"event": event, "result": result})
+		w.WriteHeader(status)
+	}
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 	if r.ContentLength > s.opts.MaxBody {
-		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		reply(http.StatusRequestEntityTooLarge, "too_large")
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.opts.MaxBody+1))
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		reply(http.StatusBadRequest, "bad_request")
 		return
 	}
 	if int64(len(body)) > s.opts.MaxBody {
-		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		reply(http.StatusRequestEntityTooLarge, "too_large")
 		return
 	}
 	if !s.opts.App.VerifyWebhook(body, r.Header.Get("X-Hub-Signature-256")) {
 		s.sigFailures.Add(1)
-		w.WriteHeader(http.StatusUnauthorized)
+		reply(http.StatusUnauthorized, "signature_failed")
 		return
 	}
 	if r.Header.Get("X-GitHub-Hook-Installation-Target-ID") != s.opts.AppID {
-		w.WriteHeader(http.StatusForbidden)
+		reply(http.StatusForbidden, "wrong_app")
 		return
+	}
+	if e := r.Header.Get("X-GitHub-Event"); len(e) <= 64 {
+		event = e
 	}
 	d := Delivery{ID: r.Header.Get("X-GitHub-Delivery"), Event: r.Header.Get("X-GitHub-Event"), Payload: body}
 	var meta struct {
@@ -227,7 +252,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} `json:"installation"`
 	}
 	if d.ID == "" || d.Event == "" || len(d.ID) > 200 || json.Unmarshal(body, &meta) != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		reply(http.StatusBadRequest, "bad_request")
 		return
 	}
 	d.Action, d.InstallationID = meta.Action, meta.Installation.ID
@@ -236,12 +261,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := s.insert(ctx, d); err != nil {
 		s.unavailable.Add(1)
 		log.Printf("GitHub 投递 %s（%s）入箱失败，回 503：%v", d.ID, d.Event, err)
-		w.WriteHeader(http.StatusServiceUnavailable)
+		reply(http.StatusServiceUnavailable, "unavailable")
 		return
 	}
 	s.received.Add(1)
 	log.Printf("GitHub 投递 %s：%s %s，安装 %d", d.ID, d.Event, d.Action, d.InstallationID)
-	w.WriteHeader(http.StatusAccepted)
+	reply(http.StatusAccepted, "accepted")
 	select {
 	case s.wake <- struct{}{}:
 	default:
@@ -297,6 +322,7 @@ func (s *Service) ProcessOnce(ctx context.Context) (int, error) {
 			cancel()
 		}
 		if herr == nil {
+			s.opts.Metrics.Count("coding.github.processed", 1, map[string]string{"event": d.Event, "result": "done"})
 			_, err = s.db.Exec(ctx, `UPDATE github_deliveries SET state = 'done', lease_until = NULL, last_error = '' WHERE delivery = $1 AND state = 'processing'`, d.ID)
 		} else {
 			state, next := "retry", s.opts.Now().Add(s.opts.Backoff(d.Attempts))
@@ -304,6 +330,7 @@ func (s *Service) ProcessOnce(ctx context.Context) (int, error) {
 				state = "dead"
 				log.Printf("GitHub 投递 %s（%s）失败 %d 次，进死信", d.ID, d.Event, d.Attempts)
 			}
+			s.opts.Metrics.Count("coding.github.processed", 1, map[string]string{"event": d.Event, "result": state})
 			reason := herr.Error()
 			if len(reason) > 300 {
 				reason = reason[:300]
@@ -344,6 +371,18 @@ func (s *Service) count(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRow(ctx, `SELECT count(*) FROM github_deliveries`).Scan(&n)
 	return n, err
+}
+
+// ReportBacklog 记积压（还没处理完的：received、retry、processing）与死信的条数（G-05；Grafana 按它们告警）。
+func (s *Service) ReportBacklog(ctx context.Context) error {
+	var pending, dead int64
+	err := s.db.QueryRow(ctx, `SELECT count(*) FILTER (WHERE state IN ('received', 'retry', 'processing')), count(*) FILTER (WHERE state = 'dead') FROM github_deliveries`).Scan(&pending, &dead)
+	if err != nil {
+		return err
+	}
+	s.opts.Metrics.Observe("coding.github.backlog", float64(pending), nil)
+	s.opts.Metrics.Observe("coding.github.dead_letters", float64(dead), nil)
+	return nil
 }
 
 // Prune 清空 Retention 之前收到的负载（行留着做去重与统计），返回清了几条。
@@ -494,6 +533,9 @@ func (s *Service) Run(ctx context.Context) {
 			continue
 		case <-s.wake:
 		case <-poll.C:
+			if err := s.ReportBacklog(ctx); err != nil && ctx.Err() == nil {
+				log.Printf("读 GitHub 收件箱的积压失败：%v", err)
+			}
 		}
 		for ctx.Err() == nil {
 			n, err := s.ProcessOnce(ctx)
