@@ -39,9 +39,15 @@ func runWorkspaceUIProbe(t *testing.T, browser, lang string) {
 		t.Fatal(err)
 	}
 	_, env, _ := c.do("POST", "/api/environments", map[string]any{"name": "Py env"})
-	if _, err := app.updateSession("acme", Session{ProjectID: pid, ID: sid}, func(x *Session) {
+	sess, err := app.updateSession("acme", Session{ProjectID: pid, ID: sid}, func(x *Session) {
 		x.EnvironmentID, x.EnvironmentHandoff, x.RuntimeSessionID = env["id"].(string), handoffPending, "ses_ui"
-	}); err != nil {
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 会话开出时记下的环境配置快照（这里的会话是先开、后补上环境的）。
+	stored, _, _ := app.store.Environment("acme", env["id"].(string))
+	if err := app.store.PutSnapshot("acme", sess.WorkspaceID, snapshotOf(stored, time.Now())); err != nil {
 		t.Fatal(err)
 	}
 	fake.envReply = map[string]any{"environments": []any{

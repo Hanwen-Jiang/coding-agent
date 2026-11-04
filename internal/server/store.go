@@ -105,10 +105,37 @@ type Environment struct {
 	StartCommand string `json:"start_command,omitempty"`
 	Env          string `json:"env,omitempty"`
 	// Network 是联网需求（禁止、受限列表、完全开放）；真正放行与否由 Runtime 按租户策略核对，只能收窄。
-	Network   EnvironmentNetwork `json:"network"`
-	CreatedAt time.Time          `json:"created_at"`
-	CreatedBy string             `json:"created_by"`
-	DeletedAt *time.Time         `json:"deleted_at,omitempty"`
+	Network EnvironmentNetwork `json:"network"`
+	// Secrets 是 .env 的密钥：只写不读，值按（租户、用户、环境、名字）加密存放，不回给浏览器；删除环境时立即删掉。
+	Secrets []EnvironmentSecret `json:"secrets,omitempty"`
+	// Version 每次修改加一；会话的快照记下它开出时的版本。
+	Version   int        `json:"version"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	CreatedBy string     `json:"created_by"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+}
+
+// EnvironmentSecret 是一个密钥：名字与加密后的值（AES-256-GCM，见 Server.sealSecret）。
+type EnvironmentSecret struct {
+	Name   string `json:"name"`
+	Sealed string `json:"sealed"`
+}
+
+// EnvironmentSnapshot 是会话开出时环境配置的快照（2026-11-03 人定）：只有不是机密的设置（安装脚本、启动命令、普通变量、联网需求）
+// 与密钥的名字，没有密钥的值。会话从此只用它：之后改配置不影响已开的会话；删掉配置时会话照用快照，只是从此没有密钥。
+// 存在会话自己的文件里（env-snapshot-<workspace>.json），不进会话的 JSON：同租户的别人也能列出会话，但环境配置只有本人看得到。
+type EnvironmentSnapshot struct {
+	EnvironmentID string             `json:"environment_id"`
+	Name          string             `json:"name"`
+	Version       int                `json:"version"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+	SetupScript   string             `json:"setup_script,omitempty"`
+	StartCommand  string             `json:"start_command,omitempty"`
+	Env           string             `json:"env,omitempty"`
+	Network       EnvironmentNetwork `json:"network"`
+	SecretNames   []string           `json:"secret_names,omitempty"`
+	TakenAt       time.Time          `json:"taken_at"`
 }
 
 // EnvironmentNetwork 是环境配置里的联网需求（人工验收 Q29、Q30）：mode 是 deny、allowlist 或 open；allowlist 时
@@ -171,6 +198,33 @@ func (s *Store) environmentsFile(tenant string) string {
 
 func (s *Store) tasksFile(tenant, workspaceID string) string {
 	return filepath.Join(s.dir, tenant, "tasks-"+workspaceID+".json")
+}
+
+func (s *Store) snapshotFile(tenant, workspaceID string) string {
+	return filepath.Join(s.dir, tenant, "env-snapshot-"+workspaceID+".json")
+}
+
+// sessionFiles 是一个工作副本自己的文件（任务记录、环境配置的快照）：删会话、删工作区时一起删。
+func (s *Store) sessionFiles(tenant, workspaceID string) []string {
+	return []string{s.tasksFile(tenant, workspaceID), s.snapshotFile(tenant, workspaceID)}
+}
+
+// Snapshot 是会话（按工作副本）的环境配置快照；没有时 ok 为 false。
+func (s *Store) Snapshot(tenant, workspaceID string) (EnvironmentSnapshot, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snap, err := readJSONFile[*EnvironmentSnapshot](s.snapshotFile(tenant, workspaceID))
+	if err != nil || snap == nil {
+		return EnvironmentSnapshot{}, false, err
+	}
+	return *snap, true, nil
+}
+
+// PutSnapshot 记下会话的环境配置快照（只在开会话时写一次）。
+func (s *Store) PutSnapshot(tenant, workspaceID string, snap EnvironmentSnapshot) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return writeFileAtomic(s.snapshotFile(tenant, workspaceID), snap)
 }
 
 func (s *Store) Sessions(tenant string) ([]Session, error) {
@@ -237,6 +291,8 @@ func (s *Store) DeleteEnvironment(tenant, id string, at time.Time) error {
 			if envs[i].ID == id && envs[i].DeletedAt == nil {
 				t := at
 				envs[i].DeletedAt = &t
+				// 密钥立即删掉（常常是因为密钥泄露才删环境）：墓碑里不留加密后的值，用它的会话从此拿不到密钥。
+				envs[i].Secrets = nil
 				break
 			}
 		}
@@ -264,8 +320,10 @@ func (s *Store) DeleteSession(tenant string, sess Session) error {
 	if err := writeFileAtomic(s.sessionsFile(tenant), sessions); err != nil {
 		return err
 	}
-	if err := os.Remove(s.tasksFile(tenant, sess.WorkspaceID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	for _, f := range s.sessionFiles(tenant, sess.WorkspaceID) {
+		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 	return nil
 }
@@ -396,10 +454,10 @@ func (s *Store) DeleteProject(tenant, id string) error {
 	if err != nil {
 		return err
 	}
-	files := []string{s.tasksFile(tenant, id)}
+	files := s.sessionFiles(tenant, id)
 	for _, x := range sessions {
 		if x.ProjectID == id {
-			files = append(files, s.tasksFile(tenant, x.WorkspaceID))
+			files = append(files, s.sessionFiles(tenant, x.WorkspaceID)...)
 		}
 	}
 	if err := writeFileAtomic(s.sessionsFile(tenant), slices.DeleteFunc(sessions, func(x Session) bool { return x.ProjectID == id })); err != nil {

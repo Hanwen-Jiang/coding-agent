@@ -874,6 +874,11 @@ dialog.environment-editor .d-head .muted { margin-top: 6px; }
 .env-hint { margin-top: 4px; }
 .environment-editor .d-foot { align-items: center; }
 .env-err { line-height: 1.4; }
+.env-secrets { display: flex; flex-direction: column; gap: 6px; }
+.env-secrets:empty { display: none; }
+.env-secret-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto; gap: 6px; align-items: center; }
+.env-secret-row input[readonly] { color: var(--muted); }
+.env-note { flex-basis: 100%; line-height: 1.45; }
 .env-row { align-items: flex-start; gap: 12px; }
 .env-network { gap: 8px; }
 textarea.field.mono { font-family: var(--font-mono); font-size: 12.5px; }

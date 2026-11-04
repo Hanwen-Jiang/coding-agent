@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -16,6 +17,8 @@ const (
 	maxEnvironmentScriptBytes      = 64 << 10
 	maxEnvironmentHosts            = 100
 	maxEnvironmentHostBytes        = 253
+	maxEnvironmentSecrets          = 32
+	maxEnvironmentSecretBytes      = 4 << 10
 )
 
 const onlyMePrivacy = "only_me"
@@ -42,6 +45,27 @@ type environmentInput struct {
 	StartCommand string             `json:"start_command"`
 	Env          string             `json:"env"`
 	Network      EnvironmentNetwork `json:"network"`
+	// Secrets 是想要的全部密钥（只写）：给了值就设成它，没给值就保留原来的值，不在列表里的删掉。
+	// 不带这个字段（nil）时密钥不动。
+	Secrets *[]secretInput `json:"secrets"`
+}
+
+type secretInput struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// secretView 是密钥给浏览器看的样子：只有名字。
+type secretView struct {
+	Name string `json:"name"`
+	Set  bool   `json:"set"`
+}
+
+// environmentJSON 是环境配置给浏览器的样子：Secrets 换成只有名字的 secretView（外层的字段盖住嵌入的 Environment.Secrets），
+// 加密后的值也不出服务端。
+type environmentJSON struct {
+	Environment
+	Secrets []secretView `json:"secrets"`
 }
 
 func normalizeEnvironmentInput(in environmentInput) (environmentInput, error) {
@@ -74,7 +98,69 @@ func normalizeEnvironmentInput(in environmentInput) (environmentInput, error) {
 		return environmentInput{}, err
 	}
 	in.Network = network
+	if in.Secrets != nil {
+		secrets, err := normalizeSecrets(*in.Secrets, in.Env)
+		if err != nil {
+			return environmentInput{}, err
+		}
+		in.Secrets = &secrets
+	}
 	return in, nil
+}
+
+// normalizeSecrets 校验密钥的名字与值（值不进任何说明）：名字同环境变量的规则、不重复、不与 .env 里的变量同名，值有上限、不含 NUL。
+// 没给值的名字表示保留原来的值，由 mergeSecrets 核对原来有没有。
+func normalizeSecrets(in []secretInput, dotenv string) ([]secretInput, error) {
+	if len(in) > maxEnvironmentSecrets {
+		return nil, msg("密钥最多 %d 个", maxEnvironmentSecrets)
+	}
+	plain := map[string]bool{}
+	for _, raw := range strings.Split(dotenv, "\n") {
+		if key, _, ok := strings.Cut(strings.TrimSpace(raw), "="); ok {
+			plain[key] = true
+		}
+	}
+	out := make([]secretInput, 0, len(in))
+	seen := map[string]bool{}
+	for _, sec := range in {
+		name := strings.TrimSpace(sec.Name)
+		switch {
+		case !environmentVarName.MatchString(name) || len(name) > 128:
+			return nil, msg("密钥名 %s 不合法", name)
+		case seen[name]:
+			return nil, msg("密钥 %s 重复", name)
+		case plain[name]:
+			return nil, msg("密钥 %s 与 .env 里的变量同名", name)
+		case len(sec.Value) > maxEnvironmentSecretBytes:
+			return nil, msg("密钥 %s 的值不超过 %d 个字节", name, maxEnvironmentSecretBytes)
+		case strings.ContainsRune(sec.Value, '\x00'):
+			return nil, msg("密钥 %s 的值包含非法字符", name)
+		}
+		seen[name] = true
+		out = append(out, secretInput{Name: name, Value: sec.Value})
+	}
+	return out, nil
+}
+
+// mergeSecrets 按请求算出新的密钥：给了值的加密存放，没给值的沿用原来的（原来没有就报错），不在列表里的删掉。
+func (s *Server) mergeSecrets(tenant, user, envID string, existing []EnvironmentSecret, in []secretInput) ([]EnvironmentSecret, error) {
+	var out []EnvironmentSecret
+	for _, sec := range in {
+		if sec.Value == "" {
+			i := slices.IndexFunc(existing, func(e EnvironmentSecret) bool { return e.Name == sec.Name })
+			if i < 0 {
+				return nil, msg("密钥 %s 没有值", sec.Name)
+			}
+			out = append(out, existing[i])
+			continue
+		}
+		sealed, err := s.sealSecret(tenant, user, envID, sec.Name, sec.Value)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, EnvironmentSecret{Name: sec.Name, Sealed: sealed})
+	}
+	return out, nil
 }
 
 // normalizeNetwork 校验联网需求：模式只能是三档之一；受限列表要有域名，别的模式不能带域名（不静默丢掉用户填的东西）。
@@ -161,7 +247,7 @@ func validateDotEnv(dotenv string) error {
 		}
 		seen[key] = true
 		if looksLikeSecretName(key) {
-			return msg(".env 第 %d 行的 %s 可能是机密，请使用 Runtime 网络密钥", lineNo+1, key)
+			return msg(".env 第 %d 行的 %s 可能是机密，请放到“密钥”里", lineNo+1, key)
 		}
 		if strings.ContainsRune(value, '\x00') {
 			return msg(".env 第 %d 行包含非法字符", lineNo+1)
@@ -180,14 +266,18 @@ func looksLikeSecretName(key string) bool {
 	return false
 }
 
-func environmentView(env Environment) Environment {
+func environmentView(env Environment) environmentJSON {
 	// Keep the response as configuration only; DeletedAt is omitted for active
 	// records by the handlers and no runtime status is inferred here.
 	// Records saved before network intent existed read as the default (deny).
 	if env.Network.Mode == "" {
 		env.Network.Mode = networkDeny
 	}
-	return env
+	out := environmentJSON{Environment: env, Secrets: []secretView{}}
+	for _, sec := range env.Secrets {
+		out.Secrets = append(out.Secrets, secretView{Name: sec.Name, Set: sec.Sealed != ""})
+	}
+	return out
 }
 
 func (s *Server) environmentForUser(tenant, user, id string) (Environment, bool, error) {
@@ -208,13 +298,11 @@ func (s *Server) handleListEnvironments(w http.ResponseWriter, r *http.Request, 
 		return env.DeletedAt != nil || env.CreatedBy != id.UserID
 	})
 	slices.SortFunc(envs, func(a, b Environment) int { return b.CreatedAt.Compare(a.CreatedAt) })
-	for i := range envs {
-		envs[i] = environmentView(envs[i])
+	out := []environmentJSON{}
+	for _, env := range envs {
+		out = append(out, environmentView(env))
 	}
-	if envs == nil {
-		envs = []Environment{}
-	}
-	writeJSON(w, http.StatusOK, envs)
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request, id identity) {
@@ -231,7 +319,13 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request,
 	env := Environment{
 		ID: newEnvironmentID(in.Name), Name: in.Name, Description: in.Description, Privacy: in.Privacy,
 		SetupScript: in.SetupScript, StartCommand: in.StartCommand, Env: in.Env, Network: in.Network,
-		CreatedAt: now, CreatedBy: id.UserID,
+		Version: 1, CreatedAt: now, UpdatedAt: now, CreatedBy: id.UserID,
+	}
+	if in.Secrets != nil {
+		if env.Secrets, err = s.mergeSecrets(id.TenantID, id.UserID, env.ID, nil, *in.Secrets); err != nil {
+			writeMsg(w, r, http.StatusBadRequest, "环境配置不合法：%v", err)
+			return
+		}
 	}
 	err = s.store.UpdateEnvironments(id.TenantID, func(all []Environment) ([]Environment, error) {
 		for _, existing := range all {
@@ -294,12 +388,35 @@ func (s *Server) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request,
 					return nil, fmt.Errorf("你已有同名环境")
 				}
 			}
+			if in.Secrets != nil {
+				secrets, err := s.mergeSecrets(id.TenantID, id.UserID, all[i].ID, all[i].Secrets, *in.Secrets)
+				if err != nil {
+					return nil, err
+				}
+				all[i].Secrets = secrets
+			} else {
+				// 不带 secrets：密钥不动，但仍不能与新的 .env 同名。
+				keep := make([]secretInput, 0, len(all[i].Secrets))
+				for _, sec := range all[i].Secrets {
+					keep = append(keep, secretInput{Name: sec.Name})
+				}
+				if _, err := normalizeSecrets(keep, in.Env); err != nil {
+					return nil, err
+				}
+			}
 			all[i].Name, all[i].Description, all[i].Privacy = in.Name, in.Description, in.Privacy
 			all[i].SetupScript, all[i].StartCommand, all[i].Env, all[i].Network = in.SetupScript, in.StartCommand, in.Env, in.Network
+			all[i].Version++
+			all[i].UpdatedAt = time.Now().UTC()
 			return all, nil
 		}
 		return nil, fmt.Errorf("环境不存在")
 	})
+	// 密钥的校验要看原来的值，在锁里做：它的错误是 *Msg（同名、不存在是普通的 error）。
+	if bad := (*Msg)(nil); errors.As(err, &bad) {
+		writeMsg(w, r, http.StatusBadRequest, "环境配置不合法：%v", bad)
+		return
+	}
 	if err != nil {
 		if strings.Contains(err.Error(), "同名") {
 			writeMsg(w, r, http.StatusConflict, "你已有同名环境")

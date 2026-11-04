@@ -109,8 +109,41 @@ func legacyTokenKey(signingKey []byte) []byte {
 	return mac.Sum(nil)
 }
 
-func (s *Server) seal(plain, aad string) (string, error) {
-	block, err := aes.NewCipher(s.tokenKey())
+// secretKey 是环境配置里密钥的加密密钥：由令牌的密钥（tokenKey 或 oldKeys 里的一把）另行派生，与令牌的不同；
+// 跟着 CODING_TOKEN_KEY 走，去掉开发签名密钥（AUTH-01 第 4 步）之后照样解得开。
+func secretKey(base []byte) []byte {
+	mac := hmac.New(sha256.New, base)
+	mac.Write([]byte("coding-web/environment-secret/v1"))
+	return mac.Sum(nil)
+}
+
+func secretAAD(tenant, user, envID, name string) string {
+	return "environment-secret/" + tenant + "/" + user + "/" + envID + "/" + name
+}
+
+// sealSecret、openSecret 加密、解开环境配置的一个密钥：绑定（租户、用户、环境、名字），换到别处解不开。
+// 解开时先用当前的密钥，解不开再按 oldKeys 的顺序试（同令牌）。
+func (s *Server) sealSecret(tenant, user, envID, name, value string) (string, error) {
+	return sealWith(secretKey(s.tokenKey()), value, secretAAD(tenant, user, envID, name))
+}
+
+func (s *Server) openSecret(tenant, user, envID, name, sealed string) (string, error) {
+	aad := secretAAD(tenant, user, envID, name)
+	plain, err := openWith(secretKey(s.tokenKey()), sealed, aad)
+	if err != nil {
+		for _, key := range s.oldKeys() {
+			if old, e := openWith(secretKey(key), sealed, aad); e == nil {
+				return old, nil
+			}
+		}
+	}
+	return plain, err
+}
+
+func (s *Server) seal(plain, aad string) (string, error) { return sealWith(s.tokenKey(), plain, aad) }
+
+func sealWith(key []byte, plain, aad string) (string, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
