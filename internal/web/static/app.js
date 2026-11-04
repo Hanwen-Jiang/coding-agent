@@ -2110,6 +2110,7 @@ function loadRun(t, force = false, seed = null) {
   }
   run.promise = new Promise((resolve) => {
     const cursor = seed && seed.cursor ? `?last_event_id=${seed.cursor}` : "";
+    historyTraffic.requests++;
     const es = new EventSource(`${base}/tasks/${t.id}/events${cursor}`);
     run.es = es;
     let timer = null;
@@ -2175,6 +2176,7 @@ function scheduleTurn(id) {
 // 取不到快照（老的 Runtime 没有这个端点）时返回 false，由调用方照旧逐个回放。
 async function paintFromSnapshot(base) {
   let snap;
+  historyTraffic.requests++;
   try { snap = await api("GET", base + "/snapshot"); } catch { return false; }
   if (sbase() !== base || !snap || !Array.isArray(snap.tasks)) return false;
   const byId = new Map(snap.tasks.map((s) => [s.task_id, s]));
@@ -2204,9 +2206,15 @@ async function resnapshot(base) {
   }
 }
 
+// PERF-00（Runtime 的 workspace-read 文档第 2 节）：打开会话时取历史的请求数（取快照、开事件流）。replayTasks 量这一段的耗时
+// 与请求数，画完报给 coding-web 记成指标；只是计量，不改加载的方式。
+const historyTraffic = { requests: 0 };
+
 async function replayTasks() {
   const base = sbase();
-  if (await paintFromSnapshot(base)) return;
+  const started = performance.now();
+  const before = historyTraffic.requests;
+  if (await paintFromSnapshot(base)) return reportHistoryLoad(base, "snapshot", started, before);
   const recent = state.tasks.slice(-REPLAY_LIMIT);
   // 先接上进行中的（实时），再从最新的往前一个一个重放已结束的（浏览器对同一主机的连接数有限）：打开会话先看到最后的对话，
   // 更早的在上面陆续补上；停在底部时 renderTurn 一直跟到底。
@@ -2215,6 +2223,14 @@ async function replayTasks() {
     if (sbase() !== base) return;
     if (TERMINAL.has(t.status)) await loadRun(t);
   }
+  reportHistoryLoad(base, "replay", started, before);
+}
+
+// reportHistoryLoad 报一次历史加载的耗时与请求数；中途换了会话不报，报不上不影响页面。
+function reportHistoryLoad(base, mode, started, before) {
+  if (sbase() !== base) return;
+  const report = { mode, duration_ms: Math.round(performance.now() - started), requests: historyTraffic.requests - before };
+  api("POST", "/api/metrics/history-load", report).catch(() => { /* 只是计量 */ });
 }
 
 function afterFinish(t) {

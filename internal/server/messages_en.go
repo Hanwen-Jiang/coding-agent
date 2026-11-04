@@ -9,6 +9,7 @@ var english = map[string]string{
 	"登录已过期，请重新登录":                  "Your session has expired. Please sign in again.",
 	"缺少 X-Coding-Web 头":            "Missing the X-Coding-Web header",
 	"请求体不是合法的 JSON":                "The request body isn't valid JSON",
+	"计量的取值不对":                      "The metric values are out of range",
 	"没有打开开发登录（CODING_DEV_LOGIN=1）": "Dev sign-in isn't enabled (CODING_DEV_LOGIN=1)",
 	"租户与用户名只能用小写字母、数字、- 与 _，以字母或数字开头":                "Tenant and username may only use lowercase letters, digits, - and _, and must start with a letter or digit",
 	"gh-、gitee-、gl-、gitea-、bb-、google- 开头的租户留给第三方登录": "Tenants starting with gh-, gitee-, gl-, gitea-, bb- or google- are reserved for third-party sign-in",
