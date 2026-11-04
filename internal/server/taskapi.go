@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -107,6 +108,20 @@ func (a *TaskAPI) call(ctx context.Context, client *http.Client, path, token str
 		return nil
 	}
 	return json.Unmarshal(data, resp)
+}
+
+// Snapshot 取 Runtime 会话的快照（GET /v1/sessions/{session}/snapshot，N-19）；调用方负责关闭 Body。
+func (a *TaskAPI) Snapshot(ctx context.Context, token, sessionID string, query url.Values) (*http.Response, error) {
+	target := a.base + "/v1/sessions/" + url.PathEscape(sessionID) + "/snapshot"
+	if len(query) > 0 {
+		target += "?" + query.Encode()
+	}
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	r.Header.Set("Authorization", "Bearer "+token)
+	return a.client.Do(r)
 }
 
 // Artifact 下载 Task 交付的一个文件（GET /v1/tasks/{task}/artifacts/{artifact}，N-18）；调用方负责关闭 Body。

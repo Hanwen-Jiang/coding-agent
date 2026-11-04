@@ -269,6 +269,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+sess+"/tasks/{task}/cancel", s.authed(s.handleCancel))
 	mux.HandleFunc("GET "+sess+"/tasks/{task}/artifacts", s.authed(s.handleListArtifacts))
 	mux.HandleFunc("GET "+sess+"/tasks/{task}/artifacts/{artifact}", s.authed(s.handleArtifactDownload))
+	mux.HandleFunc("GET "+sess+"/snapshot", s.authed(s.handleSnapshot))
 	mux.HandleFunc("GET /api/tasks/active", s.authed(s.handleActiveTasks))
 
 	mux.Handle("GET /", web.Handler())

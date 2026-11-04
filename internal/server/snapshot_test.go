@@ -9,7 +9,7 @@ package server
 //   - 事件转发：上游 409 resnapshot_required 时回 200 的事件流，只有一条 resnapshot_required 事件，然后结束（EventSource 读不到状态码，
 //     只能这样告诉页面重新取快照）；别的失败照旧。
 //
-// 实现之前（没有 /snapshot 路由，请求落到 404）这些测试跳过。
+// 实现在 snapshot.go 与 tasks.go 的 handleEvents。
 
 import (
 	"io"
@@ -73,10 +73,6 @@ func newSnapshotSession(t *testing.T, submit bool) (*httptest.Server, *client, s
 		if code, _, raw := c.do("POST", api+"/tasks", map[string]string{"message": "修一下测试"}); code != http.StatusCreated {
 			t.Fatalf("提交任务失败：%d %s", code, raw)
 		}
-	}
-	// 实现之前没有这个路由（404）。实现之后去掉这段跳过。
-	if code, _, _ := c.do("GET", api+"/snapshot", nil); code == http.StatusNotFound {
-		t.Skip("快照的转发还没写：先审验收测试（WEB-SNAP）")
 	}
 	up.mu.Lock()
 	up.snapshot = nil

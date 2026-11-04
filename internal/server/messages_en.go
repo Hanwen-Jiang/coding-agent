@@ -133,6 +133,7 @@ var english = map[string]string{
 	"模型倾向只能是 economy、balanced 或 best": "The model preference must be economy, balanced or best",
 	"要给出 question_id 与 option":        "question_id and option are required",
 	"连不上 task-service":                "Can't reach task-service",
+	"暂时取不到会话快照":                       "Can't load the session snapshot right now",
 	"用户在网页上取消":                        "Cancelled by the user in the web app",
 	"还有任务在跑，等它结束或先取消":                 "A task is still running. Wait for it to finish or cancel it first.",
 	"还有任务在跑，等它结束再提交":                  "A task is still running. Commit after it finishes.",

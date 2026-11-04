@@ -262,6 +262,17 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, id identit
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		var reason struct {
+			Code string `json:"code"`
+		}
+		if res.StatusCode == http.StatusConflict && json.Unmarshal(body, &reason) == nil && reason.Code == "resnapshot_required" {
+			// 游标过期（N-19）：EventSource 读不到状态码，换成一条 resnapshot_required 事件，页面据此重新取快照。
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "event: resnapshot_required\ndata: {}\n\n")
+			return
+		}
 		writeErr(w, r, res.StatusCode, errors.New(strings.TrimSpace(string(body)))) // task-service 的说明原样转出
 		return
 	}

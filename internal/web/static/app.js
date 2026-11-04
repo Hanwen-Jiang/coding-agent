@@ -11,7 +11,7 @@ import { installScrollbars } from "./scrollbars.js";
 const EVENT_TYPES = [
   "task_accepted", "round_started", "stage_started", "node_started", "node_finished",
   "thinking_delta", "tool_status", "token_delta", "human_input_required", "verdict", "decision_retry", "task_finished",
-  "guidance_updated", "task_message_edited", "context_usage", "plan_updated",
+  "guidance_updated", "task_message_edited", "context_usage", "plan_updated", "resnapshot_required",
 ];
 const STATUS = {
   TASK_STATUS_QUEUED: [t("status.queued"), "run"],
@@ -2071,26 +2071,66 @@ function closeStreams() {
   for (const run of state.runs.values()) if (run.es) run.es.close();
 }
 
-function loadRun(t, force = false) {
+// toEvent 把事件流的一条 data（或会话快照里的一条事件，格式相同）变成 run.events 里的一项。
+function toEvent(data, msgType = "message", lastEventId = 0) {
+  const id = Number(data.event_id || lastEventId || 0);
+  const type = msgType === "message" ? String(data.type || "").replace(/^TASK_EVENT_TYPE_/, "").toLowerCase() : msgType;
+  return { event_id: id, type, time: data.emitted_at, value: (data.payload && data.payload.value) || {} };
+}
+
+// loadRun 接上一个任务的事件。seed 是会话快照里这个任务的一份（WEB-SNAP）：{ events, cursor }。快照里的事件先画出来；
+// 已经结束的不再开事件流，没结束的从 cursor 续传（事件流地址带 last_event_id）。没有 seed 时从头回放。
+function loadRun(t, force = false, seed = null) {
   if (state.runs.has(t.id) && !force) return state.runs.get(t.id).promise;
   const base = sbase();
   const run = { events: [], done: false, es: null };
   state.runs.set(t.id, run);
+  const seen = new Set();
+  for (const data of (seed && seed.events) || []) {
+    const ev = toEvent(data);
+    if (ev.event_id && seen.has(ev.event_id)) continue;
+    if (ev.event_id) seen.add(ev.event_id);
+    run.events.push(ev);
+    if (ev.type === "task_finished") {
+      t.status = ev.value.status || t.status;
+      if (!state.closed.has(t.id)) state.open.delete(t.id);
+      guidanceTaskFinished(t);
+      run.done = true;
+    } else if (ev.type === "guidance_updated") {
+      guidanceEvent(t, ev.value);
+    }
+  }
+  if (seed) {
+    scheduleTurn(t.id);
+    scheduleChrome();
+  }
+  if (run.done) {
+    run.promise = Promise.resolve();
+    return run.promise;
+  }
   run.promise = new Promise((resolve) => {
-    const es = new EventSource(`${base}/tasks/${t.id}/events`);
+    const cursor = seed && seed.cursor ? `?last_event_id=${seed.cursor}` : "";
+    const es = new EventSource(`${base}/tasks/${t.id}/events${cursor}`);
     run.es = es;
-    const seen = new Set();
     let timer = null;
     const finish = () => { es.close(); run.done = true; clearTimeout(timer); resolve(); };
     const onEvent = (msg) => {
       if (sbase() !== base) return finish();
+      if (msg.type === "resnapshot_required") {
+        // 游标过期（N-19）：中间的事件已经过了保留期，重新取快照。
+        es.close();
+        clearTimeout(timer);
+        resolve();
+        resnapshot(base);
+        return;
+      }
       let data;
       try { data = JSON.parse(msg.data); } catch { return; }
-      const id = Number(data.event_id || msg.lastEventId || 0);
+      const ev = toEvent(data, msg.type, msg.lastEventId);
+      const id = ev.event_id;
       if (id && seen.has(id)) return;
       if (id) seen.add(id);
-      const type = msg.type === "message" ? String(data.type || "").replace(/^TASK_EVENT_TYPE_/, "").toLowerCase() : msg.type;
-      const ev = { event_id: id, type, time: data.emitted_at, value: (data.payload && data.payload.value) || {} };
+      const type = ev.type;
       run.events.push(ev);
       const replaying = TERMINAL.has(t.status) && !run.live;
       if (type === "task_finished") {
@@ -2131,8 +2171,42 @@ function scheduleTurn(id) {
   requestAnimationFrame(() => { pendingTurns.delete(id); renderTurn(id); });
 }
 
+// paintFromSnapshot 用会话快照（WEB-SNAP，Runtime 的 N-19）画首屏：快照里有的任务带着它的事件与游标接上，没有的进行中任务从头接；
+// 取不到快照（老的 Runtime 没有这个端点）时返回 false，由调用方照旧逐个回放。
+async function paintFromSnapshot(base) {
+  let snap;
+  try { snap = await api("GET", base + "/snapshot"); } catch { return false; }
+  if (sbase() !== base || !snap || !Array.isArray(snap.tasks)) return false;
+  const byId = new Map(snap.tasks.map((s) => [s.task_id, s]));
+  for (const t of state.tasks.slice(-REPLAY_LIMIT)) {
+    const s = byId.get(t.id);
+    if (s) {
+      const events = (s.events || []).slice();
+      if (s.plan && !events.some((e) => e.event_id === s.plan.event_id)) events.unshift(s.plan);
+      events.sort((a, b) => Number(a.event_id || 0) - Number(b.event_id || 0));
+      loadRun(t, true, { events, cursor: Number(s.last_event_id) || 0 });
+    } else if (!TERMINAL.has(t.status)) {
+      loadRun(t, true);
+    }
+  }
+  return true;
+}
+
+let resnapshotting = false;
+async function resnapshot(base) {
+  if (resnapshotting || sbase() !== base) return;
+  resnapshotting = true;
+  try {
+    closeStreams();
+    if (!(await paintFromSnapshot(base))) for (const t of state.tasks.slice(-REPLAY_LIMIT)) loadRun(t, true);
+  } finally {
+    resnapshotting = false;
+  }
+}
+
 async function replayTasks() {
   const base = sbase();
+  if (await paintFromSnapshot(base)) return;
   const recent = state.tasks.slice(-REPLAY_LIMIT);
   // 先接上进行中的（实时），再从最新的往前一个一个重放已结束的（浏览器对同一主机的连接数有限）：打开会话先看到最后的对话，
   // 更早的在上面陆续补上；停在底部时 renderTurn 一直跟到底。
