@@ -578,6 +578,11 @@ dialog.secrets .secret-form input { flex: 1; min-width: 160px; }
 .answer { font: 16px/1.72 var(--font-serif); color: var(--text); word-break: break-word; }
 .answer > :first-child { margin-top: 0; }
 .answer > :last-child { margin-bottom: 0; }
+/* 还在生成的回答（逐字增量，DELTA）：末尾一个闪动的光标；只有思考时是一行灰字。 */
+.answer.draft > :last-child::after { content: ""; display: inline-block; width: 0.5em; height: 1em; margin-left: 2px; vertical-align: -0.12em; background: var(--muted); animation: draft-caret 1s steps(2) infinite; }
+@keyframes draft-caret { 50% { opacity: 0; } }
+.draft-thinking { color: var(--muted); font-size: 13.5px; font-style: italic; white-space: pre-wrap; word-break: break-word; }
+@media (prefers-reduced-motion: reduce) { .answer.draft > :last-child::after { animation: none; } }
 .answer p { margin: 0 0 0.85em; }
 .answer h1, .answer h2, .answer h3, .answer h4 { margin: 1.3em 0 0.5em; font-weight: 600; line-height: 1.3; letter-spacing: -0.005em; }
 .answer h1 { font-size: 1.4em; }

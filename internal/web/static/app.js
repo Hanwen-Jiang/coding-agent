@@ -1775,7 +1775,7 @@ function turn(task) {
   const running = !TERMINAL.has(status);
   let tail = null;
   if (finished) tail = result(task, finished.value);
-  else if (running) tail = waitingLine(task);
+  else if (running) tail = draftView(run) || waitingLine(task);
   else if (!run) tail = h("div", { class: "result-foot" }, statusChip(status), h("button", { class: "btn ghost sm", onclick: () => loadRun(task, true) }, t("turn.load")));
   // 每来一个事件整轮重画：这里不带进场动画（只有刚发出的那一轮在“提交中”时升上来一次）。
   const queued = status === "TASK_STATUS_QUEUED";
@@ -1853,6 +1853,34 @@ function waitingLine(task) {
   if (run && run.events.length) return null; // 进度在工作过程与输入框上方
   return h("div", { class: "waiting-line" }, h("span", { class: "spinner" }), run ? t("run.starting") : t("run.connecting"),
     h("span", { class: "since", "data-since": task.created_at }, fmtSince(task.created_at)));
+}
+
+// draftDelta 把一条逐字增量（DELTA：node_id、offset、text）拼进这个节点的草稿。offset 是 Runtime 按字符（码点）数的位置：
+// 接着末尾就追加；落在已有范围里（activity 重试从 0 重来）就从那里重写；超出末尾（连上时前面已经推过）就从这里另起，前面标省略。
+function draftDelta(run, type, v) {
+  const piece = String(v.text || "");
+  if (!piece) return;
+  const node = String(v.node_id || "");
+  const offset = Math.max(0, Number(v.offset) || 0);
+  run.drafts = run.drafts || new Map();
+  const d = run.drafts.get(node) || { text: { base: 0, chars: [] }, thinking: { base: 0, chars: [] } };
+  const part = type === "token_delta" ? d.text : d.thinking;
+  const end = part.base + part.chars.length;
+  if (offset >= part.base && offset <= end) part.chars.splice(offset - part.base, Infinity, ...piece);
+  else { part.base = offset; part.chars = [...piece]; }
+  // 最近更新的节点排在最后，草稿画它。
+  run.drafts.delete(node);
+  run.drafts.set(node, d);
+}
+
+// draftView 是还在生成的回答：有正文画正文（前面没收全时带省略号），只有思考时画思考的末尾。
+function draftView(run) {
+  if (!run || !run.drafts || !run.drafts.size) return null;
+  const d = [...run.drafts.values()].pop();
+  if (d.text.chars.length) return h("div", { class: "answer draft" }, md((d.text.base ? "…" : "") + d.text.chars.join("")));
+  const thinking = d.thinking.chars;
+  if (!thinking.length) return null;
+  return h("div", { class: "draft-thinking" }, (thinking.length > 400 || d.thinking.base ? "…" : "") + thinking.slice(-400).join(""));
 }
 
 // pendingTurn 是正在提交的那一轮：消息先出现，下面说明在做什么、等了多久（开会话要复制工作副本，借沙箱要几秒到十几秒）。
@@ -2237,6 +2265,12 @@ function loadRun(t, force = false, seed = null) {
       }
       let data;
       try { data = JSON.parse(msg.data); } catch { return; }
+      if (msg.type === "token_delta" || msg.type === "thinking_delta") {
+        // 逐字增量（DELTA）没有 id：lastEventId 还是上一条持久事件的，不能拿来去重；不进 run.events，只拼草稿。
+        if (!run.done) draftDelta(run, msg.type, (data.payload && data.payload.value) || {});
+        scheduleTurn(t.id);
+        return;
+      }
       const ev = toEvent(data, msg.type, msg.lastEventId);
       const id = ev.event_id;
       if (id && seen.has(id)) return;
@@ -2248,6 +2282,7 @@ function loadRun(t, force = false, seed = null) {
         t.status = ev.value.status || t.status;
         if (!state.closed.has(t.id)) state.open.delete(t.id);
         guidanceTaskFinished(t);
+        run.drafts = null;
         finish();
         if (!replaying) afterFinish(t);
       } else if (type === "node_finished" && !replaying) {
