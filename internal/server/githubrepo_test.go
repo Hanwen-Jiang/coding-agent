@@ -51,7 +51,13 @@ type fakeAppGitHub struct {
 	failIssue     bool
 	// instOf 覆盖 GET /repos/{repo}/installation：值是这个仓库现在的安装 ID，0 时回 404（卸载了，或仓库不在任何安装里）。
 	instOf map[string]int
+	// G-06：各登录名在仓库上的权限（collaborators/{login}/permission，没有时为 read）、用安装令牌发的评论与开的 PR。
+	perms    map[string]string
+	comments []fakeComment
+	pulls    []map[string]any
 }
+
+type fakeComment struct{ Path, Body, Token string }
 
 func newFakeAppGitHub(t *testing.T) *fakeAppGitHub {
 	f := &fakeAppGitHub{refreshOK: map[string]bool{"ghr_1": true}, jwts: map[string]bool{}, names: map[int]string{555: "octo-cat/demo", 556: "octo-cat/readonly", 557: "octo-cat/suspended", 558: "octo-cat/noinstall"}}
@@ -138,6 +144,38 @@ func (f *fakeAppGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		default:
 			notFound()
 		}
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/") && strings.Contains(path, "/collaborators/") && strings.HasSuffix(path, "/permission"):
+		if !strings.HasPrefix(auth, "ghs_") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		login := strings.TrimSuffix(path[strings.Index(path, "/collaborators/")+len("/collaborators/"):], "/permission")
+		perm := f.perms[login]
+		if perm == "" {
+			perm = "read"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"permission": perm, "user": map[string]any{"login": login}})
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/repos/") && strings.Contains(path, "/issues/") && strings.HasSuffix(path, "/comments"):
+		if !strings.HasPrefix(auth, "ghs_") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var body struct {
+			Body string `json:"body"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.comments = append(f.comments, fakeComment{Path: path, Body: body.Body, Token: auth})
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 1000 + len(f.comments)})
+	case r.Method == http.MethodPost && strings.HasPrefix(path, "/repos/") && strings.HasSuffix(path, "/pulls"):
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		body["token"] = auth
+		f.pulls = append(f.pulls, body)
+		n := 90 + len(f.pulls)
+		repo := strings.TrimSuffix(strings.TrimPrefix(path, "/repos/"), "/pulls")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"number": n, "html_url": fmt.Sprintf("https://github.com/%s/pull/%d", repo, n)})
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/") && strings.Contains(path, "/pulls/"):
 		_ = json.NewEncoder(w).Encode(f.pr)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/") && strings.Contains(path, "/actions/runs/"):

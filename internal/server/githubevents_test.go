@@ -13,6 +13,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,6 +29,11 @@ type cancelRecorder struct {
 	mu      sync.Mutex
 	cancels []string
 	submits int
+	// G-06：提交的请求体（按 clientRequestId 去重，与 Runtime 相同）、各 Task 在 QueryTask 里的状态（没有时 RUNNING）与花费。
+	submitted []map[string]any
+	byRequest map[string]string
+	status    map[string]string
+	cost      map[string]float64
 }
 
 func (c *cancelRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +48,26 @@ func (c *cancelRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("{}"))
 	case strings.HasSuffix(r.URL.Path, "/SubmitTask"):
 		c.submits++
-		_, _ = w.Write([]byte("{}"))
+		req, _ := body["clientRequestId"].(string)
+		if id, ok := c.byRequest[req]; ok {
+			_ = json.NewEncoder(w).Encode(map[string]any{"taskId": id, "sessionId": "rs_gh", "deduplicated": true})
+			return
+		}
+		id := fmt.Sprintf("tsk_gh_%d", len(c.submitted)+1)
+		c.submitted = append(c.submitted, body)
+		if c.byRequest == nil {
+			c.byRequest = map[string]string{}
+		}
+		c.byRequest[req] = id
+		_ = json.NewEncoder(w).Encode(map[string]any{"taskId": id, "sessionId": "rs_gh"})
+	case strings.HasSuffix(r.URL.Path, "/QueryTask"):
+		id, _ := body["taskId"].(string)
+		status := c.status[id]
+		if status == "" {
+			status = "TASK_STATUS_RUNNING"
+		}
+		state := map[string]any{"value": map[string]any{"rounds": []any{map[string]any{"cost_usd": c.cost[id]}}}}
+		_ = json.NewEncoder(w).Encode(map[string]any{"taskId": id, "status": status, "taskState": state})
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
