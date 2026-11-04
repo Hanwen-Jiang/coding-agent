@@ -73,6 +73,7 @@ var reasonCases = []codeCase{
 	reason("rule_no_deliver", nil),
 	reason("rule_done_unverified", nil),
 	reason("rule_done_without_changes", nil),
+	reason("rule_done_undelivered", nil),
 	reason("rule_deliverable_empty", nil),
 	reason("rule_deliverable_unresolved", params{"references": []string{"$a.result"}}, "$a.result"),
 	reason("rule_judge_disowns", params{"probability": 0.99}),
