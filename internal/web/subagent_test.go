@@ -95,7 +95,7 @@ func TestParallelSubAgentsInBrowser(t *testing.T) {
 	tool := func(node string, step int, name, state, target string) streamEvent {
 		return streamEvent{"tool_status", params{"event": "tool_status", "round_seq": 1, "node_id": node, "step": step, "tool": name, "state": state, "target": target}}
 	}
-	res := runStreamProbe(t, subAgentProbe, []streamEvent{
+	_, res := runStreamProbe(t, subAgentProbe, []streamEvent{
 		{"task_accepted", params{}},
 		{"round_started", params{"round_seq": 1, "rerun": false}},
 		{"stage_started", params{"round_seq": 1, "goal": "分头查", "exit_when": "都查完", "nodes": []any{}}},

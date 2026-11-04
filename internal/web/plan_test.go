@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -60,6 +61,30 @@ type streamSite struct {
 	pushes  chan string
 	seq     int
 	results chan planResult
+	// snapshot 给了就在 <会话>/snapshot 返回它（WEB-SNAP）；没给时 404，同还没有快照端点的 Runtime。
+	snapshot any
+	mu       sync.Mutex
+	// requests 是页面取快照与事件流的请求（路径?查询），按到达的先后。
+	requests []string
+}
+
+func (s *streamSite) note(r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requests = append(s.requests, r.URL.Path+"?"+r.URL.RawQuery)
+}
+
+// seen 是到目前为止收到的、路径以 suffix 结尾的请求。
+func (s *streamSite) seen(suffix string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, r := range s.requests {
+		if path, _, _ := strings.Cut(r, "?"); strings.HasSuffix(path, suffix) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 type streamEvent struct {
@@ -142,7 +167,17 @@ func (s *streamSite) handler() http.Handler {
 			_ = json.NewEncoder(w).Encode(body)
 		})
 	}
+	mux.HandleFunc("GET "+base+"/snapshot", func(w http.ResponseWriter, r *http.Request) {
+		s.note(r)
+		if s.snapshot == nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(s.snapshot)
+	})
 	mux.HandleFunc("GET "+base+"/tasks/{task}/events", func(w http.ResponseWriter, r *http.Request) {
+		s.note(r)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		switch r.PathValue("task") {
@@ -200,13 +235,16 @@ await fetch("/__result", { method: "POST", body: JSON.stringify(out) });
 `
 
 // runStreamProbe 起 streamSite，用 headless 的浏览器打开会话页，等探针交回结果。找不到浏览器时跳过。
-func runStreamProbe(t *testing.T, probe string, initial []streamEvent) planResult {
+func runStreamProbe(t *testing.T, probe string, initial []streamEvent, opts ...func(*streamSite)) (*streamSite, planResult) {
 	t.Helper()
 	browser := findBrowser()
 	if browser == "" {
 		t.Skip("找不到浏览器（CODING_TEST_BROWSER 可以指定）")
 	}
 	site := &streamSite{t: t, probe: probe, initial: initial, pushes: make(chan string, 16), results: make(chan planResult, 1)}
+	for _, opt := range opts {
+		opt(site)
+	}
 	srv := httptest.NewServer(site.handler())
 	t.Cleanup(srv.Close)
 	dir, err := os.MkdirTemp("", "coding-web-stream")
@@ -225,10 +263,10 @@ func runStreamProbe(t *testing.T, probe string, initial []streamEvent) planResul
 	defer stop()
 	select {
 	case res := <-site.results:
-		return res
+		return site, res
 	case <-ctx.Done():
 		t.Fatal("等不到页面的结果")
-		return planResult{}
+		return nil, planResult{}
 	}
 }
 
@@ -257,7 +295,7 @@ func TestThePlanAreaInBrowser(t *testing.T) {
 		params{"id": "locate", "title": "找到出错的测试", "status": "active", "round": 1},
 		params{"id": "fix", "title": "修改代码", "status": "pending", "round": 1},
 		params{"id": "verify", "title": "跑测试确认", "status": "pending", "round": 1})
-	res := runStreamProbe(t, planProbe, []streamEvent{
+	_, res := runStreamProbe(t, planProbe, []streamEvent{
 		{"task_accepted", params{}},
 		{"round_started", params{"round_seq": 1, "rerun": false}},
 		{"plan_updated", first},
