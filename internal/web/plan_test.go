@@ -150,8 +150,15 @@ func (s *streamSite) handler() http.Handler {
 		var ev struct {
 			Name  string         `json:"name"`
 			Value map[string]any `json:"value"`
+			// Delta 为 true 时同 Runtime 的逐字增量（DELTA）：没有 id 行，data 里也没有 event_id。
+			Delta bool `json:"delta"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&ev)
+		if ev.Delta {
+			data, _ := json.Marshal(params{"task_id": "t1", "type": "TASK_EVENT_TYPE_" + strings.ToUpper(ev.Name), "payload": params{"value": ev.Value}})
+			s.pushes <- fmt.Sprintf("event: %s\ndata: %s\n\n", ev.Name, data)
+			return
+		}
 		s.pushes <- s.frame(ev.Name, ev.Value)
 	})
 	mux.HandleFunc("POST /__result", func(w http.ResponseWriter, r *http.Request) {
