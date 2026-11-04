@@ -111,6 +111,17 @@ func (s *Server) authorizeRepo(r *http.Request, id identity, p *Project, need re
 	if prov == nil || p.Repo == "" {
 		return repoGrant{Done: noop}, nil
 	}
+	// Webhook 记下的远端状况（G-04）：不正常时不签发，提示写清原因。
+	switch p.RemoteState {
+	case "app_suspended":
+		return repoGrant{}, &GitError{Provider: prov.Name, Status: http.StatusForbidden, Note: msg("GitHub App 在 %s 上的安装已暂停，暂时不能操作这个仓库", p.Repo)}
+	case "app_removed":
+		return repoGrant{}, &GitError{Provider: prov.Name, Status: http.StatusForbidden, Note: msg("GitHub App 已从 %s 卸载：重新安装后才能操作这个仓库", p.Repo)}
+	case "repo_removed":
+		return repoGrant{}, &GitError{Provider: prov.Name, Status: http.StatusForbidden, Note: msg("%s 已从 GitHub App 的安装里移除：在 GitHub 上把它加回安装后才能操作，工作区还在", p.Repo)}
+	case "remote_deleted":
+		return repoGrant{}, &GitError{Provider: prov.Name, Status: http.StatusGone, Note: msg("%s 在 GitHub 上已经不存在了，工作区还在", p.Repo)}
+	}
 	conn, token, err := s.connToken(r, id, prov)
 	if errors.Is(err, errNotConnected) {
 		if need == repoRead {

@@ -117,22 +117,28 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var inbox *github.Service
 	if cfg.GitHubApp != nil {
 		if os.Getenv("CODING_GITHUB_DSN") == "" {
 			log.Printf("配了 GitHub App 但没有 CODING_GITHUB_DSN：Webhook 回 503，配上库之后对账会补投 3 天内失败的")
 		} else {
-			inbox, err := newInbox(ctx, cfg.GitHubApp)
-			if err != nil {
+			if inbox, err = newInbox(ctx, cfg.GitHubApp); err != nil {
 				log.Fatalf("coding-web: %v", err)
 			}
 			defer inbox.Close()
 			cfg.Webhook = inbox
-			go inbox.Run(ctx)
 		}
 	}
 	srv, err := server.New(cfg)
 	if err != nil {
 		log.Fatalf("coding-web: %v", err)
+	}
+	if inbox != nil {
+		// 事件到动作（G-04）：处理函数在 Server 上，Server 建好之后再注册、再起后台循环。
+		for event, h := range srv.GitHubHandlers() {
+			inbox.Handle(event, h)
+		}
+		go inbox.Run(ctx)
 	}
 	addr := os.Getenv("CODING_ADDR")
 	if addr == "" {

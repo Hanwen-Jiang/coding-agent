@@ -249,6 +249,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, id identity)
 		writeMsg(w, r, statusOf(err, http.StatusBadGateway), "拉取失败：%v", err)
 		return
 	}
+	if p.RemoteUpdated {
+		_, _ = s.updateProject(id.TenantID, p.ID, func(x *Project) { x.RemoteUpdated = false }) // 拉过了：清掉“远端有更新”（G-04）
+	}
 	updated, err := s.updateSession(id.TenantID, sess, func(x *Session) { x.BaseCommit = head })
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, err)

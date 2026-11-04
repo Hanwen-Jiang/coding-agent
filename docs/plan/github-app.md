@@ -102,6 +102,8 @@
 
 ### G-04 事件到动作
 
+> 2026-11-03 已完成（代码，没部署）：`internal/server/githubevents.go`，经 G-02 的收件箱注册（`Service.Handle`）。表里各行都有测试，每个处理函数执行两次与执行一次结果相同。远端状况记在项目的 `remote_state`、`remote_updated`，PR 与 CI 记在会话的 `pr_state`、`ci`、`reviews`；不正常时 `authorizeRepo` 不签发。界面上的展示在 G-05。App 现在没有 Actions 权限：`workflow_run` 读不到 API 时用事件里的状态，靠 `updated_at` 挡住迟到的旧事件。
+
 | 事件 | 动作 | 验收 |
 | --- | --- | --- |
 | `installation` deleted、suspend | 停用，取消相关 Task，不再签发 | 运行中的 Task 被取消；之后的操作提示清楚 |

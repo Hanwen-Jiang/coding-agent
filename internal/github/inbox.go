@@ -177,6 +177,14 @@ CREATE TABLE IF NOT EXISTS github_redeliveries (
 // Close 关掉连接池。
 func (s *Service) Close() { s.db.Close() }
 
+// Handle 注册一类事件的处理函数（G-04 的处理函数在 coding-web 里，收件箱先建好才能建 Server）。要在 Run 之前调用。
+func (s *Service) Handle(event string, h Handler) {
+	if s.opts.Handlers == nil {
+		s.opts.Handlers = map[string]Handler{}
+	}
+	s.opts.Handlers[event] = h
+}
+
 // Stats 返回计数。
 func (s *Service) Stats() Stats {
 	return Stats{Received: s.received.Load(), SignatureFailures: s.sigFailures.Load(), Unavailable: s.unavailable.Load(), Redelivered: s.redelivered.Load()}

@@ -25,6 +25,10 @@ type Project struct {
 	// RepoID、InstallationID 是 GitHub 的仓库 ID 与 App 的安装 ID（G-03）：第一次经 App 操作时补上；按 ID 取当前名字，改名后照常工作。
 	RepoID         int64 `json:"repo_id,omitempty"`
 	InstallationID int64 `json:"installation_id,omitempty"`
+	// RemoteState 是 Webhook 告诉我们的远端状况（G-04）：app_suspended、app_removed（App 的安装暂停或卸载）、repo_removed
+	// （仓库从安装里移除）、remote_deleted（仓库删了）；空表示正常。不正常时不签发令牌。RemoteUpdated 是基线分支在远端有新提交。
+	RemoteState   string `json:"remote_state,omitempty"`
+	RemoteUpdated bool   `json:"remote_updated,omitempty"`
 	// 多平台之前只有 GitHub：读到时转成 Provider、Repo。
 	GitHubRepo string `json:"github_repo,omitempty"`
 	// 克隆时的分支（PR 的目标分支）。
@@ -62,6 +66,26 @@ type Session struct {
 	PRURL      string `json:"pr_url,omitempty"`
 	PRNumber   int    `json:"pr_number,omitempty"`
 	PushedHead string `json:"pushed_head,omitempty"`
+	// 下面三项来自 GitHub App 的事件（G-04）：PR 的当前状态（open、closed、merged，按 API 取）、分支上最新的 CI 运行、PR 的评审。
+	PRState string     `json:"pr_state,omitempty"`
+	CI      *CIStatus  `json:"ci,omitempty"`
+	Reviews []PRReview `json:"reviews,omitempty"`
+}
+
+// CIStatus 是会话分支上最新的一次 workflow 运行；UpdatedAt 用来挡住迟到的旧事件。
+type CIStatus struct {
+	RunID      int64     `json:"run_id"`
+	Status     string    `json:"status"`
+	Conclusion string    `json:"conclusion,omitempty"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// PRReview 是 PR 上的一条评审（只记录、展示，不触发 Agent）。
+type PRReview struct {
+	ID          int64     `json:"id"`
+	State       string    `json:"state"`
+	User        string    `json:"user"`
+	SubmittedAt time.Time `json:"submitted_at"`
 }
 
 // Environment 是一个可由会话选择的环境配置。它故意只保存普通配置：
