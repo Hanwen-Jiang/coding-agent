@@ -149,6 +149,8 @@ var english = map[string]string{
 	"密钥的值要是 UTF-8":                    "The secret value must be UTF-8",
 	"密钥的值不能有换行之类的控制字符（会放进请求头）":        "The secret value can't contain control characters such as line breaks (it goes into a request header)",
 	"暂时取不到会话快照":                       "Can't load the session snapshot right now",
+	"暂时取不到会话的事件":                      "Can't load the session's events right now",
+	"一次最多取 %d 个任务的事件":                 "Events can be loaded for at most %d tasks at a time",
 	"用户在网页上取消":                        "Cancelled by the user in the web app",
 	"还有任务在跑，等它结束或先取消":                 "A task is still running. Wait for it to finish or cancel it first.",
 	"还有任务在跑，等它结束再提交":                  "A task is still running. Commit after it finishes.",

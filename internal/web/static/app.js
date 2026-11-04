@@ -2325,15 +2325,63 @@ async function replayTasks() {
   const started = performance.now();
   const before = historyTraffic.requests;
   if (await paintFromSnapshot(base)) return reportHistoryLoad(base, "snapshot", started, before);
+  if (sbase() !== base) return;
   const recent = state.tasks.slice(-REPLAY_LIMIT);
+  // 取不到快照时先批量取事件（HIST-01）；Runtime 给不了的任务（或整个端点用不了时全部）才逐个回放。
+  const left = await paintFromEvents(base, recent);
+  if (sbase() !== base) return;
+  const replay = left || recent;
   // 先接上进行中的（实时），再从最新的往前一个一个重放已结束的（浏览器对同一主机的连接数有限）：打开会话先看到最后的对话，
   // 更早的在上面陆续补上；停在底部时 renderTurn 一直跟到底。
-  for (const t of recent) if (!TERMINAL.has(t.status)) loadRun(t);
-  for (const t of recent.slice().reverse()) {
+  for (const t of replay) if (!TERMINAL.has(t.status)) loadRun(t);
+  for (const t of replay.slice().reverse()) {
     if (sbase() !== base) return;
     if (TERMINAL.has(t.status)) await loadRun(t);
   }
-  reportHistoryLoad(base, "replay", started, before);
+  reportHistoryLoad(base, left ? "events" : "replay", started, before);
+}
+
+// paintFromEvents 用批量取的事件（HIST-01，Runtime 的 ListSessionEvents）画历史：每个任务从头取，有 more 的拿 next_after_event_id
+// 接着取；取全了的任务带着事件与游标接上（结束的不再开事件流，没结束的从游标续传）。返回 Runtime 给不了、要逐个回放的任务
+// （不存在、events_unavailable、没取完）；第一次就取不到（老的 Runtime 或 coding-web）时返回 null，由调用方全部逐个回放。
+async function paintFromEvents(base, recent) {
+  if (!recent.length) return [];
+  const cursors = new Map(recent.map((t) => [t.id, 0]));
+  const events = new Map(recent.map((t) => [t.id, []]));
+  const done = new Map();
+  for (let round = 0; cursors.size && round < 50; round++) {
+    let page = null;
+    historyTraffic.requests++;
+    try {
+      page = await api("POST", base + "/events", { cursors: [...cursors].map(([task_id, after_event_id]) => ({ task_id, after_event_id })) });
+    } catch { /* 下面按取不到处理 */ }
+    if (sbase() !== base) return [];
+    if (!page || !Array.isArray(page.tasks)) {
+      if (!round) return null;
+      break; // 翻页中途取不到：没取完的逐个回放
+    }
+    const byId = new Map(page.tasks.map((x) => [x.task_id, x]));
+    for (const id of [...cursors.keys()]) {
+      const x = byId.get(id);
+      if (!x || !x.found || x.events_unavailable) {
+        cursors.delete(id);
+        continue;
+      }
+      events.get(id).push(...(x.events || []));
+      const next = Number(x.next_after_event_id) || 0;
+      if (x.more && next > cursors.get(id)) cursors.set(id, next);
+      else {
+        cursors.delete(id);
+        done.set(id, next);
+      }
+    }
+  }
+  const left = [];
+  for (const t of recent) {
+    if (done.has(t.id)) loadRun(t, true, { events: events.get(t.id), cursor: done.get(t.id) });
+    else left.push(t);
+  }
+  return left;
 }
 
 // reportHistoryLoad 报一次历史加载的耗时与请求数；中途换了会话不报，报不上不影响页面。

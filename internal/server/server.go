@@ -280,6 +280,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET "+sess+"/tasks/{task}/artifacts", s.authed(s.handleListArtifacts))
 	mux.HandleFunc("GET "+sess+"/tasks/{task}/artifacts/{artifact}", s.authed(s.handleArtifactDownload))
 	mux.HandleFunc("GET "+sess+"/snapshot", s.authed(s.handleSnapshot))
+	mux.HandleFunc("POST "+sess+"/events", s.authed(s.handleSessionEvents))
 	mux.HandleFunc("GET /api/tasks/active", s.authed(s.handleActiveTasks))
 	// 网页报上来的计量（PERF-00，client_metrics.go）。
 	mux.HandleFunc("POST /api/metrics/history-load", s.authed(s.handleHistoryLoad))

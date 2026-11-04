@@ -28,7 +28,7 @@ func (s *Server) handleHistoryLoad(w http.ResponseWriter, r *http.Request, _ ide
 		return
 	}
 	d, n := report.DurationMS, report.Requests
-	if (report.Mode != "snapshot" && report.Mode != "replay") || d == nil || n == nil ||
+	if (report.Mode != "snapshot" && report.Mode != "events" && report.Mode != "replay") || d == nil || n == nil ||
 		*d < 0 || *d > maxHistoryLoadMS || *n < 0 || *n > maxHistoryLoadRequests || *n != math.Trunc(*n) {
 		writeMsg(w, r, http.StatusBadRequest, "计量的取值不对")
 		return
