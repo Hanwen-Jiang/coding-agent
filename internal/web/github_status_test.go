@@ -16,6 +16,7 @@ package web
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -93,11 +94,32 @@ await fetch("/__result", { method: "POST", body: JSON.stringify(out) });
 // runGitHubProbe 起假的 API（config、status 由调用方给），用 headless 的浏览器打开账号页。找不到浏览器时跳过。
 func runGitHubProbe(t *testing.T, lang string, config, status any) githubResult {
 	t.Helper()
+	extra := map[string]any{}
+	if status != nil {
+		extra["/api/github/status"] = status
+	}
+	var res githubResult
+	if err := json.Unmarshal(runAccountProbe(t, lang, githubProbe, config, extra), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("页面报错：%v", res.Errors)
+	}
+	if !res.Dialog {
+		t.Fatal("账号页没有打开")
+	}
+	return res
+}
+
+// runAccountProbe 起真正的页面与假的 API（config 与 extra 由调用方给，extra 的值是 GET 的回答），地址带 ?linked=github 打开账号页，
+// 注入 probe，返回它 POST 到 /__result 的 JSON。找不到浏览器时跳过（G-05、WEB-SEC 共用）。
+func runAccountProbe(t *testing.T, lang, probe string, config any, extra map[string]any) json.RawMessage {
+	t.Helper()
 	browser := findBrowser()
 	if browser == "" {
 		t.Skip("找不到浏览器（CODING_TEST_BROWSER 可以指定）")
 	}
-	results := make(chan githubResult, 1)
+	results := make(chan json.RawMessage, 1)
 	conns := []params{{"provider": "github", "login": "octo-cat", "name": "Octo", "git": true}}
 	api := map[string]any{
 		"/api/config":       config,
@@ -108,11 +130,15 @@ func runGitHubProbe(t *testing.T, lang string, config, status any) githubResult 
 		"/api/sessions":     []any{},
 		"/api/tasks/active": []any{},
 	}
-	if status != nil {
-		api["/api/github/status"] = status
-	}
 	app := Handler()
 	mux := http.NewServeMux()
+	for path, body := range extra {
+		if fn, ok := body.(http.HandlerFunc); ok {
+			mux.HandleFunc(path, fn) // 键是带方法的路由，例如 "PUT /api/secrets/{name}"
+			continue
+		}
+		api[path] = body
+	}
 	mux.Handle("/assets/", app)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		_, page := getFrom(t, app, "/")
@@ -123,15 +149,12 @@ func runGitHubProbe(t *testing.T, lang string, config, status any) githubResult 
 	})
 	mux.HandleFunc("GET /__probe.js", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/javascript")
-		_, _ = w.Write([]byte(githubProbe))
+		_, _ = w.Write([]byte(probe))
 	})
 	mux.HandleFunc("POST /__result", func(w http.ResponseWriter, r *http.Request) {
-		var res githubResult
-		if err := json.NewDecoder(r.Body).Decode(&res); err != nil {
-			res.Errors = append(res.Errors, err.Error())
-		}
+		raw, _ := io.ReadAll(r.Body)
 		select {
-		case results <- res:
+		case results <- json.RawMessage(raw):
 		default:
 		}
 	})
@@ -159,16 +182,10 @@ func runGitHubProbe(t *testing.T, lang string, config, status any) githubResult 
 	defer stop()
 	select {
 	case res := <-results:
-		if len(res.Errors) != 0 {
-			t.Fatalf("页面报错：%v", res.Errors)
-		}
-		if !res.Dialog {
-			t.Fatal("账号页没有打开")
-		}
 		return res
 	case <-ctx.Done():
 		t.Fatal("等不到页面的结果")
-		return githubResult{}
+		return nil
 	}
 }
 
