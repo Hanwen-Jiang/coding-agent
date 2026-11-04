@@ -141,8 +141,9 @@ func TestInstallationSuspendAndDeleteStopWorkAndCancelTasks(t *testing.T) {
 	if p = f.projectNow(); p.RemoteState != "app_removed" {
 		t.Fatalf("卸载：%+v", p)
 	}
-	if _, err := f.authorize(&p, repoRead); err == nil {
-		t.Fatal("卸载之后不签发")
+	f.gh.instOf = map[string]int{"octo-cat/demo": 0} // GitHub 那边也没有这个安装了
+	if _, err := f.authorize(&p, repoRead); err == nil || !strings.Contains(err.Error(), "卸载") {
+		t.Fatalf("卸载之后不签发，提示清楚：%v", err)
 	}
 }
 
@@ -154,8 +155,9 @@ func TestRemovedRepositoriesAreRefusedButTheWorkspaceStays(t *testing.T) {
 	if p.RemoteState != "repo_removed" {
 		t.Fatalf("移除的仓库：%+v", p)
 	}
-	if _, err := f.authorize(&p, repoWrite); err == nil {
-		t.Fatal("移除的仓库操作被拒")
+	f.gh.instOf = map[string]int{"octo-cat/demo": 0} // 仓库不在任何安装里，GitHub 回 404
+	if _, err := f.authorize(&p, repoWrite); err == nil || !strings.Contains(err.Error(), "移除") {
+		t.Fatalf("移除的仓库操作被拒，提示清楚：%v", err)
 	}
 	f.deliver("installation_repositories", map[string]any{"action": "added", "installation": map[string]any{"id": 100},
 		"repositories_added": []any{map[string]any{"id": 555, "full_name": "octo-cat/demo"}}})

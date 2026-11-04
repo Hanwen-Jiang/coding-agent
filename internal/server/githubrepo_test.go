@@ -45,6 +45,12 @@ type fakeAppGitHub struct {
 	// pr 是 GET /repos/{repo}/pulls/{n} 的当前状态（G-04）；run 是 GET /repos/{repo}/actions/runs/{id}，nil 时回 403（App 没有 Actions 权限）。
 	pr  map[string]any
 	run map[string]any
+	// G-05：GET /app/installations 的安装列表、GET /installation/repositories 的仓库（按安装 ID），failIssue 时签发回 500。
+	installations []map[string]any
+	instRepos     map[int][]map[string]any
+	failIssue     bool
+	// instOf 覆盖 GET /repos/{repo}/installation：值是这个仓库现在的安装 ID，0 时回 404（卸载了，或仓库不在任何安装里）。
+	instOf map[string]int
 }
 
 func newFakeAppGitHub(t *testing.T) *fakeAppGitHub {
@@ -116,6 +122,14 @@ func (f *fakeAppGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+		if id, ok := f.instOf[name]; ok {
+			if id == 0 {
+				notFound()
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "suspended_at": nil})
+			return
+		}
 		switch {
 		case name == "octo-cat/suspended":
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": 101, "suspended_at": "2026-11-01T00:00:00Z"})
@@ -141,9 +155,29 @@ func (f *fakeAppGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "full_name": name, "private": true, "permissions": map[string]bool{"pull": true, "push": name != "octo-cat/readonly"}})
+	case r.Method == http.MethodGet && path == "/app/installations":
+		if !isJWT {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(f.installations)
+	case r.Method == http.MethodGet && path == "/installation/repositories":
+		// 令牌是哪个安装签的：按签发的顺序找回安装 ID。
+		inst := 0
+		for i, to := range f.issuedTo {
+			if fmt.Sprintf("ghs_inst_secret_%d", i+1) == auth {
+				_, _ = fmt.Sscanf(strings.TrimPrefix(to, "/app/installations/"), "%d", &inst)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"total_count": len(f.instRepos[inst]), "repositories": f.instRepos[inst]})
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "/app/installations/") && strings.HasSuffix(path, "/access_tokens"):
 		if !isJWT {
 			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if f.failIssue {
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "boom"})
 			return
 		}
 		var body map[string]any

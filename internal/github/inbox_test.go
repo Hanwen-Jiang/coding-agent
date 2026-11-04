@@ -439,6 +439,59 @@ func TestPayloadsArePrunedAfterSevenDaysButDedupeStays(t *testing.T) {
 	}
 }
 
+type countRec struct {
+	mu     sync.Mutex
+	counts map[string]int64
+	gauges map[string]float64
+}
+
+func (c *countRec) Count(name string, n int64, labels map[string]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.counts == nil {
+		c.counts = map[string]int64{}
+	}
+	c.counts[name+"|"+labels["result"]] += n
+	if strings.Contains(fmt.Sprint(labels), "{") {
+		panic("标签只能是短字符串，不带负载")
+	}
+}
+
+func (c *countRec) Observe(name string, v float64, _ map[string]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.gauges == nil {
+		c.gauges = map[string]float64{}
+	}
+	c.gauges[name] = v
+}
+
+// G-05：投递数与结果、处理结果、积压与死信（不带负载）。
+func TestMetricsCountDeliveriesProcessingAndBacklog(t *testing.T) {
+	rec := &countRec{}
+	s := newFixture(t).service(func(o *Options) {
+		o.Metrics, o.MaxAttempts = rec, 1
+		o.Handlers = map[string]Handler{"push": func(context.Context, Delivery) error { return fmt.Errorf("boom") }}
+	})
+	post(t, s, "m-1", "push", payload("x"), "", nil)
+	post(t, s, "m-bad", "push", payload("x"), "sha256=00", nil)
+	if _, err := s.ProcessOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	post(t, s, "m-2", "push", payload("x"), "", nil)
+	if err := s.ReportBacklog(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if rec.counts["coding.github.deliveries|accepted"] != 2 || rec.counts["coding.github.deliveries|signature_failed"] != 1 || rec.counts["coding.github.processed|dead"] != 1 {
+		t.Fatalf("计数：%v", rec.counts)
+	}
+	if rec.gauges["coding.github.backlog"] != 1 || rec.gauges["coding.github.dead_letters"] != 1 {
+		t.Fatalf("积压与死信：%v", rec.gauges)
+	}
+}
+
 func TestDatabaseUnavailableReturns503(t *testing.T) {
 	s := newFixture(t).service(nil)
 	s.db.Close()
