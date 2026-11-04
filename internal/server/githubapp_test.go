@@ -184,7 +184,8 @@ func TestGitHubAppSecretsNeverLeak(t *testing.T) {
 	var logs bytes.Buffer
 	log.SetOutput(&logs)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
-	ts, _, cfg, _ := newServerWith(t, func(c *Config) { c.GitHubApp = app })
+	// 配了 Client secret 的 App 会打开 GitHub 的登录（G-03），要回调地址。
+	ts, _, cfg, _ := newServerWith(t, func(c *Config) { c.GitHubApp, c.PublicURL = app, "http://placeholder" })
 	c := newClient(t, ts.URL)
 	login(t, c, "acme", "alice")
 	var seen []string

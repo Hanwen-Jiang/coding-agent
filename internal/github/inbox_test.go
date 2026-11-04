@@ -169,8 +169,17 @@ func TestReceiveAnswersFastEvenWhenTheHandlerHangs(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
 	f := newFixture(t)
+	// 对账调的 GitHub：一个一直不回的替身，证明对账慢的时候不耽误处理。
+	slowAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(20 * time.Second):
+		}
+	}))
+	defer slowAPI.Close()
 	s := f.service(func(o *Options) {
 		o.Now = nil // 后台循环按真实时间
+		o.APIURL = slowAPI.URL
 		o.Handlers = map[string]Handler{"push": func(ctx context.Context, d Delivery) error {
 			started <- struct{}{}
 			select {
