@@ -235,6 +235,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/secrets", s.authed(s.handleListSecrets))
 	mux.HandleFunc("PUT /api/secrets/{name}", s.authed(s.handlePutSecret))
 	mux.HandleFunc("DELETE /api/secrets/{name}", s.authed(s.handleDeleteSecret))
+	// 我的 Skill（WEB-SKILLS，Runtime 的 N-14）：转调 Runtime 的 SkillService；Runtime 没有它时列表回 available false。
+	mux.HandleFunc("GET /api/skills", s.authed(s.handleListSkills))
+	mux.HandleFunc("GET /api/skills/{name}", s.authed(s.handleGetSkill))
+	mux.HandleFunc("PUT /api/skills/{name}", s.authed(s.handlePutSkill))
+	mux.HandleFunc("DELETE /api/skills/{name}", s.authed(s.handleRetireSkill))
 
 	mux.HandleFunc("GET /api/samples", s.authed(s.handleSamples))
 	// 环境配置与项目解耦；这里仅保存普通配置，不报告 Runtime 生命周期状态。

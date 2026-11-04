@@ -575,6 +575,8 @@ async function openAccount() {
   const secrets = state.config.network_secrets
     ? h("div", { class: "secrets-entry" }, h("button", { class: "btn sm secrets-open", onclick: () => openSecrets() }, t("secrets.open")))
     : null;
+  // 我的 Skill（WEB-SKILLS）：总有入口；部署没有 Skill 时对话框里写明。
+  const skills = h("div", { class: "skills-entry" }, h("button", { class: "btn sm skills-open", onclick: () => openSkills() }, t("skills.open")));
   const draw = (acct) => {
     const conns = acct.connections || [];
     const rows = providerList().filter((p) => p.configured || state.config.dev_login || conns.some((c) => c.provider === p.id)).map((p) => {
@@ -589,7 +591,7 @@ async function openAccount() {
         c ? h("button", { class: "btn sm", onclick: () => disconnect(p, draw) }, t("account.disconnect"))
           : p.configured ? h("a", { class: "btn sm primary", href: `/api/auth/${p.id}/login?link=1` }, t("account.connect")) : null);
     });
-    body.replaceChildren(...[h("div", { class: "conn-list" }, rows), github, secrets].filter(Boolean));
+    body.replaceChildren(...[h("div", { class: "conn-list" }, rows), github, secrets, skills].filter(Boolean));
   };
   dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
@@ -645,6 +647,89 @@ async function openSecrets() {
     } catch (ex) { report(ex); }
   }
   dialog.addEventListener("close", () => { value.value = ""; dialog.remove(); });
+  document.body.append(dialog);
+  dialog.showModal();
+  await reload();
+}
+
+// openSkills 是“我的 Skill”（WEB-SKILLS，/api/skills；Runtime 的 N-14）：列出看得到的 Skill（平台、团队的只读，我的可以编辑与收回，
+// 被遮住的写明不会被用到），新建与编辑我的（名字、说明、做法；编辑时名字不能改，原有的文件照旧带上）。
+async function openSkills() {
+  if (document.querySelector("dialog.skills")) return;
+  const list = h("div", { class: "skill-list" }, h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading")));
+  const name = h("input", { class: "skill-name", placeholder: t("skills.name"), maxlength: 64, autocomplete: "off", spellcheck: "false" });
+  const description = h("input", { class: "skill-description", placeholder: t("skills.description"), maxlength: 1024 });
+  const instructions = h("textarea", { class: "skill-instructions", placeholder: t("skills.instructions"), rows: 8, spellcheck: "false" });
+  const filesNote = h("div", { class: "muted small skill-files" });
+  const save = h("button", { class: "btn sm primary skill-save", onclick: () => saveSkill() }, t("skills.save"));
+  const cancel = h("button", { class: "btn sm ghost skill-cancel", onclick: () => resetForm() }, t("skills.cancel"));
+  const form = h("div", { class: "skill-form" }, name, description, instructions, filesNote, h("div", { class: "row" }, save, cancel));
+  const dialog = h("dialog", { class: "skills" },
+    h("div", { class: "d-head" }, h("h2", {}, t("skills.title"))),
+    h("div", { class: "d-body" }, h("div", { class: "skills-note" }, t("skills.note")), list, form),
+    h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))),
+  );
+  // 正在编辑的 Skill 原有的文件：页上不改它们，保存时照旧带上。
+  let files = null;
+  const resetForm = () => {
+    name.value = ""; name.readOnly = false; description.value = ""; instructions.value = "";
+    files = null; filesNote.textContent = ""; cancel.hidden = true;
+  };
+  const row = (s) => h("div", { class: "conn-row skill-row", "data-name": s.name, "data-scope": s.scope },
+    h("div", { class: "grow" },
+      h("div", { class: "t" }, s.name, h("span", { class: "chip" }, t(`skills.scope.${s.scope}`))),
+      h("div", { class: "m" }, s.description || ""),
+      s.shadowed ? h("div", { class: "m skill-shadowed" }, t("skills.shadowed")) : null),
+    s.scope === "user" ? h("button", { class: "btn sm skill-edit", onclick: () => editSkill(s.name) }, t("skills.edit")) : null,
+    s.scope === "user" ? h("button", { class: "btn sm skill-retire", onclick: () => retireSkill(s.name) }, t("skills.retire")) : null);
+  const draw = (data) => {
+    if (data.available === false) {
+      list.replaceChildren(h("div", { class: "muted skills-unavailable" }, t("skills.unavailable")));
+      form.remove();
+      return;
+    }
+    const items = data.skills || [];
+    list.replaceChildren(items.length ? h("div", { class: "conn-list" }, items.map(row)) : h("div", { class: "muted" }, t("skills.empty")));
+  };
+  const reload = async () => {
+    try { draw(await api("GET", "/api/skills")); } catch (ex) { report(ex); }
+  };
+  async function editSkill(n) {
+    try {
+      const { skill } = await api("GET", `/api/skills/${encodeURIComponent(n)}`);
+      name.value = skill.name; name.readOnly = true;
+      description.value = skill.description || "";
+      instructions.value = skill.instructions || "";
+      files = skill.files && skill.files.length ? skill.files : null;
+      filesNote.textContent = files ? t("skills.files", { n: files.length }) : "";
+      cancel.hidden = false;
+      instructions.focus();
+    } catch (ex) { report(ex); }
+  }
+  async function saveSkill() {
+    const n = name.value.trim();
+    if (!n || !description.value.trim() || !instructions.value.trim()) return;
+    const body = { description: description.value, instructions: instructions.value };
+    if (files) body.files = files;
+    save.disabled = true;
+    try {
+      await api("PUT", `/api/skills/${encodeURIComponent(n)}`, body);
+      toast(t("skills.saved", { name: n }));
+      resetForm();
+      await reload();
+    } catch (ex) { report(ex); } finally { save.disabled = false; }
+  }
+  async function retireSkill(n) {
+    if (!confirm(t("skills.retireConfirm", { name: n }))) return;
+    try {
+      await api("DELETE", `/api/skills/${encodeURIComponent(n)}`);
+      toast(t("skills.retired", { name: n }));
+      if (name.readOnly && name.value === n) resetForm();
+      await reload();
+    } catch (ex) { report(ex); }
+  }
+  resetForm();
+  dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();
   await reload();

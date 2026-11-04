@@ -51,6 +51,19 @@ func runtimeMsg(reason string) *Msg {
 		return msg("没有要推送的提交")
 	case "rate_limit":
 		return msg("请求太频繁，稍后再试")
+	// 我的 Skill（Runtime 的 N-14）。
+	case "skills_unavailable":
+		return msg("这个部署还没有 Skill")
+	case "name_taken":
+		return msg("平台或团队已经有这个名字的 Skill，换一个名字")
+	case "skill_limit":
+		return msg("每个人最多 100 个 Skill，先收回不用的")
+	case "skill_too_large":
+		return msg("Skill 太大：整份最多 256 KiB")
+	case "duplicate_path":
+		return msg("Skill 的文件路径重复了（不分大小写），或一个是另一个的目录")
+	case "skill_not_found":
+		return msg("没有这个 Skill")
 	}
 	return nil
 }

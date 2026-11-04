@@ -192,4 +192,14 @@ var english = map[string]string{
 	"远端拒绝了推送：远端可能有新的提交，先同步": "The remote rejected the push. It may have new commits; sync first.",
 	"没有要推送的提交":              "There are no commits to push",
 	"请求太频繁，稍后再试":            "Too many requests. Try again shortly.",
+
+	// 我的 Skill（WEB-SKILLS）。
+	"这个部署还没有 Skill":                              "Skills aren't available on this deployment yet",
+	"平台或团队已经有这个名字的 Skill，换一个名字":                  "The platform or your team already has a Skill with this name. Choose another name.",
+	"每个人最多 100 个 Skill，先收回不用的":                   "You can have at most 100 Skills. Retire one you don't use first.",
+	"Skill 太大：整份最多 256 KiB":                      "The Skill is too large. The limit is 256 KiB in total.",
+	"Skill 的文件路径重复了（不分大小写），或一个是另一个的目录":           "Two of the Skill's file paths are the same (ignoring case), or one is a folder of the other",
+	"没有这个 Skill":                                 "Skill not found",
+	"Skill 的名字要小写字母开头，只用小写字母、数字、_ 与 -，最多 64 个字符": "A Skill name starts with a lowercase letter and uses only lowercase letters, digits, _ and -, up to 64 characters",
+	"Skill 要写说明与做法":                              "A Skill needs a description and instructions",
 }
