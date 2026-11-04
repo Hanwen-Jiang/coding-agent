@@ -220,6 +220,44 @@ func TestReconcileAdoptsTheNewInstallationAfterMissedEvents(t *testing.T) {
 	}
 }
 
+// 第 5 节第 6 条：安装记录保留到卸载后 30 天。安装记录只在项目上（安装 ID）：卸载 30 天后对账把它去掉，卸载的标记留着；
+// 之后重新安装照样能恢复。
+func TestUninstalledInstallationIDsAreForgottenAfter30Days(t *testing.T) {
+	f := newEventFixture(t)
+	f.gh.instOf = map[string]int{"octo-cat/demo": 0}
+	f.gh.installations = []map[string]any{}
+	f.deliver("installation", map[string]any{"action": "deleted", "installation": map[string]any{"id": 100}})
+	f.clock.advance(29 * 24 * time.Hour)
+	if err := f.srv.ReconcileGitHubInstallations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p := f.projectNow(); p.InstallationID != 100 || p.RemoteState != "app_removed" {
+		t.Fatalf("30 天之内留着：%+v", p)
+	}
+	f.clock.advance(2 * 24 * time.Hour)
+	for range 2 {
+		if err := f.srv.ReconcileGitHubInstallations(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := f.projectNow()
+	if p.InstallationID != 0 || p.RemoteState != "app_removed" {
+		t.Fatalf("超过 30 天去掉安装 ID，卸载的标记留着：%+v", p)
+	}
+	if _, err := f.authorize(&p, repoRead); err == nil || !strings.Contains(err.Error(), "卸载") {
+		t.Fatalf("仍然不签发：%v", err)
+	}
+	f.gh.instOf["octo-cat/demo"] = 300
+	g, err := f.authorize(&p, repoWrite)
+	if err != nil {
+		t.Fatalf("重新安装之后照样恢复：%v", err)
+	}
+	g.Done()
+	if p = f.projectNow(); p.InstallationID != 300 || p.RemoteState != "" || !p.RemovedAt.IsZero() {
+		t.Fatalf("恢复：%+v", p)
+	}
+}
+
 func TestUninstallUnlinksTheInstallationRightAway(t *testing.T) {
 	f := newEventFixture(t)
 	if _, err := f.srv.updateAccount(f.id.TenantID, f.id.UserID, func(a *Account) error {
