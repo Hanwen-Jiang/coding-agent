@@ -6,7 +6,7 @@
 
 - `GET/POST /api/environments`：列出或创建当前用户的环境。
 - `GET/PUT/PATCH/DELETE /api/environments/{id}`：读取、替换或删除环境配置。删除写墓碑，列表和读取不再返回；有会话在用也可以删（见下面“删除与快照”）；Runtime 后续负责异步回收其运行资源。
-- 环境字段：`name`、`description`（最多 4 KiB）、`privacy`（当前固定 `only_me`）、`setup_script`（最多 64 KiB）、`start_command`（最多 64 KiB）和普通 `.env` 文本 `env`（最多 64 KiB）。
+- 环境字段：`name`、`description`（最多 4 KiB）、`privacy`（当前固定 `only_me`）、`setup_script`（最多 64 KiB）、`start_command`（最多 64 KiB）和普通 `.env` 文本 `env`（最多 16 KiB、64 个变量，与 Runtime 的 `SetWorkspaceEnvironment` 一致）。
 - `.env` 每个非空、非注释行必须是 `KEY=value`，键名符合环境变量规则且不能重复。明显的 `TOKEN`、`SECRET`、`PASSWORD`、`APIKEY` 等机密键名会被拒绝；网络密钥必须走 Runtime 的 SecretStore/代理。
 - 同一用户的活动环境名不区分大小写且必须唯一。`only_me` 由 API 层按创建者过滤，其他用户无法读取、修改或绑定。
 - `POST /api/projects/{project}/sessions` 可选 `environment_id`。服务端校验配置归属和未删除，记录引用，并记下这份配置此刻的快照（见下）；项目仓库与环境配置没有持久化耦合。

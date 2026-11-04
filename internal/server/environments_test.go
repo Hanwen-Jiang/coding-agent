@@ -43,6 +43,35 @@ func TestNormalizeEnvironmentInput(t *testing.T) {
 	}
 }
 
+// .env 的上限与 Runtime 的 SetWorkspaceEnvironment 一致（16 KiB、64 个变量；task-service 的 workspaceapi.checkDotEnv）：
+// 这边放过、Runtime 拒绝（env_too_large）的配置在开会话时才报错，所以保存时就挡住。
+func TestEnvironmentDotEnvLimitsMatchTheRuntime(t *testing.T) {
+	vars := func(n int) string {
+		lines := make([]string, n)
+		for i := range lines {
+			lines[i] = fmt.Sprintf("V%d=1", i)
+		}
+		return strings.Join(lines, "\n")
+	}
+	if _, err := normalizeEnvironmentInput(environmentInput{Name: "x", Env: vars(64)}); err != nil {
+		t.Fatalf("64 个变量要收：%v", err)
+	}
+	if _, err := normalizeEnvironmentInput(environmentInput{Name: "x", Env: "A=" + strings.Repeat("x", 16<<10-2)}); err != nil {
+		t.Fatalf("正好 16 KiB 要收：%v", err)
+	}
+	for _, tc := range []struct {
+		env, want string
+	}{
+		{vars(65), "most 64 variables"},
+		{"A=" + strings.Repeat("x", 16<<10-1), "16384 bytes"},
+	} {
+		_, err := normalizeEnvironmentInput(environmentInput{Name: "x", Env: tc.env})
+		if err == nil || !strings.Contains(msg("环境配置不合法：%v", err).In(langEN), tc.want) {
+			t.Errorf("got %v, want %q", err, tc.want)
+		}
+	}
+}
+
 // 联网需求（人工验收 Q29、Q30）：三档模式，受限列表的域名可以用 *.example.com 匹配子域名；写法不对的整份拒绝，不静默丢掉。
 func TestEnvironmentNetworkIntent(t *testing.T) {
 	in, err := normalizeEnvironmentInput(environmentInput{Name: "x"})

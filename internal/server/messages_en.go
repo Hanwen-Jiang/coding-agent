@@ -102,6 +102,7 @@ var english = map[string]string{
 	"安装脚本不超过 %d 个字节":                 "Setup script must not exceed %d bytes",
 	"启动命令不超过 %d 个字节":                 "Start command must not exceed %d bytes",
 	"环境变量不超过 %d 个字节":                 "Environment variables must not exceed %d bytes",
+	"环境变量最多 %d 个":                    "At most %d variables are allowed in .env",
 	".env 第 %d 行应为 KEY=value":        ".env line %d must be KEY=value",
 	".env 第 %d 行重复定义 %s":             ".env line %d defines %s more than once",
 	".env 第 %d 行的 %s 可能是机密，请放到“密钥”里": ".env line %d: %s may contain a secret; put it under Secrets",

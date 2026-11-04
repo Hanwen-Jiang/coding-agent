@@ -15,10 +15,13 @@ const (
 	maxEnvironmentNameBytes        = 80
 	maxEnvironmentDescriptionBytes = 4 << 10
 	maxEnvironmentScriptBytes      = 64 << 10
-	maxEnvironmentHosts            = 100
-	maxEnvironmentHostBytes        = 253
-	maxEnvironmentSecrets          = 32
-	maxEnvironmentSecretBytes      = 4 << 10
+	// .env 的上限与 Runtime 的 SetWorkspaceEnvironment 一致（task-service 的 workspaceapi.checkDotEnv），否则开会话时才报 env_too_large。
+	maxEnvironmentDotEnvBytes = 16 << 10
+	maxEnvironmentDotEnvVars  = 64
+	maxEnvironmentHosts       = 100
+	maxEnvironmentHostBytes   = 253
+	maxEnvironmentSecrets     = 32
+	maxEnvironmentSecretBytes = 4 << 10
 )
 
 const onlyMePrivacy = "only_me"
@@ -229,8 +232,8 @@ func normalizeHost(raw string) (string, error) {
 // accidentally persist credentials in a config visible to the environment's
 // users. Secret material must be provisioned through Runtime instead.
 func validateDotEnv(dotenv string) error {
-	if len(dotenv) > maxEnvironmentScriptBytes {
-		return msg("环境变量不超过 %d 个字节", maxEnvironmentScriptBytes)
+	if len(dotenv) > maxEnvironmentDotEnvBytes {
+		return msg("环境变量不超过 %d 个字节", maxEnvironmentDotEnvBytes)
 	}
 	seen := map[string]bool{}
 	for lineNo, raw := range strings.Split(dotenv, "\n") {
@@ -252,6 +255,9 @@ func validateDotEnv(dotenv string) error {
 		if strings.ContainsRune(value, '\x00') {
 			return msg(".env 第 %d 行包含非法字符", lineNo+1)
 		}
+	}
+	if len(seen) > maxEnvironmentDotEnvVars {
+		return msg("环境变量最多 %d 个", maxEnvironmentDotEnvVars)
 	}
 	return nil
 }

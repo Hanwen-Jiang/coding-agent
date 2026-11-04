@@ -158,6 +158,11 @@ try {
   await wait(() => $('.environment-editor [role="alert"]').textContent.includes('65536'), 'UTF-8 size error');
   check((await (await fetch('/api/environments')).json()).length === 0, 'oversize script saved');
   field('setup_script', 'python --version');
+  field('env', 'A=' + 'x'.repeat(16383));
+  save();
+  await wait(() => $('.environment-editor [role="alert"]').textContent.includes('16384'), '.env size error (Runtime limit)');
+  check((await (await fetch('/api/environments')).json()).length === 0, 'oversize .env saved');
+  field('env', '');
   field('start_command', 'python -m app');
   field('env', 'BAD-NAME=value');
   save();

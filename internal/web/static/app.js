@@ -1280,7 +1280,7 @@ function renderActivity() {
 // 环境配置与仓库无关（人工验收 Q16–37）：名称、描述、安装脚本、启动命令、.env 变量与联网需求，只有自己看得到；开新会话时选用。
 // 这里只编辑配置；就绪、复用、到期这类运行状态只来自 Runtime 的记录（右栏“环境”），这里不显示也不推断。
 // 字节上限与服务端一致（UTF-8 字节，不是字数）：先在本地挡住，免得几十 KB 的脚本白传一趟；其余（.env 的格式、域名）由服务端说。
-const ENV_LIMITS = { name: 80, description: 4096, setup_script: 65536, start_command: 65536, env: 65536 };
+const ENV_LIMITS = { name: 80, description: 4096, setup_script: 65536, start_command: 65536, env: 16384 };
 const ENV_LIMIT_ERRORS = { name: "envcfg.err.name", description: "envcfg.err.description", setup_script: "envcfg.err.setup", start_command: "envcfg.err.start", env: "envcfg.err.env" };
 const NETWORK_MODES = [
   { id: "deny", icon: "shield" },
