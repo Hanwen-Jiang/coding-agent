@@ -11,7 +11,7 @@ import { installScrollbars } from "./scrollbars.js";
 const EVENT_TYPES = [
   "task_accepted", "round_started", "stage_started", "node_started", "node_finished",
   "thinking_delta", "tool_status", "token_delta", "human_input_required", "verdict", "decision_retry", "task_finished",
-  "guidance_updated", "task_message_edited", "context_usage",
+  "guidance_updated", "task_message_edited", "context_usage", "plan_updated",
 ];
 const STATUS = {
   TASK_STATUS_QUEUED: [t("status.queued"), "run"],
@@ -22,7 +22,7 @@ const STATUS = {
   TASK_STATUS_FAILED: [t("status.failed"), "err"],
 };
 const TERMINAL = new Set(["TASK_STATUS_DONE", "TASK_STATUS_ABORTED", "TASK_STATUS_CANCELLED", "TASK_STATUS_FAILED"]);
-const QUIET = new Set(["heartbeat", "token_delta", "thinking_delta", "guidance_updated", "task_message_edited", "context_usage"]);
+const QUIET = new Set(["heartbeat", "token_delta", "thinking_delta", "guidance_updated", "task_message_edited", "context_usage", "plan_updated"]);
 const REPLAY_LIMIT = 12;
 
 // 沙箱等级就是 Task 的 effect 上限；模型倾向交给 Planner 选 Tier（服务端见 runsettings.go）。
@@ -1680,9 +1680,27 @@ function turn(task) {
     ),
     h("div", { class: "msg-agent" },
       h("div", { class: "agent-mark" + (running ? " live" : ""), title: running ? t("turn.working") : null }, logo()),
-      h("div", { class: "agent-body" }, worklog(task, events, running, finished), asks(events), guidanceList(task), tail),
+      h("div", { class: "agent-body" }, planArea(events), worklog(task, events, running, finished), asks(events), guidanceList(task), tail),
     ),
   );
+}
+
+// 计划区（N-04）：Runtime 在规划后、每轮结束与收尾时推 plan_updated。只看最新的一份，整份替换（不按步骤合并）；
+// 没有计划的任务（fast）不画。current_step 那一步另加 current。
+const PLAN_STATUSES = new Set(["pending", "active", "done", "blocked"]);
+
+function planArea(events) {
+  let plan = null;
+  for (const e of events) if (e.type === "plan_updated" && Array.isArray(e.value.steps)) plan = e.value;
+  if (!plan || !plan.steps.length) return null;
+  return h("div", { class: "plan" },
+    h("div", { class: "plan-title" }, t("plan.title")),
+    h("ol", { class: "plan-steps" }, plan.steps.map((s) => {
+      const status = PLAN_STATUSES.has(s.status) ? s.status : "pending";
+      const current = s.id && s.id === plan.current_step;
+      return h("li", { class: "plan-step" + (current ? " current" : ""), "data-status": status, title: t("plan.status." + status) },
+        h("span", { class: "plan-mark" }), h("span", { class: "plan-text" }, s.title || s.id));
+    })));
 }
 
 function waitingLine(task) {
