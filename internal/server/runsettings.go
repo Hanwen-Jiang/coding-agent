@@ -65,6 +65,29 @@ func sameRecord(a, b TaskRecord) bool {
 	return a.Status == b.Status && a.CostUSD == b.CostUSD && a.Rounds == b.Rounds && a.Settled == b.Settled && string(a.Usage) == string(b.Usage)
 }
 
+// environmentProjection is deliberately a narrow, additive view.  The
+// coding web process does not own the sandbox ledger, so it only reports the
+// session/runtime facts it can establish and leaves lifecycle fields empty.
+// A future Runtime environment endpoint can fill the optional fields without
+// changing this response shape or exposing env_ref.
+func environmentProjection(runtimeOK bool, backend string, sess Session) map[string]any {
+	state := "unknown"
+	if runtimeOK && strings.TrimSpace(sess.RuntimeSessionID) != "" {
+		state = "ready"
+	}
+	env := map[string]any{
+		"state":        state,
+		"backend":      strings.TrimSpace(backend),
+		"reused":       nil,
+		"last_used_at": nil,
+		"expires_at":   nil,
+	}
+	if state == "unknown" {
+		env["reason_code"] = "runtime_environment_status_unavailable"
+	}
+	return env
+}
+
 // handleEnv 是右栏“环境”：Runtime 是否连得上、沙箱、会话工作副本的分支与 HEAD、工作区来源与 Runtime 的 Session。
 func (s *Server) handleEnv(w http.ResponseWriter, r *http.Request, id identity) {
 	p, sess, ok := s.session(w, r, id)
@@ -84,9 +107,11 @@ func (s *Server) handleEnv(w http.ResponseWriter, r *http.Request, id identity) 
 		sandbox["image"] = s.cfg.SandboxImage
 		sandbox["network"] = "none"
 	}
+	runtimeOK := s.api.Healthy(ctx)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"runtime": map[string]any{"ok": s.api.Healthy(ctx)},
-		"sandbox": sandbox,
+		"runtime":     map[string]any{"ok": runtimeOK},
+		"environment": environmentProjection(runtimeOK, s.cfg.Sandbox, sess),
+		"sandbox":     sandbox,
 		"git": map[string]any{
 			"branch": changes.Branch, "head": changes.Head, "subject": strings.TrimSpace(subject),
 			"dirty": len(changes.Files), "base_branch": p.BaseBranch,

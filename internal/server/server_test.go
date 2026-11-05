@@ -437,10 +437,12 @@ func TestEnvAndActiveTasks(t *testing.T) {
 		t.Fatalf("env：%d %s", code, raw)
 	}
 	runtime, _ := env["runtime"].(map[string]any)
+	environment, _ := env["environment"].(map[string]any)
 	sandbox, _ := env["sandbox"].(map[string]any)
 	git, _ := env["git"].(map[string]any)
 	session, _ := env["session"].(map[string]any)
-	if runtime["ok"] != true || sandbox["mode"] != "docker" || sandbox["network"] != "none" || git["head"] == "" || env["effect_ceiling"] != "write_reversible" ||
+	if runtime["ok"] != true || environment["state"] != "ready" || environment["backend"] != "docker" || environment["reused"] != nil ||
+		environment["last_used_at"] != nil || environment["expires_at"] != nil || sandbox["mode"] != "docker" || sandbox["network"] != "none" || git["head"] == "" || env["effect_ceiling"] != "write_reversible" ||
 		session["workspace_id"] != filepath.Base(ws) || session["own_copy"] != true {
 		t.Fatalf("环境信息不对：%s", raw)
 	}
