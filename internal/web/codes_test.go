@@ -70,6 +70,7 @@ var reasonCases = []codeCase{
 	reason("rule_replan_no_progress", params{"replans": 2}, "2"),
 	reason("rule_unverified_quality", params{"nodes": []string{"n1"}}, "n1"),
 	reason("rule_budget_spent", params{"spent_ratio": 1.02}, "102%"),
+	reason("rule_tenant_budget_exceeded", params{"nodes": []string{"n1"}}, "n1"),
 	reason("rule_budget_alarm", params{"spent_ratio": 0.85, "completion": 0.4}, "85%", "40%"),
 	reason("rule_cap_reached", params{"step": "replan", "used": 2, "cap": 2, "next": "replan_change_shape"}, "2/2"),
 	reason("rule_criteria_not_met", nil),
