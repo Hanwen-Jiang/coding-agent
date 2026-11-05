@@ -23,6 +23,8 @@ func runtimeMsg(reason string) *Msg {
 		return msg("工作区已经存在")
 	case "workspace_dirty":
 		return msg("还有未提交的改动：先推送、提交或丢弃")
+	case "workspace_not_ready":
+		return msg("工作区还在创建，稍等一会儿再发")
 	case "workspace_busy", "workspace_operation_pending":
 		return msg("工作区正在做别的操作，稍后再试")
 	case "workspace_quota_exceeded":

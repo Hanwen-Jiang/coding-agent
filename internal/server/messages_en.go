@@ -178,6 +178,7 @@ var english = map[string]string{
 	"账号的策略不允许连这个主机":         "Your account's policy doesn't allow connecting to this host",
 	"只读的任务不能联网":             "Read-only tasks can't use the network",
 	"选的沙箱等级超出了账号的策略":        "The selected sandbox level is above what your account's policy allows",
+	"工作区还在创建，稍等一会儿再发": "The workspace is still being created. Wait a moment and send again.",
 	"工作区正在做别的操作，稍后再试":       "The workspace is busy with another operation. Try again shortly.",
 	"工作区数量已到上限":             "You've reached the workspace limit",
 	"工作区的操作暂时失败，稍后再试":       "The workspace operation failed for now. Try again shortly.",
