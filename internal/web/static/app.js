@@ -577,6 +577,8 @@ async function openAccount() {
     : null;
   // 我的 Skill（WEB-SKILLS）：总有入口；部署没有 Skill 时对话框里写明。
   const skills = h("div", { class: "skills-entry" }, h("button", { class: "btn sm skills-open", onclick: () => openSkills() }, t("skills.open")));
+  // 我的 MCP（Runtime 的 N-15）：总有入口；部署没有或账号的策略不允许时对话框里写明。
+  const mcp = h("div", { class: "mcp-entry" }, h("button", { class: "btn sm mcp-open", onclick: () => openMcp() }, t("mcp.open")));
   const draw = (acct) => {
     const conns = acct.connections || [];
     const rows = providerList().filter((p) => p.configured || state.config.dev_login || conns.some((c) => c.provider === p.id)).map((p) => {
@@ -591,7 +593,7 @@ async function openAccount() {
         c ? h("button", { class: "btn sm", onclick: () => disconnect(p, draw) }, t("account.disconnect"))
           : p.configured ? h("a", { class: "btn sm primary", href: `/api/auth/${p.id}/login?link=1` }, t("account.connect")) : null);
     });
-    body.replaceChildren(...[h("div", { class: "conn-list" }, rows), github, secrets, skills].filter(Boolean));
+    body.replaceChildren(...[h("div", { class: "conn-list" }, rows), github, secrets, skills, mcp].filter(Boolean));
   };
   dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
@@ -733,6 +735,134 @@ async function openSkills() {
   document.body.append(dialog);
   dialog.showModal();
   await reload();
+}
+
+// openMcp 是“我的 MCP”（/api/mcp；Runtime 的 N-15）：登记自己的远程 MCP Server（https 地址，鉴权头引用“网络密钥”页里的
+// 一个名字，值不经这里），看它的工具，逐个打开并定权限：只读（远端自己说只读的才能选）或不可逆写（每次调用前要你批准）。
+// 新出现与参数变了的工具先关着；删掉连接后，正在跑的任务也不能再调它。任务开始时用的是当时打开的工具。
+async function openMcp() {
+  if (document.querySelector("dialog.mcp")) return;
+  const list = h("div", { class: "mcp-list" }, h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading")));
+  const name = h("input", { class: "mcp-name", placeholder: t("mcp.name"), maxlength: 32, autocomplete: "off", spellcheck: "false" });
+  const url = h("input", { class: "mcp-url", placeholder: "https://example.com/mcp", autocomplete: "off", spellcheck: "false" });
+  const secret = h("select", { class: "mcp-secret" }, h("option", { value: "" }, t("mcp.noSecret")));
+  const header = h("input", { class: "mcp-header", placeholder: t("mcp.header"), maxlength: 64, autocomplete: "off", spellcheck: "false" });
+  const create = h("button", { class: "btn sm primary mcp-create", onclick: () => createConn() }, t("mcp.create"));
+  const form = h("div", { class: "mcp-form" }, h("div", { class: "t" }, t("mcp.add")), name, url, h("div", { class: "row" }, secret, header), create);
+  const dialog = h("dialog", { class: "mcp" },
+    h("div", { class: "d-head" }, h("h2", {}, t("mcp.title"))),
+    h("div", { class: "d-body" }, h("div", { class: "mcp-note" }, t("mcp.note")), list, form),
+    h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))),
+  );
+  const open = new Set();
+  const stateText = (c) => c.state === "ready" ? t("mcp.ready", { n: c.tools.filter((x) => x.enabled).length, total: c.tools.length })
+    : t("mcp.error", { why: t(`mcp.err.${c.error_code}`) === `mcp.err.${c.error_code}` ? c.error_code : t(`mcp.err.${c.error_code}`) });
+  const toolRow = (c, tool, edits) => {
+    const readOnly = tool.read_only_hint === true;
+    const choice = h("select", { class: "mcp-effect", disabled: !!tool.unavailable_reason },
+      h("option", { value: "" }, t("mcp.off")),
+      h("option", { value: "read", disabled: !readOnly }, readOnly ? t("mcp.read") : t("mcp.readNotOffered")),
+      h("option", { value: "write_irreversible" }, t("mcp.write")));
+    choice.value = tool.enabled ? tool.effect : "";
+    const timeout = h("input", { class: "mcp-timeout", type: "number", min: 1, max: 300, value: tool.timeout_s || 30, title: t("mcp.timeout") });
+    const mark = () => edits.set(tool.tool, { tool: tool.tool, enabled: !!choice.value, effect: choice.value, timeout_s: Number(timeout.value) || 30, schema_digest: tool.schema_digest });
+    choice.addEventListener("change", mark);
+    timeout.addEventListener("change", mark);
+    return h("div", { class: "mcp-tool", "data-tool": tool.tool },
+      h("div", { class: "grow" },
+        h("div", { class: "t" }, tool.tool, h("span", { class: "chip mono" }, tool.name), readOnly ? h("span", { class: "chip" }, t("mcp.readOnlyHint")) : null),
+        h("div", { class: "m mcp-desc" }, tool.description || ""),
+        tool.unavailable_reason ? h("div", { class: "m mcp-unavailable" }, t(`mcp.err.${tool.unavailable_reason}`)) : null),
+      choice, timeout);
+  };
+  const connRow = (c) => {
+    const edits = new Map();
+    const tools = open.has(c.connection_id)
+      ? h("div", { class: "mcp-tools" },
+        c.tools.length ? c.tools.map((x) => toolRow(c, x, edits)) : h("div", { class: "muted" }, t("mcp.noTools")),
+        c.tools.length ? h("div", { class: "row" }, h("button", { class: "btn sm primary mcp-save", onclick: () => saveTools(c, edits) }, t("mcp.save"))) : null)
+      : null;
+    return h("div", { class: "conn-row mcp-row" + (c.state === "ready" ? " on" : ""), "data-name": c.name },
+      h("div", { class: "grow" },
+        h("div", { class: "t" }, c.name, c.server_name ? h("span", { class: "chip" }, c.server_name) : null, c.secret_name ? h("span", { class: "chip" }, t("mcp.usesSecret", { name: c.secret_name })) : null),
+        h("div", { class: "m mono" }, c.url),
+        h("div", { class: "m mcp-state" }, stateText(c)),
+        tools),
+      h("div", { class: "col" },
+        h("button", { class: "btn sm mcp-tools-toggle", onclick: () => toggle(c) }, open.has(c.connection_id) ? t("mcp.hideTools") : t("mcp.showTools")),
+        h("button", { class: "btn sm mcp-refresh", onclick: () => refresh(c) }, t("mcp.refresh")),
+        h("button", { class: "btn sm mcp-delete", onclick: () => removeConn(c) }, t("mcp.delete"))));
+  };
+  let items = [];
+  const draw = () => {
+    list.replaceChildren(items.length ? h("div", { class: "conn-list" }, items.map(connRow)) : h("div", { class: "muted" }, t("mcp.empty")));
+  };
+  const reload = async () => {
+    try {
+      const data = await api("GET", "/api/mcp");
+      if (data.available === false) {
+        list.replaceChildren(h("div", { class: "muted mcp-unavailable" }, t("mcp.unavailable")));
+        form.hidden = true;
+        return;
+      }
+      // 列表不带参数 schema；展开的连接另取一次全的。
+      items = await Promise.all((data.connections || []).map(async (c) => open.has(c.connection_id) ? (await api("GET", `/api/mcp/${encodeURIComponent(c.connection_id)}`)).connection : c));
+      draw();
+    } catch (ex) { report(ex); }
+  };
+  const loadSecrets = async () => {
+    if (!state.config.network_secrets) return;
+    try {
+      for (const s of (await api("GET", "/api/secrets")).secrets || []) secret.append(h("option", { value: s.name }, s.name));
+    } catch { /* 网络密钥不可用时只能建不带鉴权的连接 */ }
+  };
+  async function toggle(c) {
+    if (open.has(c.connection_id)) open.delete(c.connection_id); else open.add(c.connection_id);
+    await reload();
+  }
+  async function createConn() {
+    const n = name.value.trim(), u = url.value.trim();
+    if (!n || !u) return;
+    create.disabled = true;
+    try {
+      const { connection, created } = await api("POST", "/api/mcp", { name: n, url: u, secret_name: secret.value, header: header.value.trim() });
+      toast(created ? t("mcp.created", { name: n }) : t("mcp.exists", { name: n }));
+      if (connection.state !== "ready") toast(stateText(connection), true);
+      name.value = ""; url.value = ""; header.value = ""; secret.value = "";
+      open.add(connection.connection_id);
+      await reload();
+    } catch (ex) { report(ex); } finally { create.disabled = false; }
+  }
+  async function refresh(c) {
+    try {
+      const r = await api("POST", `/api/mcp/${encodeURIComponent(c.connection_id)}/refresh`);
+      toast(r.connection.state === "ready" ? t("mcp.refreshed", { added: r.added.length, disabled: r.disabled.length, removed: r.removed.length }) : stateText(r.connection), r.connection.state !== "ready");
+      await reload();
+    } catch (ex) { report(ex); }
+  }
+  async function saveTools(c, edits) {
+    if (!edits.size) return;
+    const changes = [...edits.values()];
+    if (changes.some((x) => x.enabled && x.effect === "write_irreversible") && !confirm(t("mcp.writeConfirm"))) return;
+    try {
+      await api("PUT", `/api/mcp/${encodeURIComponent(c.connection_id)}/tools`, { tools: changes });
+      toast(t("mcp.saved", { name: c.name }));
+      await reload();
+    } catch (ex) { report(ex); }
+  }
+  async function removeConn(c) {
+    if (!confirm(t("mcp.deleteConfirm", { name: c.name }))) return;
+    try {
+      await api("DELETE", `/api/mcp/${encodeURIComponent(c.connection_id)}`);
+      toast(t("mcp.deleted", { name: c.name }));
+      open.delete(c.connection_id);
+      await reload();
+    } catch (ex) { report(ex); }
+  }
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  await Promise.all([reload(), loadSecrets()]);
 }
 
 // drawGitHubApp 是账号页里的 GitHub App 一段（G-05，/api/github/status）：旧 OAuth 连接的提示、安装或调整的入口、

@@ -345,6 +345,20 @@ dialog.skills .skill-form { display: flex; flex-direction: column; gap: 8px; }
 dialog.skills .skill-form input, dialog.skills .skill-form textarea { width: 100%; box-sizing: border-box; }
 dialog.skills .skill-form textarea { min-height: 140px; resize: vertical; font-family: var(--mono, monospace); font-size: 13px; }
 dialog.skills .skill-form input[readonly] { color: var(--muted); }
+.mcp-entry { margin-top: 8px; }
+dialog.mcp { width: min(760px, 96vw); }
+dialog.mcp .d-body { display: flex; flex-direction: column; gap: 12px; }
+dialog.mcp .mcp-note { font-size: 12.5px; color: var(--muted); }
+dialog.mcp .mcp-form { display: flex; flex-direction: column; gap: 8px; }
+dialog.mcp .mcp-form input, dialog.mcp .mcp-form select { width: 100%; box-sizing: border-box; }
+dialog.mcp .mcp-form .row { display: flex; gap: 8px; }
+dialog.mcp .mcp-row .col { display: flex; flex-direction: column; gap: 4px; align-self: flex-start; }
+dialog.mcp .mcp-tools { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+dialog.mcp .mcp-tool { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-top: 1px solid var(--line, #8883); }
+dialog.mcp .mcp-tool .mcp-timeout { width: 64px; }
+dialog.mcp .mcp-desc { white-space: pre-wrap; max-height: 4.5em; overflow: hidden; }
+dialog.mcp .mcp-unavailable { color: var(--warn); }
+dialog.mcp .mono { font-family: var(--mono, monospace); font-size: 12px; }
 /* 账号页里的 GitHub App 一段（G-05）。 */
 .github-app { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .github-app .gh-head { font-weight: 600; }

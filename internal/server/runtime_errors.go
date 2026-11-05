@@ -66,6 +66,35 @@ func runtimeMsg(reason string) *Msg {
 		return msg("Skill 的文件路径重复了（不分大小写），或一个是另一个的目录")
 	case "skill_not_found":
 		return msg("没有这个 Skill")
+	// 我的 MCP（Runtime 的 N-15）。
+	case "mcp_not_allowed":
+		return msg("账号的策略不允许登记 MCP Server")
+	case "mcp_connection_not_found":
+		return msg("MCP 连接不存在")
+	case "mcp_connection_exists":
+		return msg("已经有同名、设置不同的 MCP 连接：换个名字，或先删掉旧的")
+	case "mcp_connection_limit":
+		return msg("MCP 连接已经到了上限，先删掉不用的")
+	case "mcp_host_not_allowed":
+		return msg("账号的策略不允许连这个 MCP Server 的主机")
+	case "mcp_host_not_public":
+		return msg("MCP Server 的地址要是公网域名（不收 IP 与内网地址）")
+	case "invalid_mcp_url":
+		return msg("MCP Server 的地址要是 https://<域名>/...，不带账号密码")
+	case "invalid_mcp_name":
+		return msg("连接的名字要小写字母开头，只用小写字母、数字与 _，最多 32 个字符")
+	case "invalid_mcp_auth":
+		return msg("网络密钥的名字或请求头名不对")
+	case "invalid_mcp_effect":
+		return msg("这个工具远端没说只读，只能定为不可逆写（每次调用前要你批准）")
+	case "effect_over_limit":
+		return msg("账号的策略不允许给 MCP 工具定这么高的权限")
+	case "mcp_schema_changed":
+		return msg("这个工具的参数变了：先刷新，再确认")
+	case "tool_name_conflict":
+		return msg("这个工具的名字与同一连接里的另一个撞了，打不开")
+	case "mcp_tool_not_found":
+		return msg("连接上没有这个工具：先刷新")
 	}
 	return nil
 }

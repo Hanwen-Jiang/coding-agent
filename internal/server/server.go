@@ -240,6 +240,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/skills/{name}", s.authed(s.handleGetSkill))
 	mux.HandleFunc("PUT /api/skills/{name}", s.authed(s.handlePutSkill))
 	mux.HandleFunc("DELETE /api/skills/{name}", s.authed(s.handleRetireSkill))
+	// 我的 MCP（Runtime 的 N-15）：转调 Runtime 的 McpConnectionService；Runtime 没有它时列表回 available false。
+	mux.HandleFunc("GET /api/mcp", s.authed(s.handleListMcp))
+	mux.HandleFunc("POST /api/mcp", s.authed(s.handleCreateMcp))
+	mux.HandleFunc("GET /api/mcp/{id}", s.authed(s.handleGetMcp))
+	mux.HandleFunc("POST /api/mcp/{id}/refresh", s.authed(s.handleRefreshMcp))
+	mux.HandleFunc("PUT /api/mcp/{id}/tools", s.authed(s.handleConfigureMcp))
+	mux.HandleFunc("DELETE /api/mcp/{id}", s.authed(s.handleDeleteMcp))
 
 	mux.HandleFunc("GET /api/samples", s.authed(s.handleSamples))
 	// 环境配置与项目解耦；这里仅保存普通配置，不报告 Runtime 生命周期状态。
