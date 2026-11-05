@@ -58,6 +58,9 @@ func nodeError(code string, p params, values ...string) codeCase {
 
 var reasonCases = []codeCase{
 	reason("rule_fallback", nil),
+	reason("rule_fast_path", nil),
+	reason("rule_deliver_unusable", params{"node": "n1"}, "n1"),
+	reason("rule_unresolved_reference", params{"nodes": []string{"n1"}}, "n1"),
 	reason("rule_node_failed", params{"nodes": []string{"n1", "n2"}}, "n1", "n2"),
 	reason("rule_failed_twice", params{"node": "n1", "times": 2}, "n1", "2"),
 	reason("rule_failed_thrice", params{"node": "n1", "times": 3}, "n1", "3"),

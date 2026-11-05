@@ -300,6 +300,9 @@ const ZH = {
 
   // Runtime 进度事件里的代码（codes.js）。只用字符串，不用函数：少了参数时才看得出来，回落到事件自己的文字。
   "reason.rule_fallback": "模型的评审没有结果，按规则判定",
+  "reason.rule_fast_path": "快速回复，按规则检查",
+  "reason.rule_deliver_unusable": "{node} 的交付是空的、有没解析的引用或是拒答，不能算完成",
+  "reason.rule_unresolved_reference": "{nodes} 的输入里有没解析的引用，是规划写错了，重新规划",
   "reason.rule_node_failed": "本轮有节点失败（{nodes}），这一轮不算完成",
   "reason.rule_failed_twice": "{node} 已经失败 {times} 次，不再原地重试，换个方法",
   "reason.rule_failed_thrice": "{node} 已经失败 {times} 次，重新规划",
@@ -1023,6 +1026,9 @@ const EN = {
 
   // Runtime 进度事件里的代码（codes.js）。只用字符串，不用函数：少了参数时才看得出来，回落到事件自己的文字。
   "reason.rule_fallback": "No model review was available, so the rules decided",
+  "reason.rule_fast_path": "Quick reply, checked by the rules",
+  "reason.rule_deliver_unusable": "The deliverable from {node} is empty, has unresolved references or declines to answer, so this isn't done",
+  "reason.rule_unresolved_reference": "Unresolved references in the inputs of {nodes}: the plan was wrong, so replanning",
   "reason.rule_node_failed": "Nodes failed this round ({nodes}), so the round isn't complete",
   "reason.rule_failed_twice": "{node} has failed {times} times; changing method instead of retrying in place",
   "reason.rule_failed_thrice": "{node} has failed {times} times; replanning",
