@@ -234,20 +234,23 @@ func (s *Store) PutSnapshot(tenant, workspaceID string, snap EnvironmentSnapshot
 func (s *Store) Sessions(tenant string) ([]Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return readJSONFile[[]Session](s.sessionsFile(tenant))
+	return s.readSessions(tenant)
 }
 
 // UpdateSessions 在锁里读出、修改、写回会话列表。
 func (s *Store) UpdateSessions(tenant string, fn func([]Session) ([]Session, error)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sessions, err := readJSONFile[[]Session](s.sessionsFile(tenant))
+	sessions, err := s.readSessions(tenant)
 	if err != nil {
 		return err
 	}
 	sessions, err = fn(sessions)
 	if err != nil {
 		return err
+	}
+	for i := range sessions {
+		sessions[i].PersonalConfig = nil
 	}
 	return writeFileAtomic(s.sessionsFile(tenant), sessions)
 }
@@ -316,12 +319,15 @@ func (s *Store) HasTasks(tenant, workspaceID string) bool {
 func (s *Store) DeleteSession(tenant string, sess Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sessions, err := readJSONFile[[]Session](s.sessionsFile(tenant))
+	sessions, err := s.readSessions(tenant)
 	if err != nil {
 		return err
 	}
 	sessions = slices.DeleteFunc(sessions, func(x Session) bool { return x.ProjectID == sess.ProjectID && x.ID == sess.ID })
 	if err := writeFileAtomic(s.sessionsFile(tenant), sessions); err != nil {
+		return err
+	}
+	if err := s.removePersonalSessions(tenant, sess.WorkspaceID); err != nil {
 		return err
 	}
 	for _, f := range s.sessionFiles(tenant, sess.WorkspaceID) {
@@ -454,13 +460,19 @@ func (s *Store) DeleteProject(tenant, id string) error {
 	if err := writeFileAtomic(s.projectsFile(tenant), projects); err != nil {
 		return err
 	}
-	sessions, err := readJSONFile[[]Session](s.sessionsFile(tenant))
+	sessions, err := s.readSessions(tenant)
 	if err != nil {
 		return err
 	}
 	files := s.sessionFiles(tenant, id)
+	if err := s.removePersonalSessions(tenant, id); err != nil {
+		return err
+	}
 	for _, x := range sessions {
 		if x.ProjectID == id {
+			if err := s.removePersonalSessions(tenant, x.WorkspaceID); err != nil {
+				return err
+			}
 			files = append(files, s.sessionFiles(tenant, x.WorkspaceID)...)
 		}
 	}

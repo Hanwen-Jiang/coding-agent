@@ -77,3 +77,26 @@ browser and listening-server suites are **not newly certified** here: the curren
 execution sandbox rejects socket creation with EPERM. The Go race run additionally
 requires a C compiler, which this shell does not have. Final integration must run
 these checks in the permitted host/CI environment and deploy before acceptance.
+
+## Integration review corrections
+
+The async runner re-reads its journal after taking its execution slot, preventing
+an older poll from overwriting a newly saved terminal response. New asynchronous
+session workspaces have their own bounded stable slug, including when the parent
+project already has a long ID. Background Runtime polls validate the original
+browser session without counting as browser activity or prolonging idle expiry.
+
+Personal tool choices are private files under
+`<tenant>/personal-sessions/<workspace>/<user-hash>.json`; shared session records
+never carry them. Session responses project only the authenticated user's choice,
+Task submission defaults only to that user's choice, and copying a session copies
+only that user's references. Existing unowned shared choices are cleared, because
+they did not identify who last selected them. Explicit empty arrays remain empty;
+an absent choice continues to inherit the package defaults. Browser remembered
+environments are keyed by tenant/user and reset on account change; unowned legacy
+`cw_environment` values are not adopted into another account.
+
+New real HTTP tests cover shared-session privacy, owner-only copies, async session
+recovery with explicit empty tool lists and long project IDs, stale poll recovery,
+and non-renewal of browser idle lifetime. These pass together with `go vet`; the
+browser and real Sandbox execution follow-up is recorded separately below.

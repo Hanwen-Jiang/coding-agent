@@ -202,3 +202,14 @@ func (s *sessions) runtimeToken(id string, b browserSession, issue func(tenant, 
 	s.mu.Unlock()
 	return token
 }
+
+// Background polling is not browser activity and must not extend idle expiry.
+func (s *sessions) lookupWithoutActivity(id string) (browserSession, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.load(); err != nil {
+		return browserSession{}, false, err
+	}
+	session, ok := s.byHash[sessionHash(id)]
+	return session, ok && !s.expired(session, s.now()), nil
+}

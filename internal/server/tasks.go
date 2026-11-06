@@ -148,6 +148,12 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 	if sess.RuntimeSessionID != "" {
 		submit["sessionId"] = sess.RuntimeSessionID
 	}
+	if req.PersonalConfig != nil {
+		if err := s.store.PutPersonalSession(id.TenantID, id.UserID, sess.WorkspaceID, selection); err != nil {
+			writeErr(w, r, 500, err)
+			return
+		}
+	}
 	var resp submitResponse
 	ctx, cancel := ctxTimeout(r, 30*time.Second)
 	defer cancel()
@@ -157,7 +163,6 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 	}
 	now := time.Now().UTC()
 	_, _ = s.updateSession(id.TenantID, sess, func(x *Session) {
-		x.PersonalConfig = selection
 		if x.RuntimeSessionID == "" {
 			x.RuntimeSessionID = resp.SessionID
 		}

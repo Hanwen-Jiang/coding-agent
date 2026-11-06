@@ -308,6 +308,17 @@ func (s *Server) resumeWorkspaceHTTP(rec *workspaceHTTPRecord, id identity) {
 	if _, loaded := s.wsJobs.LoadOrStore(key, true); loaded {
 		return
 	}
+	// The caller may have read RUNNING just before the preceding runner saved
+	// COMPLETED and released its slot. Never overwrite that newer result or its
+	// recorded steps with the caller's older snapshot.
+	s.store.mu.Lock()
+	latest, err := readJSONFile[*workspaceHTTPRecord](s.store.workspaceOperationFile(id.TenantID, rec.ID))
+	s.store.mu.Unlock()
+	if err != nil || latest == nil || latest.User != id.UserID || latest.Status != 0 {
+		s.wsJobs.Delete(key)
+		return
+	}
+	rec = latest
 	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
@@ -412,7 +423,7 @@ func (j *workspaceHTTPJournal) runtimeToken() string {
 	if j.identity.session == "" || j.server.sessions == nil {
 		return j.identity.token
 	}
-	session, ok, err := j.server.sessions.lookup(j.identity.session)
+	session, ok, err := j.server.sessions.lookupWithoutActivity(j.identity.session)
 	if err != nil || !ok || session.Tenant != j.tenant || session.User != j.record.User {
 		panic(workspaceHTTPAbort{errors.New("authentication required")})
 	}

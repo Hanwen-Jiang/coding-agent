@@ -60,7 +60,7 @@ const state = {
   sessions: [], // 全部会话，最近活动的在前
   samples: [],
   environments: null, // 自己的环境配置（与仓库无关，开会话时选用）；null 是还没读到
-  draftEnvironment: ls.get("cw_environment") || "", // 草稿选的环境配置；空是默认环境
+  draftEnvironment: "", // 草稿选的环境配置；空是默认环境
   project: null, // 当前工作区
   session: null, // 当前会话；为空时是草稿（第一条消息发出时才开会话）
   view: "session", // session、workspaces、activity 或 environments
@@ -1188,6 +1188,10 @@ async function logout() {
   state.me = null;
   state.project = null;
   state.session = null;
+  state.personalConfig = null;
+  state.personalChoices.clear();
+  state.draftEnvironment = "";
+  state.environments = null;
   renderLogin();
 }
 
@@ -1196,12 +1200,15 @@ async function logout() {
 async function enterApp() {
   state.personalChoices.clear();
   state.personalConfig = null;
+  state.draftEnvironment = "";
+  state.environments = null;
   try { state.personalConfig = (await api("GET", "/api/personal-config")).config || null; } catch { /* Older deployments have no personal packages. */ }
   const personalEnv = state.personalConfig?.document?.defaults?.environmentId;
-  if (personalEnv && !ls.get("cw_environment")) state.draftEnvironment = personalEnv;
+  const rememberedEnvironment = ls.get(draftEnvironmentKey());
+  state.draftEnvironment = rememberedEnvironment ?? personalEnv ?? "";
   [state.projects, state.samples, state.sessions] = await Promise.all([api("GET", "/api/projects"), api("GET", "/api/samples"), api("GET", "/api/sessions")]);
   loadActive();
-  loadEnvironments();
+  await loadEnvironments();
   await route();
   resumeWorkspaceOperations().catch(report);
 }
@@ -1708,9 +1715,13 @@ function draftEnvironment() {
   return id;
 }
 
+function draftEnvironmentKey() {
+  return `cw_environment:${state.me?.tenant || ""}/${state.me?.user || ""}`;
+}
+
 function setDraftEnvironment(id) {
   state.draftEnvironment = id;
-  ls.set("cw_environment", id);
+  ls.set(draftEnvironmentKey(), id);
   updateComposer(true);
 }
 

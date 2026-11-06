@@ -83,7 +83,12 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, id identity) (P
 	sid := r.PathValue("session")
 	var saved Session
 	if workspaceFact(r.Context(), "session:"+p.ID+":"+sid, &saved) {
-		return p, saved, true
+		projected, err := s.personalSession(id, saved)
+		if err != nil {
+			writeErr(w, r, 500, err)
+			return Project{}, Session{}, false
+		}
+		return p, projected, true
 	}
 	sessions, err := s.ensureSessions(id.TenantID)
 	if err != nil {
@@ -96,7 +101,12 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, id identity) (P
 		return Project{}, Session{}, false
 	}
 	saveWorkspaceFact(r.Context(), "session:"+p.ID+":"+sid, sessions[i])
-	return p, sessions[i], true
+	projected, err := s.personalSession(id, sessions[i])
+	if err != nil {
+		writeErr(w, r, 500, err)
+		return Project{}, Session{}, false
+	}
+	return p, projected, true
 }
 
 // updateSession 在锁里改一个会话的记录，返回改后的值。
@@ -121,6 +131,7 @@ func (s *Server) updateSession(tenant string, sess Session, fn func(*Session)) (
 		}
 		return nil, msg("会话不存在")
 	})
+	out.PersonalConfig = clonePersonalSelection(sess.PersonalConfig)
 	return out, err
 }
 
@@ -132,6 +143,13 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request, id i
 	}
 	if sessions == nil {
 		sessions = []Session{}
+	}
+	for i := range sessions {
+		sessions[i], err = s.personalSession(id, sessions[i])
+		if err != nil {
+			writeErr(w, r, 500, err)
+			return
+		}
 	}
 	slices.SortFunc(sessions, func(a, b Session) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
 	writeJSON(w, http.StatusOK, sessions)
@@ -176,11 +194,12 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	if req.PersonalConfig != nil {
-		sess, err = s.updateSession(id.TenantID, sess, func(x *Session) { x.PersonalConfig = req.PersonalConfig })
+		err = s.store.PutPersonalSession(id.TenantID, id.UserID, sess.WorkspaceID, req.PersonalConfig)
 		if err != nil {
 			writeErr(w, r, http.StatusInternalServerError, err)
 			return
 		}
+		sess.PersonalConfig = clonePersonalSelection(req.PersonalConfig)
 	}
 	writeJSON(w, http.StatusCreated, sess)
 }
@@ -191,7 +210,9 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 func (s *Server) createSession(r *http.Request, id identity, p Project, title string, env *Environment, from *Session) (Session, error) {
 	now := workspaceCreated(r.Context())
 	sess := Session{ID: workspaceResourceID(r.Context(), "session", newSessionID()), ProjectID: p.ID, Title: title, CreatedAt: now, CreatedBy: id.UserID, UpdatedAt: now}
-	sess.WorkspaceID = p.ID + "--" + sess.ID
+	// Existing project IDs can already occupy most of Runtime's 63-byte slug.
+	// Keep an async workspace identity independent of their combined lengths.
+	sess.WorkspaceID = workspaceResourceID(r.Context(), "workspace", p.ID+"--"+sess.ID)
 	ctx, cancel := ctxTimeout(r, 10*time.Minute)
 	defer cancel()
 	source := p.ID
@@ -256,11 +277,16 @@ func (s *Server) createSession(r *http.Request, id identity, p Project, title st
 				return all, nil
 			}
 		}
-		return append(all, sess), nil
+		return append(all, sessionWithoutPersonal(sess)), nil
 	}); err != nil {
 		_ = s.ws.Delete(ctx, id, sess.WorkspaceID)
 		_ = s.store.DeleteSession(id.TenantID, sess)
 		return Session{}, err
+	}
+	if from != nil && from.PersonalConfig != nil {
+		if err := s.store.PutPersonalSession(id.TenantID, id.UserID, sess.WorkspaceID, from.PersonalConfig); err != nil {
+			return Session{}, err
+		}
 	}
 	return sess, nil
 }
