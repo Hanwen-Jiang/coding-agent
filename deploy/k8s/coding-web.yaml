@@ -58,14 +58,11 @@ spec:
             - {name: CODING_NETWORK_SECRETS, value: "1"}
             # G-05：coding.github.* 指标经 Runtime 的 Collector 写进 VictoriaMetrics（Grafana 的告警读它）。
             - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://ar-agent-runtime-otel-collector:4318"}
-            - name: AR_DEV_SIGNING_KEY
-              valueFrom:
-                secretKeyRef: {name: agent-runtime-secrets, key: dev-signing-key}
             # AUTH-01（Runtime 仓库 docs/plan/auth-tokens-2026-11-03.md；线上 2026-11-06 切换）：签 Ed25519 的 JWT 给 Runtime，Runtime 只持公钥。
             # 私钥在 Secret coding-jwt（键 key.pem，task-service keygen --iss coding-agent --kid <kid> 生成），只按文件挂进来；打印的登记
             # （只有公钥）在 Runtime Chart 的 taskService.ingress.issuers。CODING_TOKEN_KEY 在 coding-oauth 里。
-            # AR_DEV_SIGNING_KEY 再留一段时间（第三方令牌读到时改用 CODING_TOKEN_KEY 重新加密），之后连同 Runtime 的
-            # taskService.ingress.devTokens: accept 一起去掉（第 4 步）。
+            # 不再有 AR_DEV_SIGNING_KEY（AUTH-01 第 4 步，线上 2026-11-06）：旧格式的平台令牌与环境密钥在启动时已全部改用 CODING_TOKEN_KEY
+            # 重新加密（Server.Reseal）；Runtime 不再收开发令牌。
             - {name: CODING_JWT_KEY_FILE, value: /etc/coding/jwt/key.pem}
             - {name: CODING_JWT_KID, value: "<kid>"}
             # GitHub App（G-01，docs/plan/github-app.md 第 3 节）：App ID、Client ID、Webhook secret 在 coding-oauth 里（envFrom）；
