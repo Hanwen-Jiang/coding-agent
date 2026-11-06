@@ -13,6 +13,7 @@ import (
 // Project 是一个工作区：租户下的一个基线 Git 仓库（<工作区根>/<租户>/<ID>）。它下面可以开很多会话（Session），
 // 每个会话从基线仓库复制一份自己的工作副本，互不干扰，可以同时跑。
 type Project struct {
+	Layout    string    `json:"layout,omitempty"`
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Source    string    `json:"source"`
@@ -46,11 +47,13 @@ type Project struct {
 
 // Session 是工作区里的一个会话：一段对话（Runtime 的一个 Session）加一份独立的工作副本。
 type Session struct {
-	ID        string    `json:"id"`
-	ProjectID string    `json:"project_id"`
-	Title     string    `json:"title"`
-	CreatedAt time.Time `json:"created_at"`
-	CreatedBy string    `json:"created_by"`
+	RepoStates map[string]RepoSessionState `json:"repo_states,omitempty"`
+	repo       string                      // transient selected repository; never persisted
+	ID         string                      `json:"id"`
+	ProjectID  string                      `json:"project_id"`
+	Title      string                      `json:"title"`
+	CreatedAt  time.Time                   `json:"created_at"`
+	CreatedBy  string                      `json:"created_by"`
 	// UpdatedAt 是最近一次提交任务的时间（侧栏按它排序）。
 	UpdatedAt time.Time `json:"updated_at"`
 	// WorkspaceID 是 Runtime 的 workspace id，也是工作副本的目录名（<工作区根>/<租户>/<WorkspaceID>）；

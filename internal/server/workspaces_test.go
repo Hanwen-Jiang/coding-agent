@@ -31,7 +31,8 @@ type fakeWorkspaceAPI struct {
 	calls   []map[string]any
 	methods []string
 	// logGate 不为空时 GetLog 等它关上再回（模拟借沙箱环境的冷启动）。
-	logGate chan struct{}
+	logGate    chan struct{}
+	operations map[string]any
 }
 
 func (f *fakeWorkspaceAPI) record(method string, body map[string]any) {
@@ -75,6 +76,23 @@ func (f *fakeWorkspaceAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	id := identity{Identity: who}
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	operationID := ""
+	if method == "GetWorkspaceOperation" {
+		f.mu.Lock()
+		out := f.operations[body["operationId"].(string)]
+		f.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "WORKSPACE_OPERATION_STATUS_COMPLETED", "result": out})
+		return
+	}
+	if method == "StartWorkspaceOperation" {
+		operationID = body["requestId"].(string)
+		for key, rpc := range map[string]string{"create": "CreateWorkspace", "delete": "DeleteWorkspace", "commit": "CommitWorkspace", "push": "PushWorkspace", "sync": "SyncWorkspace", "discard": "DiscardChanges"} {
+			if inner, ok := body[key].(map[string]any); ok {
+				method, body = rpc, inner
+				break
+			}
+		}
+	}
 	f.record(method, body)
 	str := func(k string) string { s, _ := body[k].(string); return s }
 	auth := GitAuth{}
@@ -180,6 +198,15 @@ func (f *fakeWorkspaceAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(statusOf(err, http.StatusInternalServerError))
 		_ = json.NewEncoder(w).Encode(map[string]string{"code": "failed", "message": err.Error()})
 		return
+	}
+	if operationID != "" {
+		f.mu.Lock()
+		if f.operations == nil {
+			f.operations = make(map[string]any)
+		}
+		f.operations[operationID] = out
+		f.mu.Unlock()
+		out = map[string]any{"operationId": operationID}
 	}
 	_ = json.NewEncoder(w).Encode(out)
 }
@@ -362,10 +389,16 @@ func TestRuntimeClientSendsCredentialsOnlyAsCredential(t *testing.T) {
 	var seen map[string]any
 	var header http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "GetWorkspaceOperation") {
+			_, _ = io.WriteString(w, `{"status":"WORKSPACE_OPERATION_STATUS_COMPLETED","result":{"sha":"abc","branch":"agent/x"}}`)
+			return
+		}
 		header = r.Header.Clone()
 		data, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(data, &seen)
-		_, _ = io.WriteString(w, `{"sha":"abc","branch":"agent/x"}`)
+		var start map[string]any
+		_ = json.Unmarshal(data, &start)
+		seen = start["push"].(map[string]any)
+		_, _ = io.WriteString(w, `{"operationId":"op1"}`)
 	}))
 	defer server.Close()
 	w := runtimeWorkspaces{api: NewTaskAPI(server.URL)}

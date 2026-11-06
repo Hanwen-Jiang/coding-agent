@@ -249,6 +249,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/mcp/{id}/tools", s.authed(s.handleConfigureMcp))
 	mux.HandleFunc("DELETE /api/mcp/{id}", s.authed(s.handleDeleteMcp))
 
+	mux.HandleFunc("GET /api/projects/{project}/repos", s.authed(s.handleWorkspaceRepos))
+	mux.HandleFunc("POST /api/projects/{project}/repos", s.authed(s.handleAttachRepo))
+	mux.HandleFunc("POST /api/projects/{project}/repos/{repo}/detach", s.authed(s.handleDetachRepo))
+	mux.HandleFunc("GET /api/projects/{project}/sessions/{session}/repos", s.authed(s.handleWorkspaceRepos))
+	mux.HandleFunc("POST /api/projects/{project}/sessions/{session}/repos", s.authed(s.handleAttachRepo))
+	mux.HandleFunc("POST /api/projects/{project}/sessions/{session}/repos/{repo}/detach", s.authed(s.handleDetachRepo))
 	mux.HandleFunc("GET /api/samples", s.authed(s.handleSamples))
 	// 环境配置与项目解耦；这里仅保存普通配置，不报告 Runtime 生命周期状态。
 	mux.HandleFunc("GET /api/environments", s.authed(s.handleListEnvironments))
@@ -367,6 +373,7 @@ type identity struct {
 	ingress.Identity
 	token   string
 	session string
+	repo    string // selected only after tenant-owned Workspace API metadata validation
 }
 
 // handleJWKS 发布签 Runtime 令牌用的公钥（AUTH-03）：RFC 8037 的 OKP Ed25519 JWK，只有公钥。Runtime 或网关可以按它登记

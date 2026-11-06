@@ -41,7 +41,7 @@ func (s *Server) updateProject(tenant, id string, fn func(*Project)) (Project, e
 // handlePublish 把会话工作副本里的改动推到这个会话的 agent/* 分支并开草稿 PR（已有 PR 时只推送，PR 自动更新）。
 // 一个会话一个分支、一个 PR。由人点按钮触发。
 func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, id identity) {
-	p, sess, ok := s.session(w, r, id)
+	id, p, sess, ok := s.gitSession(w, r, id, true)
 	if !ok {
 		return
 	}
@@ -154,7 +154,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, id identi
 
 // handleResetBranch 让会话的工作副本回到基线分支并拉取最新：PR 合并之后开始下一轮。要求没有未提交的改动。
 func (s *Server) handleResetBranch(w http.ResponseWriter, r *http.Request, id identity) {
-	p, sess, ok := s.session(w, r, id)
+	id, p, sess, ok := s.gitSession(w, r, id, false)
 	if !ok {
 		return
 	}
@@ -199,7 +199,7 @@ func (s *Server) handleResetBranch(w http.ResponseWriter, r *http.Request, id id
 // handleSync 把还没有自己分支的会话拉到基线分支在远端的最新提交（Workspace API 的 SyncWorkspace）。要求没有任务在跑、
 // 没有未提交的改动，也没有还没推送的提交（会话开始以来自己的提交：拉取会切走它们）；已经推送到 agent/* 分支的会话用“回到基线分支”。
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, id identity) {
-	p, sess, ok := s.session(w, r, id)
+	id, p, sess, ok := s.gitSession(w, r, id, false)
 	if !ok {
 		return
 	}

@@ -81,6 +81,8 @@ const state = {
   shownNow: new Map(), // taskId → “此刻”那一行对应的事件：换了才给它进场动画
   pending: null, // 正在提交的任务：{ message, phase: "session" | "submit", started, shown }
   changes: null,
+  repos: [],
+  repoName: "",
   env: null,
   active: [],
   filesPath: "",
@@ -467,7 +469,7 @@ async function api(method, path, body) {
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if (!res.ok) throw new Error((data && data.error) || t("api.failed", { status: res.status }));
+  if (!res.ok) { const ex = new Error((data && data.error) || t("api.failed", { status: res.status })); ex.code = data && data.code; throw ex; }
   return data;
 }
 
@@ -1091,6 +1093,8 @@ function resetSessionState() {
   state.guidance = new Map();
   state.queuedEdit = null;
   state.changes = null;
+  state.repos = [];
+  state.repoName = "";
   state.env = null;
   state.filesPath = "";
 }
@@ -1112,6 +1116,7 @@ async function openSession(pid, sid) {
   }
   renderApp();
   if (state.session) {
+    await loadWorkspaceRepos();
     loadChanges();
     loadEnv();
     const focus = focusTask();
@@ -1130,6 +1135,7 @@ function openDraft(pid) {
   setHash(`#/w/${pid}/new`);
   renderApp();
   if (ui.input) ui.input.focus();
+  loadWorkspaceRepos();
 }
 
 function go(view) {
@@ -1226,6 +1232,7 @@ function scheduleChrome() {
 // ---------------------------------------------------------------- 左栏
 
 function sourceLabel(p) {
+  if (p.layout === "WORKSPACE_LAYOUT_MULTI") return t("repos.multi");
   if (p.repo) return `${providerInfo(p.git_provider).name} · ${p.repo}`;
   if (!p.source || p.source === "empty") return t("source.empty");
   if (p.source.startsWith("sample:")) return t("source.sample");
@@ -1430,6 +1437,15 @@ function renderTopbar() {
       s && s.pr_url ? h("a", { class: "chip ok", href: s.pr_url, target: "_blank", rel: "noopener" }, `PR #${s.pr_number}`, icon("external", "xs")) : null,
     ));
   }
+  if (p && p.layout === "WORKSPACE_LAYOUT_MULTI" && state.view === "session") {
+    if (state.session && state.repos.length) {
+      const picker = h("select", { class: "field", "aria-label": t("repos.select"), "data-repo-picker": "" },
+        state.repos.map((repo) => h("option", { value: repo.name, selected: repo.name === state.repoName }, `${repo.name}${repo.access === "REPO_ACCESS_WRITE" ? "" : " · " + t("repos.readOnly")}`)));
+      picker.addEventListener("change", () => { state.repoName = picker.value; state.changes = null; renderTopbar(); renderStatus(); loadChanges(); if (state.drawer) renderDrawer(); });
+      parts.push(picker);
+    }
+    parts.push(h("button", { class: "btn sm", onclick: () => openWorkspaceRepos(p, state.session), "data-repo-manage": "" }, icon("folder", "sm"), t("repos.manage")));
+  }
   parts.push(h("span", { class: "grow" }));
   if (inSession()) {
     parts.push(h("button", { class: "btn ghost sm icon-only", title: t("drawer.title"), onclick: () => openDrawer("changes") }, icon("diff", "sm")));
@@ -1459,6 +1475,7 @@ function renderWorkspaces() {
         live.has(`${p.id}/${s.id}`) ? h("span", { class: "spinner" }) : icon("chat", "xs"), h("span", { class: "grow ellipsis" }, s.title || t("session.untitled")), h("span", { class: "when" }, fmtShortAgo(s.updated_at))))) : null,
       h("div", { class: "actions" },
         h("button", { class: "btn primary sm", onclick: () => openDraft(p.id) }, icon("plus", "sm"), t("nav.newSession")),
+        p.layout === "WORKSPACE_LAYOUT_MULTI" ? h("button", { class: "btn sm", onclick: () => openWorkspaceRepos(p, null) }, t("repos.manage")) : null,
         h("span", { class: "grow" }),
         h("button", { class: "btn ghost sm danger", onclick: () => deleteProject(p) }, icon("trash", "sm"), t("ws.delete"))),
     );
@@ -2667,8 +2684,10 @@ async function loadChanges() {
   const base = sbase();
   if (!base) return;
   try {
-    const c = await api("GET", `${base}/changes`);
-    if (sbase() === base) { state.changes = c; scheduleChrome(); }
+    const selected = state.repoName;
+    if (isMulti() && !selected) { state.changes = { files: [], diff: "" }; scheduleChrome(); return; }
+    const c = await api("GET", gitURL("changes"));
+    if (sbase() === base && state.repoName === selected) { state.changes = c; scheduleChrome(); }
   } catch { /* 下次再取 */ }
 }
 
@@ -3239,6 +3258,7 @@ async function submit(text) {
       state.session = sess;
       state.pending = { ...state.pending, phase: "submit", session: sess.id };
       setHash(`#/w/${p.id}/s/${sess.id}`);
+      await loadWorkspaceRepos();
       renderApp();
       loadEnv();
     }
@@ -3330,8 +3350,8 @@ function envSummary() {
 function envBody() {
   const e = state.env;
   if (!e) return h("div", { class: "empty-line" }, t("common.loading"));
-  const p = state.project;
-  const s = state.session;
+  const p = gitProject();
+  const s = gitSessionState();
   const sb = e.sandbox || {};
   // 分支、HEAD 与改动取自“改动”（/env 不调 Workspace API：那要借沙箱环境）。
   const c = state.changes || {};
@@ -3369,11 +3389,11 @@ function canSync(p, s) {
 }
 
 async function syncSession() {
-  const p = state.project;
+  const p = gitProject();
   const base = sbase();
   toast(t("sync.running", { base: p.base_branch }));
   try {
-    const r = await api("POST", `${base}/sync`);
+    const r = await api("POST", gitURL("sync"));
     setSession(r.session);
     if (sbase() !== base) return;
     toast(t("sync.done", { base: p.base_branch, head: String(r.head || "").slice(0, 7) }));
@@ -3644,8 +3664,8 @@ function changesSummary() {
 function changesBody() {
   if (!state.changes) return h("div", { class: "empty-line" }, t("common.loading"));
   const { files } = changeStats();
-  const p = state.project;
-  const s = state.session;
+  const p = gitProject();
+  const s = gitSessionState();
   const max = 12;
   return [
     files.length
@@ -3656,9 +3676,9 @@ function changesBody() {
       : h("div", { class: "empty-line" }, t("changes.none")),
     h("div", { class: "sp-actions" },
       files.length ? h("button", { class: "btn primary xs", onclick: () => openDrawer("changes") }, icon("diff", "xs"), t("changes.reviewCommit")) : null,
-      files.length && p.repo && connection(p.git_provider) ? h("button", { class: "btn xs", onclick: () => openDrawer("changes", { focus: "publish" }) },
+      files.length && canWriteRepo() && p.repo && connection(p.git_provider) ? h("button", { class: "btn xs", onclick: () => openDrawer("changes", { focus: "publish" }) },
         badge(p.git_provider, "xs"), s.pr_number ? t("publish.pushTo", { rn: requestName(p), n: s.pr_number }) : t("publish.pushOpen", { rn: requestName(p) })) : null,
-      files.length ? h("a", { class: "btn xs", href: `${sbase()}/patch`, download: `${s.workspace_id}.patch` }, icon("download", "xs"), t("changes.patch")) : null,
+      files.length ? h("a", { class: "btn xs", href: gitURL("patch"), download: `${s.workspace_id}.patch` }, icon("download", "xs"), t("changes.patch")) : null,
       h("button", { class: "btn ghost xs", onclick: () => openDrawer("history") }, icon("history", "xs"), t("drawer.history"))),
   ];
 }
@@ -3729,8 +3749,11 @@ function renderDrawer() {
 async function drawChanges(body, focus) {
   body.replaceChildren(h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("changes.loading")));
   let data;
+  const requestURL = gitURL("changes");
   try {
-    data = await api("GET", `${sbase()}/changes`);
+    if (isMulti() && !selectedRepo()) { body.replaceChildren(h("div", { class: "muted" }, t("repos.empty"))); return; }
+    data = await api("GET", requestURL);
+    if (requestURL !== gitURL("changes")) return;
     state.changes = data;
     scheduleChrome();
   } catch (ex) {
@@ -3739,6 +3762,7 @@ async function drawChanges(body, focus) {
   }
   const busy = !!currentTask();
   const parts = [];
+  if (!canWriteRepo()) parts.push(h("div", { class: "chip", "data-repo-readonly": "" }, t("repos.readOnly")));
   let commitInput = null;
   if (!data.files.length) {
     parts.push(h("div", { class: "card" },
@@ -3748,10 +3772,10 @@ async function drawChanges(body, focus) {
     const added = data.files.reduce((n, f) => n + f.added, 0);
     const deleted = data.files.reduce((n, f) => n + f.deleted, 0);
     commitInput = h("input", { class: "field", placeholder: t("commit.ph"), value: lastMessage() });
-    const commit = h("button", { class: "btn primary sm", disabled: busy, onclick: async () => {
+    const commit = h("button", { class: "btn primary sm", "data-git-commit": "", disabled: busy || !canWriteRepo(), onclick: async () => {
       commit.disabled = true;
       try {
-        const r = await api("POST", `${sbase()}/commit`, { message: commitInput.value });
+        const r = await api("POST", gitURL("commit"), { message: commitInput.value });
         toast(t("commit.done", { hash: r.head.slice(0, 8) }));
         await loadChanges();
         loadEnv();
@@ -3762,7 +3786,7 @@ async function drawChanges(body, focus) {
       h("div", { class: "card-title" }, t("changes.title", { n: data.files.length }), h("span", { class: "stat-add" }, `+${added}`), h("span", { class: "stat-del" }, `−${deleted}`),
         busy ? h("span", { class: "chip run" }, h("span", { class: "spinner" }), t("changes.busy")) : null),
       h("div", { class: "actions" }, h("div", { class: "grow" }, commitInput), commit,
-        h("a", { class: "btn sm", href: `${sbase()}/patch`, download: `${state.session.workspace_id}.patch` }, icon("download", "sm"), t("changes.patch")),
+        h("a", { class: "btn sm", href: gitURL("patch"), download: `${state.session.workspace_id}.patch` }, icon("download", "sm"), t("changes.patch")),
         h("button", { class: "btn sm danger", disabled: busy, onclick: discard }, icon("trash", "sm"), t("changes.discard"))),
     ));
   }
@@ -3782,7 +3806,7 @@ async function drawChanges(body, focus) {
 async function discard() {
   if (!confirm(t("changes.discardConfirm"))) return;
   try {
-    await api("POST", `${sbase()}/discard`);
+    await api("POST", gitURL("discard"));
     toast(t("changes.discarded"));
     await loadChanges();
     loadEnv();
@@ -3798,9 +3822,9 @@ function lastMessage() {
 
 // publishCard 是“推送并开草稿 PR/MR”：一个会话一个 agent/* 分支、一个 PR（GitLab 叫 Merge Request）。
 function publishCard(busy, dirty) {
-  const p = state.project;
-  const s = state.session;
-  if (!p.repo) return null;
+  const p = gitProject();
+  const s = gitSessionState();
+  if (!p.repo || !canWriteRepo()) return null;
   const info = providerInfo(p.git_provider);
   const rn = requestName(p);
   if (!connection(p.git_provider)) {
@@ -3819,7 +3843,7 @@ function publishCard(busy, dirty) {
     push.disabled = true;
     push.lastChild.textContent = t("publish.pushing");
     try {
-      const r = await api("POST", `${sbase()}/publish`, { title: title.value });
+      const r = await api("POST", gitURL("publish"), { title: title.value });
       setSession(r.session);
       toast(r.created ? t("publish.opened", { rn, n: r.pr_number }) : t("publish.pushed", { branch: r.branch }));
       renderTopbar();
@@ -3886,7 +3910,8 @@ function renderDiff(text) {
 
 // changedPaths 是“改动”里列出的文件（文件树上标出来；改名的按新路径）。
 function changedPaths() {
-  return new Set((state.changes ? state.changes.files : []).map((f) => String(f.path).replace(/^.* => /, "")));
+  const prefix = isMulti() ? selectedRepo()?.path || "" : "";
+  return new Set((state.changes ? state.changes.files : []).map((f) => join(prefix, String(f.path).replace(/^.* => /, ""))));
 }
 
 async function loadFiles(body, path) {
@@ -3929,7 +3954,7 @@ async function showFile(viewer, path) {
   try {
     const f = await api("GET", `${sbase()}/file?path=${encodeURIComponent(path)}`);
     const head = h("div", { class: "row" }, icon("file", "sm"), h("strong", { class: "mono grow ellipsis" }, path),
-      changedPaths().has(path) ? h("button", { class: "btn xs", "data-action": "file-diff", onclick: () => openDrawer("changes", { focus: path }) }, icon("diff", "xs"), t("files.viewDiff")) : null,
+      changedPaths().has(path) ? h("button", { class: "btn xs", "data-action": "file-diff", onclick: () => openDrawer("changes", { focus: isMulti() ? path.slice((selectedRepo()?.path.length || 0) + 1) : path }) }, icon("diff", "xs"), t("files.viewDiff")) : null,
       h("span", { class: "muted" }, fmtSize(f.size || 0)));
     const content = f.binary ? h("div", { class: "muted" }, t("files.binary"))
       : f.too_large ? h("div", { class: "muted" }, t("files.tooLarge"))
@@ -3947,8 +3972,8 @@ const HISTORY_MAX = 200;
 
 async function loadHistory(body, limit = HISTORY_STEP) {
   try {
-    const commits = await api("GET", `${sbase()}/log?limit=${limit}`);
-    const start = state.session.base_commit || "";
+    const commits = await api("GET", gitURL("log", { limit }));
+    const start = gitSessionState().base_commit || "";
     const at = start ? commits.findIndex((c) => c.hash === start) : -1;
     const rows = commits.map((c, i) => h("div", { class: "commit-row", "data-hash": c.hash },
       h("span", { class: "hash" }, c.hash.slice(0, 7)),
@@ -3965,17 +3990,121 @@ async function loadHistory(body, limit = HISTORY_STEP) {
 }
 
 async function resetBranch() {
-  const p = state.project;
-  const s = state.session;
+  const p = gitProject();
+  const s = gitSessionState();
   if (!confirm(t("env.resetConfirm", { base: p.base_branch, branch: s.branch }))) return;
   try {
-    const r = await api("POST", `${sbase()}/reset-branch`);
+    const r = await api("POST", gitURL("reset-branch"));
     setSession(r.session);
     toast(t("env.resetDone", { base: p.base_branch }));
     renderTopbar();
     loadChanges();
     loadEnv();
   } catch (ex) { report(ex); }
+}
+
+// A selection scopes Git operations only. File browsing and agent tasks see the whole workspace.
+function isMulti() { return state.project?.layout === "WORKSPACE_LAYOUT_MULTI"; }
+function selectedRepo() { return state.repos.find((repo) => repo.name === state.repoName); }
+function canWriteRepo() { return !isMulti() || selectedRepo()?.access === "REPO_ACCESS_WRITE"; }
+function gitURL(endpoint, params = {}) {
+  const query = new URLSearchParams(params);
+  if (isMulti()) query.set("repo", state.repoName);
+  return `${sbase()}/${endpoint}${query.size ? "?" + query : ""}`;
+}
+function gitProject() {
+  if (!isMulti()) return state.project;
+  const repo = selectedRepo();
+  return { ...state.project, source: repo?.url || "", repo: repo?.remote_repo || "", git_provider: repo?.git_provider || "", base_branch: repo?.state?.base_branch || "" };
+}
+function gitSessionState() {
+  if (!isMulti()) return state.session;
+  return { ...state.session, branch: "", pr_url: "", pr_number: 0, base_commit: "", ...selectedRepo()?.state, ...state.session?.repo_states?.[state.repoName] };
+}
+function workspaceRepoBase(p = state.project, session = state.session) {
+  return session ? sessionURL(p.id, session.id) : `/api/projects/${p.id}`;
+}
+async function loadWorkspaceRepos() {
+  if (!isMulti()) return;
+  const base = workspaceRepoBase();
+  try {
+    const data = await api("GET", `${base}/repos`);
+    if (!state.project || workspaceRepoBase() !== base) return;
+    state.repos = data.repos || [];
+    if (!state.repos.some((r) => r.name === state.repoName)) state.repoName = (state.repos.find((r) => r.primary) || state.repos[0])?.name || "";
+    renderTopbar();
+  } catch (ex) { report(ex); }
+}
+
+function openWorkspaceRepos(project, session) {
+  const base = workspaceRepoBase(project, session);
+  const list = h("div", { class: "col", "data-workspace-repos": "" });
+  const error = h("div", { class: "err-text", role: "alert" });
+  const name = h("input", { class: "field", "aria-label": t("repos.name"), maxlength: 64 });
+  const path = h("input", { class: "field", "aria-label": t("repos.path"), maxlength: 64 });
+  const url = h("input", { class: "field", "aria-label": t("new.url"), placeholder: "https://github.com/owner/repo.git" });
+  const ref = h("input", { class: "field", "aria-label": t("env.branch"), placeholder: t("new.branchPh") });
+  const access = h("select", { class: "field", "aria-label": t("repos.access") },
+    h("option", { value: "REPO_ACCESS_READ" }, t("repos.readOnly")), h("option", { value: "REPO_ACCESS_WRITE" }, t("repos.writable")));
+  const primary = h("input", { type: "checkbox" });
+  const attach = h("button", { class: "btn primary", "data-repo-attach": "" }, t("repos.attach"));
+  const close = h("button", { class: "btn ghost" }, t("common.close"));
+  let running = false;
+  const dialog = h("dialog", {},
+    h("div", { class: "d-head" }, h("h2", {}, t("repos.manage"))),
+    h("div", { class: "d-body col" }, h("div", { class: "muted" }, t(session ? "repos.sessionHint" : "repos.baselineHint")), list,
+      h("label", { class: "lbl" }, t("new.url")), url,
+      h("div", { class: "row" }, h("label", { class: "grow lbl" }, t("repos.name"), name), h("label", { class: "grow lbl" }, t("repos.path"), path)),
+      h("label", { class: "lbl" }, t("env.branch")), ref,
+      h("label", { class: "lbl" }, t("repos.access")), access,
+      h("label", { class: "row" }, primary, t("repos.primary")), error),
+    h("div", { class: "d-foot" }, close, attach));
+  close.onclick = () => dialog.close();
+  dialog.addEventListener("close", () => dialog.remove());
+  url.addEventListener("change", () => {
+    const guess = url.value.trim().split("/").pop().replace(/\.git$/, "").replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64);
+    if (!name.value) name.value = guess;
+    if (!path.value) path.value = guess;
+  });
+  const busy = () => running || (session && !!state.tasks.find((task) => !TERMINAL.has(statusOf(task)) && state.session?.id === session.id));
+  async function refresh() {
+    const data = await api("GET", `${base}/repos`);
+    list.replaceChildren(...(data.repos.length ? data.repos.map((repo) => h("div", { class: "card row", "data-repo-name": repo.name },
+      h("div", { class: "grow" }, h("strong", {}, repo.name), " ", h("span", { class: "mono muted" }, repo.path),
+        h("div", { class: "small muted" }, repo.url),
+        h("span", { class: "chip" }, t(repo.access === "REPO_ACCESS_WRITE" ? "repos.writable" : "repos.readOnly")),
+        repo.primary ? h("span", { class: "chip" }, t("repos.primary")) : null),
+      h("button", { class: "btn danger sm", disabled: busy(), onclick: () => detach(repo) }, t("repos.detach")))) : [h("div", { class: "muted" }, t("repos.empty"))]));
+    if (state.project?.id === project.id && workspaceRepoBase() === base) {
+      await loadWorkspaceRepos(); loadChanges(); if (state.drawer) renderDrawer();
+    }
+    attach.disabled = busy();
+  }
+  async function detach(repo) {
+    if (busy() || !confirm(t("repos.detachConfirm", { name: repo.name }))) return;
+    running = true; attach.disabled = true; error.textContent = "";
+    try {
+      let result;
+      try { result = await api("POST", `${base}/repos/${encodeURIComponent(repo.name)}/detach`, { discard_changes: false }); }
+      catch (ex) {
+        if (ex.code !== "repo_dirty" || !confirm(t("repos.discardConfirm", { name: repo.name }))) throw ex;
+        result = await api("POST", `${base}/repos/${encodeURIComponent(repo.name)}/detach`, { discard_changes: true });
+      }
+      toast(t("repos.detached", { files: result.discardedFiles || 0, commits: result.discardedCommits || 0 }));
+    } catch (ex) { error.textContent = ex.message; }
+    finally { running = false; await refresh().catch((ex) => { error.textContent = ex.message; }); }
+  }
+  attach.onclick = async () => {
+    if (busy()) return;
+    running = true; attach.disabled = true; attach.textContent = t("repos.attaching"); error.textContent = "";
+    try {
+      await api("POST", `${base}/repos`, { repo: { name: name.value.trim(), url: url.value.trim(), ref: ref.value.trim(), path: path.value.trim(), access: access.value, primary: primary.checked } });
+      name.value = path.value = url.value = ref.value = ""; primary.checked = false;
+    } catch (ex) { error.textContent = ex.message; }
+    finally { running = false; attach.textContent = t("repos.attach"); await refresh().catch((ex) => { error.textContent = ex.message; }); }
+  };
+  document.body.append(dialog); dialog.showModal();
+  refresh().catch((ex) => { error.textContent = ex.message; });
 }
 
 // ---------------------------------------------------------------- 项目
@@ -4028,7 +4157,7 @@ function openNewProject(initial) {
     repoList.replaceChildren(...(rows.length ? rows : [h("div", { class: "muted" }, t("new.noRepos"))]));
   };
   const draw = () => {
-    seg.replaceChildren(...[["git", "branch", conns.length ? t("new.myRepos") : t("new.gitUrl")], ["sample", "box", t("new.sample")], ["empty", "folder", t("source.empty")]].map(([k, ic, l]) =>
+    seg.replaceChildren(...[["git", "branch", conns.length ? t("new.myRepos") : t("new.gitUrl")], ["sample", "box", t("new.sample")], ["empty", "folder", t("source.empty")], ["multi", "layers", t("repos.multi")]].map(([k, ic, l]) =>
       h("button", { class: mode === k ? "active" : "", onclick: () => { mode = k; draw(); } }, icon(ic, "sm"), l)));
     const parts = [];
     if (mode === "git") {
@@ -4059,7 +4188,7 @@ function openNewProject(initial) {
       if (!name.value && state.samples[0]) name.value = (state.samples.find((s) => s.id === sample) || state.samples[0]).name;
       parts.push(h("div", {}, h("label", { class: "lbl" }, t("new.name")), name));
     } else {
-      parts.push(h("div", { class: "muted" }, t("new.emptyDesc")), h("div", {}, h("label", { class: "lbl" }, t("new.name")), name));
+      parts.push(h("div", { class: "muted" }, t(mode === "multi" ? "repos.createDesc" : "new.emptyDesc")), h("div", {}, h("label", { class: "lbl" }, t("new.name")), name));
     }
     body.replaceChildren(...parts);
   };
@@ -4073,11 +4202,13 @@ function openNewProject(initial) {
     const req = { name: name.value || (mode === "git" ? (gitUrl.value.split("/").pop() || "").replace(/\.git$/, "") : "") };
     if (mode === "git") Object.assign(req, { git_url: gitUrl.value, branch: branch.value });
     if (mode === "sample") req.sample = sample;
+    if (mode === "multi") req.layout = "WORKSPACE_LAYOUT_MULTI";
     try {
       const p = await api("POST", "/api/projects", req);
       state.projects.unshift(p);
       dialog.close();
       openDraft(p.id);
+      if (mode === "multi") openWorkspaceRepos(p, null);
       const s = mode === "sample" ? state.samples.find((x) => x.id === sample) : null;
       if (s) setComposer(s.prompt);
     } catch (ex) {

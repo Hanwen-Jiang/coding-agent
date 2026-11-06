@@ -6,6 +6,26 @@
 const plural = (n, one, many) => (Number(n) === 1 ? one : many);
 
 const ZH = {
+  "repos.multi": "多仓工作区",
+  "repos.createDesc": "建立空的工作区，再逐个挂载仓库。每个仓库有自己的目录和权限。",
+  "repos.select": "当前 Git 仓库",
+  "repos.manage": "管理仓库",
+  "repos.readOnly": "只读",
+  "repos.writable": "可写",
+  "repos.empty": "还没有仓库，请先挂载一个仓库。",
+  "repos.name": "仓库名称",
+  "repos.path": "一级目录",
+  "repos.access": "仓库权限",
+  "repos.primary": "主仓库",
+  "repos.attach": "挂载仓库",
+  "repos.attaching": "正在挂载…",
+  "repos.detach": "卸下",
+  "repos.detachConfirm": "卸下仓库 {name}？其他仓库不受影响。",
+  "repos.discardConfirm": "仓库 {name} 有未提交的文件或未推送的提交。确认丢弃这些改动并卸下？",
+  "repos.detached": "已卸下仓库；丢弃文件 {files} 个、提交 {commits} 个。",
+  "repos.baselineHint": "这里修改基线工作区。之后新建的会话会复制这些仓库；已有会话不变。",
+  "repos.sessionHint": "这里管理当前会话的仓库。文件浏览与 Agent 可以看到全部仓库，Git 操作只作用于选择的仓库。",
+
   "network.public": "所有公网",
   "network.hosts": "指定主机",
   "network.off": "不联网",
@@ -785,6 +805,26 @@ const ZH = {
 };
 
 const EN = {
+  "repos.multi": "Multi-repository workspace",
+  "repos.createDesc": "Create an empty workspace, then attach repositories individually with their own directories and access.",
+  "repos.select": "Current Git repository",
+  "repos.manage": "Manage repositories",
+  "repos.readOnly": "Read-only",
+  "repos.writable": "Writable",
+  "repos.empty": "No repositories yet. Attach a repository to begin.",
+  "repos.name": "Repository name",
+  "repos.path": "Top-level directory",
+  "repos.access": "Repository access",
+  "repos.primary": "Primary repository",
+  "repos.attach": "Attach repository",
+  "repos.attaching": "Attaching…",
+  "repos.detach": "Detach",
+  "repos.detachConfirm": "Detach {name}? Other repositories are kept.",
+  "repos.discardConfirm": "Repository {name} has uncommitted files or unpushed commits. Discard those changes and detach?",
+  "repos.detached": "Repository detached; discarded {files} files and {commits} commits.",
+  "repos.baselineHint": "These repositories belong to the baseline workspace. New sessions copy them; existing sessions keep their own copies.",
+  "repos.sessionHint": "Manage repositories in this session. Files and the agent see all repositories; Git actions apply to the selected repository.",
+
   "network.public": "All public domains",
   "network.hosts": "Selected hosts",
   "network.off": "Network off",

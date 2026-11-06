@@ -89,6 +89,7 @@ func author(id identity) (string, string) {
 
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request, id identity) {
 	var req struct {
+		Layout string `json:"layout"`
 		Name   string `json:"name"`
 		GitURL string `json:"git_url"`
 		Branch string `json:"branch"`
@@ -102,10 +103,26 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request, id 
 		writeMsg(w, r, http.StatusBadRequest, "项目名要有，且不超过 80 个字符")
 		return
 	}
-	p := Project{ID: newProjectID(req.Name), Name: req.Name, Source: "empty", CreatedAt: time.Now().UTC(), CreatedBy: id.UserID}
+	if req.Layout != "" && req.Layout != "WORKSPACE_LAYOUT_ROOT" && req.Layout != layoutMulti {
+		writeMsg(w, r, http.StatusBadRequest, "工作区布局不合法")
+		return
+	}
+	if req.Layout == layoutMulti && (req.GitURL != "" || req.Branch != "" || req.Sample != "") {
+		writeMsg(w, r, http.StatusBadRequest, "多仓工作区先建空容器，再逐个挂仓库")
+		return
+	}
+	if req.Layout == layoutMulti {
+		if _, ok := s.ws.(multiWorkspaces); !ok {
+			writeMsg(w, r, http.StatusBadRequest, "多仓工作区需要 Runtime Workspace API")
+			return
+		}
+	}
+	p := Project{Layout: req.Layout, ID: newProjectID(req.Name), Name: req.Name, Source: "empty", CreatedAt: time.Now().UTC(), CreatedBy: id.UserID}
 	spec := CreateSpec{}
 	spec.AuthorName, spec.AuthorEmail = author(id)
 	switch {
+	case req.Layout == layoutMulti:
+		spec.Layout = layoutMulti
 	case req.GitURL != "":
 		u, err := url.Parse(req.GitURL)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
@@ -300,7 +317,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request, id identity)
 }
 
 func (s *Server) handleLog(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+	id, _, sess, ok := s.gitSession(w, r, id, false)
 	if !ok {
 		return
 	}
@@ -320,7 +337,7 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request, id identity) 
 }
 
 func (s *Server) handleChanges(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+	id, _, sess, ok := s.gitSession(w, r, id, false)
 	if !ok {
 		return
 	}
@@ -335,7 +352,7 @@ func (s *Server) handleChanges(w http.ResponseWriter, r *http.Request, id identi
 }
 
 func (s *Server) handlePatch(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+	id, _, sess, ok := s.gitSession(w, r, id, false)
 	if !ok {
 		return
 	}
@@ -352,7 +369,7 @@ func (s *Server) handlePatch(w http.ResponseWriter, r *http.Request, id identity
 }
 
 func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+	id, _, sess, ok := s.gitSession(w, r, id, true)
 	if !ok {
 		return
 	}
@@ -386,7 +403,7 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request, id identit
 }
 
 func (s *Server) handleDiscard(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+	id, _, sess, ok := s.gitSession(w, r, id, false)
 	if !ok {
 		return
 	}

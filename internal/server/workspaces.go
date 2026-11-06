@@ -47,6 +47,7 @@ func (a GitAuth) empty() bool { return a.User == "" && a.Pass == "" }
 // CreateSpec 是建工作区的来源：RepoURL（克隆）、From（复制同租户的另一个工作区）、Files（空仓库加初始文件与一次提交）三选一。
 type CreateSpec struct {
 	RepoURL, Ref            string
+	Layout                  string
 	Auth                    GitAuth
 	From                    string
 	Files                   []InitialFile
@@ -60,6 +61,8 @@ type InitialFile struct {
 
 type WorkspaceInfo struct {
 	Head, Branch string
+	Layout       string
+	Repos        []WorkspaceRepo
 }
 
 type FileEntry struct {
@@ -158,23 +161,28 @@ func (w runtimeWorkspaces) Create(ctx context.Context, id identity, ws string, s
 		"workspaceId": ws, "repoUrl": spec.RepoURL, "ref": spec.Ref, "fromWorkspaceId": spec.From, "files": spec.Files,
 		"authorName": spec.AuthorName, "authorEmail": spec.AuthorEmail,
 	}
+	if spec.Layout == layoutMulti {
+		req = map[string]any{"workspaceId": ws, "layout": layoutMulti, "fromWorkspaceId": spec.From}
+	}
 	if c := credential(spec.Auth); c != nil {
 		req["credential"] = c
 	}
 	var resp struct {
 		Workspace struct {
-			Head   string `json:"head"`
-			Branch string `json:"branch"`
+			Head   string          `json:"head"`
+			Branch string          `json:"branch"`
+			Layout string          `json:"layout"`
+			Repos  []WorkspaceRepo `json:"repos"`
 		} `json:"workspace"`
 	}
-	if err := w.api.CallWorkspace(ctx, id.token, "CreateWorkspace", req, &resp); err != nil {
+	if err := w.api.workspaceOperation(ctx, id.token, "CreateWorkspace", req, &resp); err != nil {
 		return WorkspaceInfo{}, err
 	}
-	return WorkspaceInfo{Head: resp.Workspace.Head, Branch: resp.Workspace.Branch}, nil
+	return WorkspaceInfo{Head: resp.Workspace.Head, Branch: resp.Workspace.Branch, Layout: resp.Workspace.Layout, Repos: resp.Workspace.Repos}, nil
 }
 
 func (w runtimeWorkspaces) Delete(ctx context.Context, id identity, ws string) error {
-	err := w.api.CallWorkspace(ctx, id.token, "DeleteWorkspace", map[string]any{"workspaceId": ws}, nil)
+	err := w.api.workspaceOperation(ctx, id.token, "DeleteWorkspace", map[string]any{"workspaceId": ws}, nil)
 	if isNotFound(err) {
 		return nil
 	}
@@ -221,7 +229,7 @@ func (w runtimeWorkspaces) Log(ctx context.Context, id identity, ws string, limi
 			Subject    string `json:"subject"`
 		} `json:"commits"`
 	}
-	if err := w.api.CallWorkspace(ctx, id.token, "GetLog", map[string]any{"workspaceId": ws, "limit": limit, "base": base}, &resp); err != nil {
+	if err := w.api.CallWorkspace(ctx, id.token, "GetLog", map[string]any{"workspaceId": ws, "repo": id.repo, "limit": limit, "base": base}, &resp); err != nil {
 		return nil, err
 	}
 	out := make([]CommitInfo, 0, len(resp.Commits))
@@ -239,7 +247,7 @@ func (w runtimeWorkspaces) Changes(ctx context.Context, id identity, ws string) 
 		Branch    string     `json:"branch"`
 		Stats     []DiffStat `json:"stats"`
 	}
-	if err := w.api.CallWorkspace(ctx, id.token, "GetDiff", map[string]any{"workspaceId": ws, "findRenames": true}, &resp); err != nil {
+	if err := w.api.CallWorkspace(ctx, id.token, "GetDiff", map[string]any{"workspaceId": ws, "repo": id.repo, "findRenames": true}, &resp); err != nil {
 		return Changes{}, err
 	}
 	if resp.Stats == nil {
@@ -253,40 +261,40 @@ func (w runtimeWorkspaces) Commit(ctx context.Context, id identity, ws, message,
 		Sha       string `json:"sha"`
 		Committed bool   `json:"committed"`
 	}
-	req := map[string]any{"workspaceId": ws, "message": message, "authorName": name, "authorEmail": email}
-	if err := w.api.CallWorkspace(ctx, id.token, "CommitWorkspace", req, &resp); err != nil {
+	req := map[string]any{"workspaceId": ws, "repo": id.repo, "message": message, "authorName": name, "authorEmail": email}
+	if err := w.api.workspaceOperation(ctx, id.token, "CommitWorkspace", req, &resp); err != nil {
 		return "", false, err
 	}
 	return resp.Sha, resp.Committed, nil
 }
 
 func (w runtimeWorkspaces) Discard(ctx context.Context, id identity, ws string) error {
-	return w.api.CallWorkspace(ctx, id.token, "DiscardChanges", map[string]any{"workspaceId": ws}, nil)
+	return w.api.workspaceOperation(ctx, id.token, "DiscardChanges", map[string]any{"workspaceId": ws, "repo": id.repo}, nil)
 }
 
 func (w runtimeWorkspaces) Push(ctx context.Context, id identity, ws, branch string, auth GitAuth) (string, error) {
-	req := map[string]any{"workspaceId": ws, "branch": branch}
+	req := map[string]any{"workspaceId": ws, "repo": id.repo, "branch": branch}
 	if c := credential(auth); c != nil {
 		req["credential"] = c
 	}
 	var resp struct {
 		Sha string `json:"sha"`
 	}
-	if err := w.api.CallWorkspace(ctx, id.token, "PushWorkspace", req, &resp); err != nil {
+	if err := w.api.workspaceOperation(ctx, id.token, "PushWorkspace", req, &resp); err != nil {
 		return "", err
 	}
 	return resp.Sha, nil
 }
 
 func (w runtimeWorkspaces) Sync(ctx context.Context, id identity, ws, branch string, auth GitAuth) (string, error) {
-	req := map[string]any{"workspaceId": ws, "branch": branch}
+	req := map[string]any{"workspaceId": ws, "repo": id.repo, "branch": branch}
 	if c := credential(auth); c != nil {
 		req["credential"] = c
 	}
 	var resp struct {
 		Head string `json:"head"`
 	}
-	if err := w.api.CallWorkspace(ctx, id.token, "SyncWorkspace", req, &resp); err != nil {
+	if err := w.api.workspaceOperation(ctx, id.token, "SyncWorkspace", req, &resp); err != nil {
 		return "", err
 	}
 	return resp.Head, nil

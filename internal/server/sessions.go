@@ -100,7 +100,16 @@ func (s *Server) updateSession(tenant string, sess Session, fn func(*Session)) (
 	err := s.store.UpdateSessions(tenant, func(all []Session) ([]Session, error) {
 		for i := range all {
 			if all[i].ProjectID == sess.ProjectID && all[i].ID == sess.ID {
-				fn(&all[i])
+				if sess.repo != "" {
+					projected := projectRepoSession(all[i], sess.repo)
+					fn(&projected)
+					if all[i].RepoStates == nil {
+						all[i].RepoStates = make(map[string]RepoSessionState)
+					}
+					all[i].RepoStates[sess.repo] = repoSessionState(projected, all[i].RepoStates[sess.repo].BaseBranch)
+				} else {
+					fn(&all[i])
+				}
 				out = all[i]
 				return all, nil
 			}
@@ -172,11 +181,23 @@ func (s *Server) createSession(r *http.Request, id identity, p Project, title st
 	if from != nil {
 		source = from.WorkspaceID
 	}
-	info, err := s.ws.Create(ctx, id, sess.WorkspaceID, CreateSpec{From: source})
+	info, err := s.ws.Create(ctx, id, sess.WorkspaceID, CreateSpec{From: source, Layout: p.Layout})
 	if err != nil {
 		return Session{}, err
 	}
 	sess.BaseCommit = info.Head
+	if p.Layout == layoutMulti {
+		sess.RepoStates = make(map[string]RepoSessionState)
+		for _, repo := range info.Repos {
+			base, baseBranch := repo.Head, repo.Branch
+			if from != nil {
+				if old, ok := from.RepoStates[repo.Name]; ok {
+					base, baseBranch = old.BaseCommit, old.BaseBranch
+				}
+			}
+			sess.RepoStates[repo.Name] = RepoSessionState{BaseCommit: base, BaseBranch: baseBranch}
+		}
+	}
 	if from != nil && from.BaseCommit != "" {
 		sess.BaseCommit = from.BaseCommit
 	}

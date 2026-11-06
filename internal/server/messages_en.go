@@ -4,6 +4,16 @@ package server
 // TestEveryMessageHasEnglish 按源码核对每一句都有、参数个数对得上、这里没有用不到的。
 // 用词与网页一致：“项目”在界面上叫 workspace。
 var english = map[string]string{
+	"工作区布局不合法":                      "Invalid workspace layout",
+	"多仓工作区先建空容器，再逐个挂仓库":             "Create an empty multi-repository workspace, then attach repositories individually",
+	"多仓工作区需要 Runtime Workspace API": "Multi-repository workspaces require the Runtime Workspace API",
+	"根仓工作区不能选择子仓库":                  "A root workspace does not accept a repository selector",
+	"请选择当前工作区中的仓库":                  "Select a repository in this workspace",
+	"这个仓库是只读的，不能提交或推送":              "This repository is read-only; commits and pushes are disabled",
+	"仓库名称或一级目录名不合法":                 "Invalid repository name or top-level directory name",
+	"仓库权限只能是只读或可写":                  "Repository access must be read-only or writable",
+	"仓库有未提交或未推送的改动，需要明确确认丢弃后才能卸下":   "The repository has uncommitted or unpushed changes. Confirm discarding them before detaching.",
+
 	"联网范围只能是 hosts 或 public": "scope must be hosts or public",
 	"所有公网授权不能同时指定主机":         "public scope requires empty hosts",
 	"按主机联网需要填写主机名单":          "hosts scope requires hosts",
