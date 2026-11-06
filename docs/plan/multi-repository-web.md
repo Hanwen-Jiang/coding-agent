@@ -120,3 +120,20 @@ async results: 17 passed in 33.50s. Log:
 contains browser logs `/tmp/goal-web-browser.log` and
 `/tmp/goal-personal-browser.log`. Full server/race result is appended after it
 finishes. Deployment and real Cloudflare route acceptance remain integration work.
+
+Final checks for the integration review commit `b280e65`:
+
+- Full `go test ./internal/server -count=1`: passed, 30.221s, Chromium explicitly
+  configured at `/usr/bin/chromium`.
+- `go test -race ./internal/server -run
+  'Test(PersonalSessionReferences|WorkspaceHTTPRecoveryPreserves|WorkspaceHTTPStale|WorkspaceHTTPBackground|WorkspaceHTTPConcurrent)'
+  -count=1`: passed, 1.336s.
+- Runtime `cc2e00fa`: full `internal/workspaceapi` passed (0.467s), full egress
+  `internal/proxy` passed (2.156s); these now include real listening HTTP tests,
+  rather than the earlier compile-only checks under socket restrictions.
+- Logs copied to `/root/proj/agent-projs/.goal-tools/web-final-evidence/`:
+  `server-full.log`, `server-race.log`, `multirepo-browser.log`,
+  `personal-browser.log`, `sandbox-workspace.log`, `workspace-api.log`, `egress.log`.
+- The dedicated test container was removed after log export. Browser profiles and
+  Sandbox Service test environments use suite cleanup. No paid model calls were
+  made; model evaluation cost for this review is USD 0.
