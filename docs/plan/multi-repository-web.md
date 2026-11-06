@@ -100,3 +100,23 @@ New real HTTP tests cover shared-session privacy, owner-only copies, async sessi
 recovery with explicit empty tool lists and long project IDs, stale poll recovery,
 and non-renewal of browser idle lifetime. These pass together with `go vet`; the
 browser and real Sandbox execution follow-up is recorded separately below.
+
+Real execution follow-up (2026-11-06 UTC): after host networking became available,
+`TestMultiRepositoryUIInBrowser` executed in Chromium 156.0.8078.79 in both Chinese
+and English, with 202 admissions and status polling asserted (2 cases, 5.34s,
+no skips). The new `TestPersonalConfigurationAndAccountSwitchInBrowser` executed
+the embedded application against actual coding-web handlers and persistent Store
+(2.00s, no skip): package save/read, immutable-version route with no-store,
+default skill subset, explicit empty selections, asynchronous session creation,
+reopening selections, account switch, private environment defaults and absence of
+another user's session references. The Runtime wire fixture uses protobuf's real
+camelCase serialization; it is not a claim of a live deployed Registry call.
+
+Runtime mount/archive acceptance was also executed with real Sandbox Service and
+the existing sandbox-agent binary: multi-repository lifecycle/security, corrupt
+ref and hidden branch detach guards, Git configuration isolation and retained
+async results: 17 passed in 33.50s. Log:
+`/tmp/goal-web-final-workspace-tests.log`. Separate container `goal-web-final`
+contains browser logs `/tmp/goal-web-browser.log` and
+`/tmp/goal-personal-browser.log`. Full server/race result is appended after it
+finishes. Deployment and real Cloudflare route acceptance remain integration work.
