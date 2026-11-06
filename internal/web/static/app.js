@@ -462,7 +462,19 @@ async function api(method, path, body) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(path, opts);
+  const workspace = workspaceMutation(method, path);
+  if (workspace) {
+    opts.headers["X-Coding-Async"] = "1";
+    opts.headers["Idempotency-Key"] = crypto.randomUUID();
+  }
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await fetch(path, workspace ? { ...opts, signal: AbortSignal.timeout(20000) } : opts);
+      if (!workspace || ![502, 503, 504, 524].includes(res.status) || attempt >= 2) break;
+    } catch (ex) { if (!workspace || attempt >= 2) throw ex; }
+    await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+  }
   if (res.status === 401 && path !== "/api/me") {
     state.me = null;
     renderLogin(t("api.expired"));
@@ -471,8 +483,66 @@ async function api(method, path, body) {
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (res.status === 202 && data && data.status_url) return pollWorkspaceOperation(data.status_url);
   if (!res.ok) { const ex = new Error((data && data.error) || t("api.failed", { status: res.status })); ex.code = data && data.code; throw ex; }
   return data;
+}
+
+// Polling survives connection loss; reload discovers pending server journals.
+function workspaceMutation(method, path) {
+  if (!["POST", "DELETE"].includes(method)) return false;
+  path = path.split("?")[0];
+  return /^\/api\/projects(?:\/[^/]+)?$/.test(path) ||
+    /^\/api\/projects\/[^/]+\/(?:repos(?:\/[^/]+\/detach)?|sessions(?:\/[^/]+(?:\/(?:duplicate|repos(?:\/[^/]+\/detach)?|commit|discard|publish|reset-branch|sync))?)?)$/.test(path);
+}
+
+const workspacePolls = new Map();
+function workspaceSeen(path, remember = false) {
+  const key = "coding-workspace-results";
+  try {
+    const seen = JSON.parse(sessionStorage.getItem(key) || "[]");
+    if (remember && !seen.includes(path)) sessionStorage.setItem(key, JSON.stringify([...seen.slice(-99), path]));
+    return seen.includes(path);
+  } catch { return false; }
+}
+function pollWorkspaceOperation(path) {
+  if (workspacePolls.has(path)) return workspacePolls.get(path);
+  const task = (async () => {
+    for (;;) {
+      let res, data;
+      try {
+        res = await fetch(path, { credentials: "same-origin", headers: { "X-Coding-Web": "1" }, signal: AbortSignal.timeout(20000) });
+        data = await res.json();
+      } catch { await new Promise(resolve => setTimeout(resolve, 1000)); continue; }
+      if (res.status === 401) {
+        state.me = null; renderLogin(t("api.expired")); throw new Error("unauthorized");
+      }
+      if (res.status >= 500) { await new Promise(resolve => setTimeout(resolve, 1000)); continue; }
+      if (!res.ok) throw new Error(data.error || t("api.failed", { status: res.status }));
+      if (data.status === "COMPLETED") { workspaceSeen(path, true); return data.result; }
+      if (data.status === "FAILED") {
+        workspaceSeen(path, true);
+        const ex = new Error(data.result?.error || t("api.failed", { status: data.http_status }));
+        ex.code = data.result?.code; throw ex;
+      }
+      if (data.status !== "RUNNING") throw new Error(t("api.failed", { status: data.status }));
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  })().finally(() => workspacePolls.delete(path));
+  workspacePolls.set(path, task);
+  return task;
+}
+
+async function resumeWorkspaceOperations() {
+  const pending = await api("GET", "/api/workspace-operations");
+  for (const operation of pending || []) {
+    if (workspacePolls.has(operation.status_url) || workspaceSeen(operation.status_url)) continue;
+    pollWorkspaceOperation(operation.status_url).then(async () => {
+      [state.projects, state.sessions] = await Promise.all([api("GET", "/api/projects"), api("GET", "/api/sessions")]);
+      toast(t("workspace.operationRecovered"));
+      await route();
+    }).catch(report);
+  }
 }
 
 function report(ex) {
@@ -1133,6 +1203,7 @@ async function enterApp() {
   loadActive();
   loadEnvironments();
   await route();
+  resumeWorkspaceOperations().catch(report);
 }
 
 function findProject(id) {

@@ -117,7 +117,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request, id 
 			return
 		}
 	}
-	p := Project{Layout: req.Layout, ID: newProjectID(req.Name), Name: req.Name, Source: "empty", CreatedAt: time.Now().UTC(), CreatedBy: id.UserID}
+	p := Project{Layout: req.Layout, ID: workspaceResourceID(r.Context(), "project", newProjectID(req.Name)), Name: req.Name, Source: "empty", CreatedAt: workspaceCreated(r.Context()), CreatedBy: id.UserID}
 	spec := CreateSpec{}
 	spec.AuthorName, spec.AuthorEmail = author(id)
 	switch {
@@ -173,7 +173,14 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	p.BaseBranch = info.Branch
-	if err := s.store.UpdateProjects(id.TenantID, func(ps []Project) ([]Project, error) { return append(ps, p), nil }); err != nil {
+	if err := s.store.UpdateProjects(id.TenantID, func(ps []Project) ([]Project, error) {
+		for _, existing := range ps {
+			if existing.ID == p.ID {
+				return ps, nil
+			}
+		}
+		return append(ps, p), nil
+	}); err != nil {
 		_ = s.ws.Delete(ctx, id, p.ID)
 		writeErr(w, r, http.StatusInternalServerError, err)
 		return
@@ -187,7 +194,14 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request, id 
 	if !ok {
 		return
 	}
-	sessions, err := s.projectSessions(id.TenantID, p.ID)
+	var sessions []Session
+	var err error
+	if !workspaceFact(r.Context(), "delete_sessions", &sessions) {
+		sessions, err = s.projectSessions(id.TenantID, p.ID)
+		if err == nil {
+			saveWorkspaceFact(r.Context(), "delete_sessions", sessions)
+		}
+	}
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, err)
 		return

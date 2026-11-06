@@ -118,6 +118,7 @@ const ZH = {
   "code.lang": "代码",
   "api.expired": "登录已过期，请重新登录",
   "api.failed": "请求失败（{status}）",
+  "workspace.operationRecovered": "工作区操作已恢复并完成",
 
   "account.title": "账号与平台",
   "account.who": "租户 {tenant} · 用户 {user}",
@@ -936,6 +937,7 @@ const EN = {
   "code.lang": "code",
   "api.expired": "Your session has expired. Please sign in again.",
   "api.failed": "Request failed ({status})",
+  "workspace.operationRecovered": "Workspace operation recovered and completed",
 
   "account.title": "Account & platforms",
   "account.who": "Tenant {tenant} · User {user}",

@@ -102,6 +102,7 @@ type Server struct {
 	api       *TaskAPI
 	git       Git
 	ws        Workspaces
+	wsJobs    sync.Map // in-process runners for persisted HTTP workspace operations
 	wsLocks   sync.Map // 工作区 id → *sync.Mutex（workspaceLock）
 	providers map[string]*Provider
 	allowed   map[string]bool
@@ -221,6 +222,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
 	mux.HandleFunc("POST /api/sessions/revoke-all", s.authed(s.handleRevokeAll))
 	mux.HandleFunc("GET /api/me", s.authed(s.handleMe))
+	mux.HandleFunc("GET /api/workspace-operations", s.authed(s.handleWorkspaceHTTPList))
+	mux.HandleFunc("GET /api/workspace-operations/{operation}", s.authed(s.handleWorkspaceHTTPStatus))
 	mux.HandleFunc("GET /api/network-policy", s.authed(s.handleNetworkPolicy))
 	// 第三方登录与账号关联（accounts.go）。
 	mux.HandleFunc("GET /api/auth/{provider}/login", s.handleOAuthLogin)
@@ -253,11 +256,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/mcp/{id}", s.authed(s.handleDeleteMcp))
 
 	mux.HandleFunc("GET /api/projects/{project}/repos", s.authed(s.handleWorkspaceRepos))
-	mux.HandleFunc("POST /api/projects/{project}/repos", s.authed(s.handleAttachRepo))
-	mux.HandleFunc("POST /api/projects/{project}/repos/{repo}/detach", s.authed(s.handleDetachRepo))
+	mux.HandleFunc("POST /api/projects/{project}/repos", s.authed(s.workspaceHTTP("attach")))
+	mux.HandleFunc("POST /api/projects/{project}/repos/{repo}/detach", s.authed(s.workspaceHTTP("detach")))
 	mux.HandleFunc("GET /api/projects/{project}/sessions/{session}/repos", s.authed(s.handleWorkspaceRepos))
-	mux.HandleFunc("POST /api/projects/{project}/sessions/{session}/repos", s.authed(s.handleAttachRepo))
-	mux.HandleFunc("POST /api/projects/{project}/sessions/{session}/repos/{repo}/detach", s.authed(s.handleDetachRepo))
+	mux.HandleFunc("POST /api/projects/{project}/sessions/{session}/repos", s.authed(s.workspaceHTTP("attach")))
+	mux.HandleFunc("POST /api/projects/{project}/sessions/{session}/repos/{repo}/detach", s.authed(s.workspaceHTTP("detach")))
 	mux.HandleFunc("GET /api/samples", s.authed(s.handleSamples))
 	// 环境配置与项目解耦；这里仅保存普通配置，不报告 Runtime 生命周期状态。
 	mux.HandleFunc("GET /api/environments", s.authed(s.handleListEnvironments))
@@ -268,26 +271,26 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/environments/{environment}", s.authed(s.handleDeleteEnvironment))
 	// 工作区（项目）：基线仓库。
 	mux.HandleFunc("GET /api/projects", s.authed(s.handleListProjects))
-	mux.HandleFunc("POST /api/projects", s.authed(s.handleCreateProject))
-	mux.HandleFunc("DELETE /api/projects/{project}", s.authed(s.handleDeleteProject))
+	mux.HandleFunc("POST /api/projects", s.authed(s.workspaceHTTP("create_project")))
+	mux.HandleFunc("DELETE /api/projects/{project}", s.authed(s.workspaceHTTP("delete_project")))
 	// 会话：一段对话加一份工作副本；文件、改动、提交、推送与任务都按会话。
 	mux.HandleFunc("GET /api/sessions", s.authed(s.handleListSessions))
-	mux.HandleFunc("POST /api/projects/{project}/sessions", s.authed(s.handleCreateSession))
+	mux.HandleFunc("POST /api/projects/{project}/sessions", s.authed(s.workspaceHTTP("create_session")))
 	const sess = "/api/projects/{project}/sessions/{session}"
-	mux.HandleFunc("DELETE "+sess, s.authed(s.handleDeleteSession))
+	mux.HandleFunc("DELETE "+sess, s.authed(s.workspaceHTTP("delete_session")))
 	mux.HandleFunc("POST "+sess+"/rename", s.authed(s.handleRenameSession))
-	mux.HandleFunc("POST "+sess+"/duplicate", s.authed(s.handleDuplicateSession))
+	mux.HandleFunc("POST "+sess+"/duplicate", s.authed(s.workspaceHTTP("duplicate_session")))
 	mux.HandleFunc("GET "+sess+"/env", s.authed(s.handleEnv))
 	mux.HandleFunc("GET "+sess+"/tree", s.authed(s.handleTree))
 	mux.HandleFunc("GET "+sess+"/file", s.authed(s.handleFile))
 	mux.HandleFunc("GET "+sess+"/log", s.authed(s.handleLog))
 	mux.HandleFunc("GET "+sess+"/changes", s.authed(s.handleChanges))
 	mux.HandleFunc("GET "+sess+"/patch", s.authed(s.handlePatch))
-	mux.HandleFunc("POST "+sess+"/commit", s.authed(s.handleCommit))
-	mux.HandleFunc("POST "+sess+"/discard", s.authed(s.handleDiscard))
-	mux.HandleFunc("POST "+sess+"/publish", s.authed(s.handlePublish))
-	mux.HandleFunc("POST "+sess+"/reset-branch", s.authed(s.handleResetBranch))
-	mux.HandleFunc("POST "+sess+"/sync", s.authed(s.handleSync))
+	mux.HandleFunc("POST "+sess+"/commit", s.authed(s.workspaceHTTP("commit")))
+	mux.HandleFunc("POST "+sess+"/discard", s.authed(s.workspaceHTTP("discard")))
+	mux.HandleFunc("POST "+sess+"/publish", s.authed(s.workspaceHTTP("publish")))
+	mux.HandleFunc("POST "+sess+"/reset-branch", s.authed(s.workspaceHTTP("reset")))
+	mux.HandleFunc("POST "+sess+"/sync", s.authed(s.workspaceHTTP("sync")))
 	mux.HandleFunc("GET "+sess+"/tasks", s.authed(s.handleListTasks))
 	mux.HandleFunc("POST "+sess+"/tasks", s.authed(s.handleSubmitTask))
 	mux.HandleFunc("GET "+sess+"/tasks/{task}", s.authed(s.handleQueryTask))
@@ -641,6 +644,10 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 // project 取出请求路径里的项目，确认它属于这个租户。
 func (s *Server) project(w http.ResponseWriter, r *http.Request, id identity) (Project, bool) {
 	pid := r.PathValue("project")
+	var saved Project
+	if workspaceFact(r.Context(), "project:"+pid, &saved) {
+		return saved, true
+	}
 	if !slug.MatchString(pid) {
 		writeMsg(w, r, http.StatusNotFound, "项目不存在")
 		return Project{}, false
@@ -654,9 +661,13 @@ func (s *Server) project(w http.ResponseWriter, r *http.Request, id identity) (P
 		writeMsg(w, r, http.StatusNotFound, "项目不存在")
 		return Project{}, false
 	}
+	saveWorkspaceFact(r.Context(), "project:"+pid, p)
 	return p, true
 }
 
 func ctxTimeout(r *http.Request, d time.Duration) (context.Context, context.CancelFunc) {
+	if workspaceJournal(r.Context()) != nil && d >= 2*time.Minute {
+		return context.WithCancel(r.Context())
+	}
 	return context.WithTimeout(r.Context(), d)
 }

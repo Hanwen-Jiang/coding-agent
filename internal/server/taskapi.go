@@ -27,6 +27,23 @@ func NewTaskAPI(base string) *TaskAPI {
 
 // CallWorkspace 调 task-service 上的 Workspace API（同一个端口：POST /agentruntime.workspace.v1.WorkspaceService/<方法>）。
 func (a *TaskAPI) CallWorkspace(ctx context.Context, token, method string, req, resp any) error {
+	if j := workspaceJournal(ctx); j != nil && (method == "GetDiff" || method == "GetLog") {
+		raw, err := json.Marshal(req)
+		if err != nil {
+			return err
+		}
+		key := "read:" + workspaceHash(method, string(raw))
+		if j.get(key, resp) {
+			return nil
+		}
+		if err := a.call(ctx, a.slow, "/agentruntime.workspace.v1.WorkspaceService/"+method, token, req, resp); err != nil {
+			return err
+		}
+		if err := j.put(key, resp); err != nil {
+			panic(workspaceHTTPAbort{err})
+		}
+		return nil
+	}
 	return a.call(ctx, a.slow, "/agentruntime.workspace.v1.WorkspaceService/"+method, token, req, resp)
 }
 
@@ -84,6 +101,9 @@ func (a *TaskAPI) Call(ctx context.Context, token, method string, req, resp any)
 }
 
 func (a *TaskAPI) call(ctx context.Context, client *http.Client, path, token string, req, resp any) error {
+	if j := workspaceJournal(ctx); j != nil {
+		token = j.runtimeToken()
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return err
@@ -101,6 +121,9 @@ func (a *TaskAPI) call(ctx context.Context, client *http.Client, path, token str
 	}
 	defer res.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(res.Body, 8<<20))
+	if res.StatusCode == http.StatusUnauthorized && workspaceJournal(ctx) != nil {
+		panic(workspaceHTTPAbort{fmt.Errorf("authentication required")})
+	}
 	if res.StatusCode != http.StatusOK {
 		return parseAPIError(res.StatusCode, data)
 	}

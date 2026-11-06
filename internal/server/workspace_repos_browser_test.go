@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -24,6 +25,7 @@ func TestMultiRepositoryUIInBrowser(t *testing.T) {
 			fake := &multiWorkspaceFake{repos: make(map[string][]WorkspaceRepo)}
 			fake.files = []DiffStat{{Path: "notes.txt", Added: 1}}
 			app.ws = fake
+			app.cfg.Workspaces = "runtime" // exercise 202 + browser polling through the real wrapper
 			c := newClient(t, ts.URL)
 			c.do("POST", "/api/login", map[string]string{"tenant": "acme", "user": "alice"})
 			_, p, _ := c.do("POST", "/api/projects", map[string]string{"name": "multi", "layout": layoutMulti})
@@ -34,7 +36,14 @@ func TestMultiRepositoryUIInBrowser(t *testing.T) {
 			probe := "const C = " + string(args) + ";\n" + multiRepositoryUIProbe
 			result := make(chan string, 1)
 			handler := app.Handler()
+			var admissions, polls atomic.Int64
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("X-Coding-Async") == "1" {
+					admissions.Add(1)
+				}
+				if strings.HasPrefix(r.URL.Path, "/api/workspace-operations/who-") {
+					polls.Add(1)
+				}
 				switch r.URL.Path {
 				case "/__probe.js":
 					w.Header().Set("Content-Type", "text/javascript")
@@ -89,6 +98,9 @@ func TestMultiRepositoryUIInBrowser(t *testing.T) {
 			}
 			if fake.commits != 1 || fake.selected != "app" {
 				t.Fatalf("selected write repository: commits=%d repo=%q", fake.commits, fake.selected)
+			}
+			if admissions.Load() < 6 || polls.Load() < 6 {
+				t.Fatalf("browser bypassed async operations: admissions=%d polls=%d", admissions.Load(), polls.Load())
 			}
 			if len(fake.repos[pid]) != 0 {
 				t.Fatal("session detach affected baseline")

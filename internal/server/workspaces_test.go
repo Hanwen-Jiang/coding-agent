@@ -79,13 +79,18 @@ func (f *fakeWorkspaceAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	operationID := ""
 	if method == "GetWorkspaceOperation" {
 		f.mu.Lock()
-		out := f.operations[body["operationId"].(string)]
+		out, found := f.operations[body["operationId"].(string)]
 		f.mu.Unlock()
+		if !found {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"code":"not_found"}`)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "WORKSPACE_OPERATION_STATUS_COMPLETED", "result": out})
 		return
 	}
 	if method == "StartWorkspaceOperation" {
-		operationID = body["requestId"].(string)
+		operationID = "wso-" + workspaceHash(who.TenantID, who.UserID, body["requestId"].(string))
 		for key, rpc := range map[string]string{"create": "CreateWorkspace", "delete": "DeleteWorkspace", "commit": "CommitWorkspace", "push": "PushWorkspace", "sync": "SyncWorkspace", "discard": "DiscardChanges"} {
 			if inner, ok := body[key].(map[string]any); ok {
 				method, body = rpc, inner

@@ -81,6 +81,10 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, id identity) (P
 		return Project{}, Session{}, false
 	}
 	sid := r.PathValue("session")
+	var saved Session
+	if workspaceFact(r.Context(), "session:"+p.ID+":"+sid, &saved) {
+		return p, saved, true
+	}
 	sessions, err := s.ensureSessions(id.TenantID)
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, err)
@@ -91,6 +95,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, id identity) (P
 		writeMsg(w, r, http.StatusNotFound, "会话不存在")
 		return Project{}, Session{}, false
 	}
+	saveWorkspaceFact(r.Context(), "session:"+p.ID+":"+sid, sessions[i])
 	return p, sessions[i], true
 }
 
@@ -184,8 +189,8 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 // 在远端的最新提交（拉不到时照用复制来的）。给了 from 时改从那个会话的工作副本复制（复制会话：连同未提交的改动，不拉取），
 // 基线提交沿用它的。选了环境配置时记在会话上，再经接缝交给 Runtime（envhandoff.go）。
 func (s *Server) createSession(r *http.Request, id identity, p Project, title string, env *Environment, from *Session) (Session, error) {
-	now := time.Now().UTC()
-	sess := Session{ID: newSessionID(), ProjectID: p.ID, Title: title, CreatedAt: now, CreatedBy: id.UserID, UpdatedAt: now}
+	now := workspaceCreated(r.Context())
+	sess := Session{ID: workspaceResourceID(r.Context(), "session", newSessionID()), ProjectID: p.ID, Title: title, CreatedAt: now, CreatedBy: id.UserID, UpdatedAt: now}
 	sess.WorkspaceID = p.ID + "--" + sess.ID
 	ctx, cancel := ctxTimeout(r, 10*time.Minute)
 	defer cancel()
@@ -245,7 +250,14 @@ func (s *Server) createSession(r *http.Request, id identity, p Project, title st
 			}
 		}
 	}
-	if err := s.store.UpdateSessions(id.TenantID, func(all []Session) ([]Session, error) { return append(all, sess), nil }); err != nil {
+	if err := s.store.UpdateSessions(id.TenantID, func(all []Session) ([]Session, error) {
+		for _, existing := range all {
+			if existing.ProjectID == sess.ProjectID && existing.ID == sess.ID {
+				return all, nil
+			}
+		}
+		return append(all, sess), nil
+	}); err != nil {
 		_ = s.ws.Delete(ctx, id, sess.WorkspaceID)
 		_ = s.store.DeleteSession(id.TenantID, sess)
 		return Session{}, err

@@ -101,7 +101,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, id identi
 			writeMsg(w, r, http.StatusBadRequest, "没有可推送的改动")
 			return
 		}
-		branch = branchName(title)
+		branch = "agent/" + workspaceResourceID(r.Context(), "branch", strings.TrimPrefix(branchName(title), "agent/"))
 	} else if !dirty && changes.Head == sess.PushedHead {
 		writeMsg(w, r, http.StatusBadRequest, "没有可推送的改动")
 		return
