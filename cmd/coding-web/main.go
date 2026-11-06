@@ -156,6 +156,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("coding-web: %v", err)
 	}
+	// AUTH-01 第 4 步之前：还用旧密钥（开发签名密钥派生的）加密的平台令牌与环境配置的密钥，开始服务之前一次改用 CODING_TOKEN_KEY。
+	// 只记个数，不记任何值；没有旧密钥时什么也不做。
+	if r, err := srv.Reseal(); err != nil {
+		log.Fatalf("coding-web: 重新加密旧数据失败：%v", err)
+	} else if r.Accounts > 0 || r.Secrets > 0 || r.Unreadable > 0 {
+		log.Printf("coding-web: 旧数据重新加密：账号 %d 个（改写 %d 个），环境密钥 %d 个，哪把密钥都解不开的 %d 个", r.Accounts, r.AccountsResealed, r.Secrets, r.Unreadable)
+	}
 	if inbox != nil {
 		// 事件到动作（G-04）：处理函数在 Server 上，Server 建好之后再注册、再起后台循环。
 		for event, h := range srv.GitHubHandlers() {
