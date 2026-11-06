@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -21,16 +20,16 @@ func (n *taskNetworkRequest) validate() error {
 		n.Scope = "hosts"
 	}
 	if n.Scope != "hosts" && n.Scope != "public" {
-		return errors.New("scope must be hosts or public")
+		return msg("联网范围只能是 hosts 或 public")
 	}
 	if n.Scope == "public" && len(n.Hosts) > 0 {
-		return errors.New("public scope requires empty hosts")
+		return msg("所有公网授权不能同时指定主机")
 	}
 	if n.Scope == "hosts" && len(n.Hosts) == 0 {
-		return errors.New("hosts scope requires hosts")
+		return msg("按主机联网需要填写主机名单")
 	}
 	if n.Minutes != 15 && n.Minutes != 30 && n.Minutes != 60 {
-		return errors.New("network duration must be 15, 30 or 60 minutes")
+		return msg("联网授权时长只能是 15、30、60 分钟")
 	}
 	return nil
 }
@@ -55,12 +54,12 @@ func (s *Server) handleNetworkPolicy(w http.ResponseWriter, r *http.Request, id 
 	req.Header.Set("Authorization", "Bearer "+id.token)
 	resp, err := s.api.client.Do(req)
 	if err != nil {
-		writeErr(w, r, http.StatusBadGateway, errors.New("network policy unavailable"))
+		writeErr(w, r, http.StatusBadGateway, msg("暂时无法读取联网策略"))
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		writeMsg(w, r, resp.StatusCode, "network policy unavailable")
+		writeMsg(w, r, resp.StatusCode, "暂时无法读取联网策略")
 		return
 	}
 	var policy struct {
@@ -71,7 +70,7 @@ func (s *Server) handleNetworkPolicy(w http.ResponseWriter, r *http.Request, id 
 		Approver   string   `json:"approver"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&policy) != nil {
-		writeMsg(w, r, http.StatusBadGateway, "network policy unavailable")
+		writeMsg(w, r, http.StatusBadGateway, "暂时无法读取联网策略")
 		return
 	}
 	writeJSON(w, http.StatusOK, policy)

@@ -6,6 +6,19 @@
 const plural = (n, one, many) => (Number(n) === 1 ? one : many);
 
 const ZH = {
+  "network.public": "所有公网",
+  "network.hosts": "指定主机",
+  "network.off": "不联网",
+  "network.next": "本次任务的联网授权",
+  "network.title": "本次任务联网",
+  "network.disabled": "租户策略未允许联网。",
+  "network.duration": "授权时长",
+  "network.minutes": "{minutes} 分钟",
+  "network.reason": "提交本次任务时申请联网",
+  "network.hostInput": "主机名单",
+  "network.hostsLabel": "主机（逗号分隔）",
+  "network.publicHint": "内网、云元数据仍禁止访问",
+
   "common.loading": "正在读取…",
   "common.close": "关闭",
   "common.cancel": "取消",
@@ -772,6 +785,19 @@ const ZH = {
 };
 
 const EN = {
+  "network.public": "All public domains",
+  "network.hosts": "Selected hosts",
+  "network.off": "Network off",
+  "network.next": "Network access for the next task",
+  "network.title": "Network access for this task",
+  "network.disabled": "Network access is disabled by tenant policy.",
+  "network.duration": "Duration",
+  "network.minutes": "{minutes} minutes",
+  "network.reason": "Network access requested when submitting this task",
+  "network.hostInput": "Hosts",
+  "network.hostsLabel": "Hosts (comma separated)",
+  "network.publicHint": "Private networks and cloud metadata remain blocked",
+
   "common.loading": "Loading…",
   "common.close": "Close",
   "common.cancel": "Cancel",

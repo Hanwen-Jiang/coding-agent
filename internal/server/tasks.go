@@ -128,7 +128,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 	}
 	if req.Network != nil {
 		if err := req.Network.validate(); err != nil {
-			writeMsg(w, r, http.StatusBadRequest, err.Error())
+			writeErr(w, r, http.StatusBadRequest, err)
 			return
 		}
 		submit["networkRequest"] = req.Network.wire()

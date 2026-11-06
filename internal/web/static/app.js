@@ -3143,27 +3143,26 @@ function sandboxTool() {
 
 // A network choice authorizes this Task only; environments never grant access.
 function networkTool() {
-  const en = document.documentElement.lang === "en";
-  const label = state.networkRequest ? (state.networkRequest.scope === "public" ? (en ? "All public domains" : "所有公网") : (en ? "Selected hosts" : "指定主机")) : (en ? "Network off" : "不联网");
-  return h("button", { class: "tool", title: en ? "Network access for the next task" : "本次任务的联网授权", onclick: async (e) => {
+  const label = state.networkRequest ? (state.networkRequest.scope === "public" ? (t("network.public")) : (t("network.hosts"))) : (t("network.off"));
+  return h("button", { class: "tool", title: t("network.next"), onclick: async (e) => {
     const anchor = e.currentTarget;
     try {
       const policy = await api("GET", "/api/network-policy");
       openPop(anchor, (close) => {
         const choose = (request) => { state.networkRequest = request; state.networkRequestTenant = state.me?.tenant; close(); updateComposer(true); };
-        const out = [h("div", { class: "pop-title" }, en ? "Network access for this task" : "本次任务联网"),
-          popItem("lock", en ? "Off" : "不联网", "", !state.networkRequest, () => choose(null))];
-        if (!policy.allowed) { out.push(h("p", { class: "muted" }, en ? "Network access is disabled by tenant policy." : "租户策略未允许联网。")); return out; }
+        const out = [h("div", { class: "pop-title" }, t("network.title")),
+          popItem("lock", t("network.off"), "", !state.networkRequest, () => choose(null))];
+        if (!policy.allowed) { out.push(h("p", { class: "muted" }, t("network.disabled"))); return out; }
         const modes = policy.modes || ["deny", "allowlist"];
-        const duration = h("select", { "aria-label": en ? "Duration" : "授权时长" }, ...[15, 30, 60].filter((m) => m <= policy.max_grant_minutes).map((m) => h("option", { value: m }, `${m} ${en ? "minutes" : "分钟"}`)));
-        out.push(h("label", { class: "lbl" }, en ? "Duration" : "授权时长", duration));
-        const request = (scope, hosts) => ({ scope, hosts, minutes: Number(duration.value), reason: en ? "Network access requested when submitting this task" : "提交本次任务时申请联网" });
+        const duration = h("select", { "aria-label": t("network.duration") }, ...[15, 30, 60].filter((m) => m <= policy.max_grant_minutes).map((m) => h("option", { value: m }, t("network.minutes", { minutes: m }))));
+        out.push(h("label", { class: "lbl" }, t("network.duration"), duration));
+        const request = (scope, hosts) => ({ scope, hosts, minutes: Number(duration.value), reason: t("network.reason") });
         if (modes.includes("allowlist")) {
-          const hosts = h("input", { type: "text", value: (policy.hosts || []).join(", "), "aria-label": en ? "Hosts" : "主机名单", placeholder: "api.example.com" });
-          out.push(h("label", { class: "lbl" }, en ? "Hosts (comma separated)" : "主机（逗号分隔）", hosts),
-            popItem("globe", en ? "Selected hosts" : "指定主机", "", state.networkRequest?.scope === "hosts", () => choose(request("hosts", hosts.value.split(/[,，\s]+/).filter(Boolean)))));
+          const hosts = h("input", { type: "text", value: (policy.hosts || []).join(", "), "aria-label": t("network.hostInput"), placeholder: "api.example.com" });
+          out.push(h("label", { class: "lbl" }, t("network.hostsLabel"), hosts),
+            popItem("globe", t("network.hosts"), "", state.networkRequest?.scope === "hosts", () => choose(request("hosts", hosts.value.split(/[,，\s]+/).filter(Boolean)))));
         }
-        if (modes.includes("open")) out.push(popItem("globe", en ? "All public domains" : "所有公网", en ? "Private networks and cloud metadata remain blocked" : "内网、云元数据仍禁止访问", state.networkRequest?.scope === "public", () => choose(request("public", []))));
+        if (modes.includes("open")) out.push(popItem("globe", t("network.public"), t("network.publicHint"), state.networkRequest?.scope === "public", () => choose(request("public", []))));
         return out;
       });
     } catch (ex) { toast(ex.message, true); }

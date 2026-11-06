@@ -4,6 +4,12 @@ package server
 // TestEveryMessageHasEnglish 按源码核对每一句都有、参数个数对得上、这里没有用不到的。
 // 用词与网页一致：“项目”在界面上叫 workspace。
 var english = map[string]string{
+	"联网范围只能是 hosts 或 public": "scope must be hosts or public",
+	"所有公网授权不能同时指定主机":         "public scope requires empty hosts",
+	"按主机联网需要填写主机名单":          "hosts scope requires hosts",
+	"联网授权时长只能是 15、30、60 分钟":  "network duration must be 15, 30 or 60 minutes",
+	"暂时无法读取联网策略":             "network policy unavailable",
+
 	// 登录与请求
 	"请先登录":                         "Please sign in first",
 	"登录已过期，请重新登录":                  "Your session has expired. Please sign in again.",
