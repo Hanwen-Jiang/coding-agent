@@ -4,6 +4,11 @@ package server
 // TestEveryMessageHasEnglish 按源码核对每一句都有、参数个数对得上、这里没有用不到的。
 // 用词与网页一致：“项目”在界面上叫 workspace。
 var english = map[string]string{
+	"个人配置格式不合法":                     "Invalid personal configuration",
+	"个人配置已更新，请重新读取后保存":              "Personal configuration changed. Reload it before saving.",
+	"个人配置引用的工具当前不可用，请重新选择":          "A referenced tool is unavailable. Update your selection.",
+	"个人配置文件写入失败，任务尚未执行":             "Personal configuration files could not be installed. The task has not executed.",
+	"个人配置文件包含密钥或不允许的路径":             "Personal configuration contains a secret or a disallowed path.",
 	"工作区布局不合法":                      "Invalid workspace layout",
 	"多仓工作区先建空容器，再逐个挂仓库":             "Create an empty multi-repository workspace, then attach repositories individually",
 	"多仓工作区需要 Runtime Workspace API": "Multi-repository workspaces require the Runtime Workspace API",

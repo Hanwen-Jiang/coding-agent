@@ -5,6 +5,14 @@ package server
 // Runtime 的说明里带着 git 的输出，中文界面原样给更有用。
 func runtimeMsg(reason string) *Msg {
 	switch reason {
+	case "personal_config_version_conflict":
+		return msg("个人配置已更新，请重新读取后保存")
+	case "personal_skill_unavailable", "personal_mcp_unavailable":
+		return msg("个人配置引用的工具当前不可用，请重新选择")
+	case "personal_config_preflight_failed", "personal_config_write_failed":
+		return msg("个人配置文件写入失败，任务尚未执行")
+	case "secret_in_config", "invalid_config_path", "executable_config", "executable_or_secret_config":
+		return msg("个人配置文件包含密钥或不允许的路径")
 	case "task_finished":
 		return msg("任务已经结束，可以作为新任务发送")
 	case "task_not_started":

@@ -238,6 +238,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/secrets/{name}", s.authed(s.handleDeleteSecret))
 	// 我的 Skill（WEB-SKILLS，Runtime 的 N-14）：转调 Runtime 的 SkillService；Runtime 没有它时列表回 available false。
 	mux.HandleFunc("GET /api/skills", s.authed(s.handleListSkills))
+	mux.HandleFunc("GET /api/personal-config", s.authed(s.handleGetPersonalConfig))
+	mux.HandleFunc("PUT /api/personal-config", s.authed(s.handlePutPersonalConfig))
+	mux.HandleFunc("DELETE /api/personal-config", s.authed(s.handleRetirePersonalConfig))
 	mux.HandleFunc("GET /api/skills/{name}", s.authed(s.handleGetSkill))
 	mux.HandleFunc("PUT /api/skills/{name}", s.authed(s.handlePutSkill))
 	mux.HandleFunc("DELETE /api/skills/{name}", s.authed(s.handleRetireSkill))

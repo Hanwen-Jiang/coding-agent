@@ -1059,3 +1059,9 @@ dialog[open]::backdrop { animation: fade 0.18s ease-out; }
 .osb.y.hot .osb-thumb::before, .osb.y.drag .osb-thumb::before { width: 8px; }
 .osb.x.hot .osb-thumb::before, .osb.x.drag .osb-thumb::before { height: 8px; }
 .osb-dragging, .osb-dragging * { user-select: none !important; cursor: default !important; }
+dialog.personal-config { width: min(680px, calc(100vw - 32px)); }
+.personal-config .d-body { display: grid; gap: 14px; max-height: 72vh; overflow: auto; }
+.personal-config textarea, .personal-config input:not([type=checkbox]), .personal-config select { width: 100%; box-sizing: border-box; }
+.personal-config fieldset { min-width: 0; border: 1px solid var(--line, #ddd); border-radius: 8px; padding: 12px; }
+.personal-config .personal-file { display: grid; gap: 8px; margin: 12px 0; }
+.personal-config .personal-version { overflow-wrap: anywhere; }

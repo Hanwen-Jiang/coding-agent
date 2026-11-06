@@ -54,6 +54,8 @@ function setting(key, allowed, fallback) {
 const state = {
   config: { dev_login: false, github_login: false, sandbox_control: false },
   me: null,
+  personalConfig: null,
+  personalChoices: new Map(),
   projects: [], // 工作区
   sessions: [], // 全部会话，最近活动的在前
   samples: [],
@@ -579,6 +581,7 @@ async function openAccount() {
     : null;
   // 我的 Skill（WEB-SKILLS）：总有入口；部署没有 Skill 时对话框里写明。
   const skills = h("div", { class: "skills-entry" }, h("button", { class: "btn sm skills-open", onclick: () => openSkills() }, t("skills.open")));
+  const personal = h("div", {}, h("button", { class: "btn sm personal-open", onclick: () => openPersonalConfig() }, t("personal.title")));
   // 我的 MCP（Runtime 的 N-15）：总有入口；部署没有或账号的策略不允许时对话框里写明。
   const mcp = h("div", { class: "mcp-entry" }, h("button", { class: "btn sm mcp-open", onclick: () => openMcp() }, t("mcp.open")));
   const draw = (acct) => {
@@ -595,13 +598,96 @@ async function openAccount() {
         c ? h("button", { class: "btn sm", onclick: () => disconnect(p, draw) }, t("account.disconnect"))
           : p.configured ? h("a", { class: "btn sm primary", href: `/api/auth/${p.id}/login?link=1` }, t("account.connect")) : null);
     });
-    body.replaceChildren(...[h("div", { class: "conn-list" }, rows), github, secrets, skills, mcp].filter(Boolean));
+    body.replaceChildren(...[h("div", { class: "conn-list" }, rows), github, secrets, skills, mcp, personal].filter(Boolean));
   };
   dialog.addEventListener("close", () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();
   try { draw(await api("GET", "/api/account")); } catch (ex) { report(ex); }
   if (github) drawGitHubApp(github);
+}
+
+function personalChoiceKey() {
+  return `${state.me?.tenant}/${state.me?.user}/${state.project?.id}/${state.session?.id || "new"}`;
+}
+
+function personalSelection() {
+  return state.personalChoices.get(personalChoiceKey()) || state.session?.personal_config || undefined;
+}
+
+function personalTool() {
+  return h("button", { class: "tool personal-tools", onclick: () => openPersonalConfig(true), title: t("personal.tools") }, icon("box", "sm"), t("personal.tools"));
+}
+
+async function openPersonalConfig(sessionOnly = false) {
+  if (document.querySelector("dialog.personal-config")) return;
+  const choiceKey = personalChoiceKey();
+  const body = h("div", { class: "d-body" }, t("common.loading"));
+  const dialog = h("dialog", { class: "personal-config" },
+    h("div", { class: "d-head" }, h("h2", {}, t(sessionOnly ? "personal.tools" : "personal.title"))), body,
+    h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))));
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog); dialog.showModal();
+  try {
+    const [response, skills, mcp, environments] = await Promise.all([
+      api("GET", "/api/personal-config"), api("GET", "/api/skills"), api("GET", "/api/mcp"), api("GET", "/api/environments"),
+    ]);
+    if (response.available === false) { body.replaceChildren(h("p", {}, t("personal.unavailable"))); return; }
+    let config = response.config || {};
+    const doc = config.document || {}, defaults = doc.defaults || {};
+    const chosen = sessionOnly ? personalSelection() : null;
+    const instructions = h("textarea", { class: "personal-instructions", rows: 5, value: doc.instructions || "", "aria-label": t("personal.instructions") });
+    const fileList = h("div", { class: "personal-files" });
+    const fileRows = [];
+    const addFile = (file = {}) => {
+      if (fileRows.length >= 10) return;
+      const path = h("input", { class: "personal-path", value: file.path || "", placeholder: ".config/ruff.toml", "aria-label": t("personal.path") });
+      const content = h("textarea", { class: "personal-content", value: file.content || "", rows: 3, "aria-label": t("personal.content") });
+      const item = { path, content };
+      const row = h("div", { class: "personal-file" }, path, content, h("button", { class: "btn sm", onclick: () => { fileRows.splice(fileRows.indexOf(item), 1); row.remove(); } }, t("personal.remove")));
+      fileRows.push(item); fileList.append(row);
+    };
+    (doc.files || []).forEach(addFile);
+    const choices = (items, selected, key, label) => {
+      const present = new Set(items.map((x) => x.id));
+      for (const id of selected || []) if (!present.has(id)) items.push({ id, name: `${id} · ${t("personal.missing")}` });
+      const checked = new Set(selected || items.map((x) => x.id));
+      const inputs = items.map((item) => ({ id: item.id, name: item.name, input: h("input", { type: "checkbox", checked: checked.has(item.id), "data-reference": item.id }) }));
+      return { el: h("fieldset", { class: key }, h("legend", {}, label), inputs.length ? inputs.map((x) => h("label", { class: "row" }, x.input, x.name)) : h("p", { class: "muted" }, t("personal.empty"))), values: () => inputs.filter((x) => x.input.checked).map((x) => x.id) };
+    };
+    const skillDefault = defaults.skillNames?.length ? defaults.skillNames : undefined;
+    const mcpDefault = defaults.mcpConnectionIds?.length ? defaults.mcpConnectionIds : undefined;
+    const skillChoices = choices((skills.skills || []).filter((x) => !x.shadowed).map((x) => ({ id: x.name, name: `${x.name} · ${x.description || ""}` })), chosen?.skill_names ?? (sessionOnly ? skillDefault : defaults.skillNames || []), "personal-skills", t("skills.open"));
+    const mcpChoices = choices((mcp.connections || []).filter((x) => x.tools?.some((tool) => tool.enabled)).map((x) => ({ id: x.connection_id, name: x.name })), chosen?.mcp_connection_ids ?? (sessionOnly ? mcpDefault : defaults.mcpConnectionIds || []), "personal-mcp", t("mcp.open"));
+    const environment = h("select", { class: "personal-environment", "aria-label": t("personal.environment") }, h("option", { value: "" }, t("personal.noEnvironment")), ...environments.map((x) => h("option", { value: x.id }, x.name)));
+    if (defaults.environmentId && !environments.some((x) => x.id === defaults.environmentId)) environment.append(h("option", { value: defaults.environmentId }, `${defaults.environmentId} · ${t("personal.missing")}`));
+    environment.value = defaults.environmentId || "";
+    const save = h("button", { class: "btn primary personal-save", onclick: async () => {
+      save.disabled = true;
+      try {
+        if (sessionOnly) {
+          state.personalChoices.set(choiceKey, { skill_names: skillChoices.values(), mcp_connection_ids: mcpChoices.values() });
+          dialog.close(); updateComposer(true); return;
+        }
+        const document = { instructions: instructions.value, files: fileRows.map((x) => ({ path: x.path.value, content: x.content.value })), defaults: { skillNames: skillChoices.values(), mcpConnectionIds: mcpChoices.values(), environmentId: environment.value } };
+        const updated = await api("PUT", "/api/personal-config", { document, expected_version: config.version || "" });
+        config = updated.config; state.personalConfig = config;
+        if (!state.session) setDraftEnvironment(environment.value);
+        toast(t("personal.saved")); dialog.close();
+      } catch (ex) { report(ex); } finally { save.disabled = false; }
+    } }, t(sessionOnly ? "personal.use" : "skills.save"));
+    body.replaceChildren(h("p", { class: "muted" }, t(sessionOnly ? "personal.sessionNote" : "personal.note")),
+      ...(!sessionOnly ? [h("label", { class: "lbl" }, t("personal.instructions"), instructions), fileList,
+        h("button", { class: "btn sm personal-add", onclick: () => addFile() }, t("personal.add")),
+        h("p", { class: "muted" }, t("personal.defaultNote"))] : []),
+      skillChoices.el, mcpChoices.el,
+      ...(!sessionOnly ? [h("label", { class: "lbl" }, t("personal.environment"), environment),
+        h("p", { class: "muted small personal-version" }, config.version ? `${config.version} · ${config.digest}` : "")] : []), save,
+      ...(!sessionOnly && config.version ? [h("button", { class: "btn ghost personal-retire", onclick: async () => {
+        if (!confirm(t("personal.retireConfirm"))) return;
+        try { await api("DELETE", "/api/personal-config"); state.personalConfig = null; dialog.close(); } catch (ex) { report(ex); }
+      } }, t("personal.retire"))] : []));
+  } catch (ex) { body.replaceChildren(h("p", { class: "error" }, ex.message)); }
 }
 
 // openSecrets 是“网络密钥”（WEB-SEC，/api/secrets；值存在 Runtime 的 SecretStore 里）：只列名字与时间，值只进不出——
@@ -1038,6 +1124,11 @@ async function logout() {
 // ---------------------------------------------------------------- 主界面与路由
 
 async function enterApp() {
+  state.personalChoices.clear();
+  state.personalConfig = null;
+  try { state.personalConfig = (await api("GET", "/api/personal-config")).config || null; } catch { /* Older deployments have no personal packages. */ }
+  const personalEnv = state.personalConfig?.document?.defaults?.environmentId;
+  if (personalEnv && !ls.get("cw_environment")) state.draftEnvironment = personalEnv;
   [state.projects, state.samples, state.sessions] = await Promise.all([api("GET", "/api/projects"), api("GET", "/api/samples"), api("GET", "/api/sessions")]);
   loadActive();
   loadEnvironments();
@@ -3059,7 +3150,7 @@ function updateComposer(force = false) {
       ui.cOpts.className = "hidden";
       ui.cOpts.replaceChildren();
     }
-    ui.tools.replaceChildren(environmentTool(), sandboxTool(), networkTool(), modelTool(), meterTool(m), h("span", { class: "grow" }), h("div", { class: "c-hint" }, hint(ph)));
+    ui.tools.replaceChildren(environmentTool(), personalTool(), sandboxTool(), networkTool(), modelTool(), meterTool(m), h("span", { class: "grow" }), h("div", { class: "c-hint" }, hint(ph)));
     ui.next.replaceChildren(...nextSteps(ph));
   }
   refreshSend();
@@ -3253,7 +3344,7 @@ async function submit(text) {
   try {
     if (!state.session) {
       const p = state.project;
-      const sess = await api("POST", `/api/projects/${p.id}/sessions`, { title: message, environment_id: draftEnvironment() || undefined });
+      const sess = await api("POST", `/api/projects/${p.id}/sessions`, { title: message, environment_id: draftEnvironment() || undefined, personal_config: personalSelection() });
       state.sessions.unshift(sess);
       state.session = sess;
       state.pending = { ...state.pending, phase: "submit", session: sess.id };
@@ -3263,7 +3354,9 @@ async function submit(text) {
       loadEnv();
     }
     const base = sbase();
-    const t = await api("POST", `${base}/tasks`, { message, sandbox: state.settings.sandbox, model: state.settings.model, network_request: state.networkRequestTenant === state.me?.tenant ? state.networkRequest || undefined : undefined });
+    const selection = personalSelection();
+    const t = await api("POST", `${base}/tasks`, { message, sandbox: state.settings.sandbox, model: state.settings.model, personal_config: selection, network_request: state.networkRequestTenant === state.me?.tenant ? state.networkRequest || undefined : undefined });
+    if (selection) state.session.personal_config = selection;
     state.networkRequest = null;
     if (sbase() !== base) return;
     state.pending = null;

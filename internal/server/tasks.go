@@ -93,12 +93,21 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		return
 	}
 	var req struct {
-		Message string              `json:"message"`
-		Sandbox string              `json:"sandbox"`
-		Model   string              `json:"model"`
-		Network *taskNetworkRequest `json:"network_request"`
+		Message        string              `json:"message"`
+		Sandbox        string              `json:"sandbox"`
+		Model          string              `json:"model"`
+		Network        *taskNetworkRequest `json:"network_request"`
+		PersonalConfig *personalSelection  `json:"personal_config"`
 	}
 	if !readJSON(w, r, &req) {
+		return
+	}
+	selection := req.PersonalConfig
+	if selection == nil {
+		selection = sess.PersonalConfig
+	}
+	if err := selection.validate(); err != nil {
+		writeErr(w, r, http.StatusBadRequest, err)
 		return
 	}
 	msg := strings.TrimSpace(req.Message)
@@ -126,6 +135,9 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		// 高了 Task API 直接拒绝，不悄悄截断。不再改写租户策略文件。
 		"effectCeiling": effectEnum(sandbox),
 	}
+	if selection != nil {
+		submit["inputs"].(map[string]any)["personal_config"] = selection
+	}
 	if req.Network != nil {
 		if err := req.Network.validate(); err != nil {
 			writeErr(w, r, http.StatusBadRequest, err)
@@ -145,6 +157,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 	}
 	now := time.Now().UTC()
 	_, _ = s.updateSession(id.TenantID, sess, func(x *Session) {
+		x.PersonalConfig = selection
 		if x.RuntimeSessionID == "" {
 			x.RuntimeSessionID = resp.SessionID
 		}

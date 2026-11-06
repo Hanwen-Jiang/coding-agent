@@ -138,10 +138,15 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	var req struct {
-		Title         string `json:"title"`
-		EnvironmentID string `json:"environment_id"`
+		Title          string             `json:"title"`
+		EnvironmentID  string             `json:"environment_id"`
+		PersonalConfig *personalSelection `json:"personal_config"`
 	}
 	if !readJSON(w, r, &req) {
+		return
+	}
+	if err := req.PersonalConfig.validate(); err != nil {
+		writeErr(w, r, http.StatusBadRequest, err)
 		return
 	}
 	if _, err := s.ensureSessions(id.TenantID); err != nil { // 旧项目先迁移出 main 会话，免得被新会话挤掉
@@ -165,6 +170,13 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 		writeMsg(w, r, http.StatusInternalServerError, "开会话失败：%v", err)
 		return
 	}
+	if req.PersonalConfig != nil {
+		sess, err = s.updateSession(id.TenantID, sess, func(x *Session) { x.PersonalConfig = req.PersonalConfig })
+		if err != nil {
+			writeErr(w, r, http.StatusInternalServerError, err)
+			return
+		}
+	}
 	writeJSON(w, http.StatusCreated, sess)
 }
 
@@ -180,6 +192,7 @@ func (s *Server) createSession(r *http.Request, id identity, p Project, title st
 	source := p.ID
 	if from != nil {
 		source = from.WorkspaceID
+		sess.PersonalConfig = from.PersonalConfig
 	}
 	info, err := s.ws.Create(ctx, id, sess.WorkspaceID, CreateSpec{From: source, Layout: p.Layout})
 	if err != nil {
