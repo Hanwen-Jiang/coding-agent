@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/agentruntime/agent-runtime/libs/go-core/personalconfig"
@@ -13,6 +14,8 @@ import (
 )
 
 const personalConfigService = "/agentruntime.personalconfig.v1.PersonalConfigService/"
+
+var personalVersion = regexp.MustCompile(`^user/v[1-9][0-9]*$`)
 
 // Nil slices inherit the package defaults; explicit empty slices disable the
 // corresponding optional tools for this session. Runtime still checks all ACLs.
@@ -48,15 +51,21 @@ func (s *Server) callPersonalConfig(r *http.Request, id identity, method string,
 }
 
 func (s *Server) handleGetPersonalConfig(w http.ResponseWriter, r *http.Request, id identity) {
+	w.Header().Set("Cache-Control", "no-store")
+	version := r.URL.Query().Get("version")
+	if version != "" && !personalVersion.MatchString(version) {
+		writeMsg(w, r, http.StatusBadRequest, "个人配置格式不合法")
+		return
+	}
 	var response json.RawMessage
-	err := s.callPersonalConfig(r, id, "GetPersonalConfig", map[string]any{"tenantId": id.TenantID}, &response)
+	err := s.callPersonalConfig(r, id, "GetPersonalConfig", map[string]any{"tenantId": id.TenantID, "version": version}, &response)
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		if apiErr.Reason == "personal_config_not_found" || apiErr.Code == "not_found" {
+		if version == "" && apiErr.Reason == "personal_config_not_found" {
 			writeJSON(w, http.StatusOK, map[string]any{"config": nil, "available": true})
 			return
 		}
-		if apiErr.Code == "unimplemented" {
+		if apiErr.Code == "unimplemented" || (apiErr.Status == http.StatusNotFound && apiErr.Reason == "") {
 			writeJSON(w, http.StatusOK, map[string]any{"config": nil, "available": false})
 			return
 		}
@@ -69,11 +78,16 @@ func (s *Server) handleGetPersonalConfig(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) handlePutPersonalConfig(w http.ResponseWriter, r *http.Request, id identity) {
+	w.Header().Set("Cache-Control", "no-store")
 	var req struct {
 		Document        json.RawMessage `json:"document"`
 		ExpectedVersion string          `json:"expected_version"`
 	}
 	if !readJSON(w, r, &req) {
+		return
+	}
+	if req.ExpectedVersion != "" && !personalVersion.MatchString(req.ExpectedVersion) {
+		writeMsg(w, r, http.StatusBadRequest, "个人配置格式不合法")
 		return
 	}
 	doc := &pb.PersonalConfigDocument{}
@@ -107,6 +121,7 @@ func (s *Server) handlePutPersonalConfig(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) handleRetirePersonalConfig(w http.ResponseWriter, r *http.Request, id identity) {
+	w.Header().Set("Cache-Control", "no-store")
 	var response json.RawMessage
 	if err := s.callPersonalConfig(r, id, "RetirePersonalConfig", map[string]any{"tenantId": id.TenantID}, &response); err != nil {
 		writeAPIError(w, r, err)
