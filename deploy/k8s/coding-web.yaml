@@ -61,13 +61,13 @@ spec:
             - name: AR_DEV_SIGNING_KEY
               valueFrom:
                 secretKeyRef: {name: agent-runtime-secrets, key: dev-signing-key}
-            # AUTH-01（Runtime 仓库 docs/plan/auth-tokens-2026-11-03.md）：改发 Ed25519 的 JWT 时——
-            #   1. task-service keygen --iss coding-agent --kid <kid> --out key.pem：私钥放进 Secret coding-jwt（键 key.pem），
-            #      打印的登记（只有公钥）写进 Runtime Chart 的 taskService.ingress.issuers；
-            #   2. 这里加 CODING_JWT_KEY_FILE=/etc/coding/jwt/key.pem（挂 Secret coding-jwt）、CODING_JWT_KID=<kid>，
-            #      CODING_TOKEN_KEY（32 字节的 base64，放 Secret）；
-            #   3. AR_DEV_SIGNING_KEY 再留一段时间（第三方令牌读到时改用 CODING_TOKEN_KEY 重新加密），之后连同 Runtime 的
-            #      taskService.ingress.devTokens: accept 一起去掉。用户要重新登录一次。
+            # AUTH-01（Runtime 仓库 docs/plan/auth-tokens-2026-11-03.md；线上 2026-11-06 切换）：签 Ed25519 的 JWT 给 Runtime，Runtime 只持公钥。
+            # 私钥在 Secret coding-jwt（键 key.pem，task-service keygen --iss coding-agent --kid <kid> 生成），只按文件挂进来；打印的登记
+            # （只有公钥）在 Runtime Chart 的 taskService.ingress.issuers。CODING_TOKEN_KEY 在 coding-oauth 里。
+            # AR_DEV_SIGNING_KEY 再留一段时间（第三方令牌读到时改用 CODING_TOKEN_KEY 重新加密），之后连同 Runtime 的
+            # taskService.ingress.devTokens: accept 一起去掉（第 4 步）。
+            - {name: CODING_JWT_KEY_FILE, value: /etc/coding/jwt/key.pem}
+            - {name: CODING_JWT_KID, value: "<kid>"}
             # GitHub App（G-01，docs/plan/github-app.md 第 3 节）：App ID、Client ID、Webhook secret 在 coding-oauth 里（envFrom）；
             # 私钥单独放 Secret coding-github-app（键 private-key.pem），只按文件挂进来，不进环境变量（coding-web 起的 git 会继承
             # 环境变量）。coding-oauth 里不能再有 CODING_GITHUB_APP_PRIVATE_KEY，有的话 coding-web 拒绝启动：部署前
@@ -91,6 +91,7 @@ spec:
             - {name: data, mountPath: /data}
             - {name: tmp, mountPath: /tmp}
             - {name: github-app, mountPath: /etc/coding/github-app, readOnly: true}
+            - {name: jwt, mountPath: /etc/coding/jwt, readOnly: true}
       volumes:
         - name: data
           persistentVolumeClaim: {claimName: coding-data}
@@ -102,6 +103,12 @@ spec:
             defaultMode: 0400
             items:
               - {key: private-key.pem, path: private-key.pem}
+        - name: jwt
+          secret:
+            secretName: coding-jwt
+            defaultMode: 0400
+            items:
+              - {key: key.pem, path: key.pem}
 ---
 apiVersion: v1
 kind: Service
