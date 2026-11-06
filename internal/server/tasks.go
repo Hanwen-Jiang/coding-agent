@@ -93,9 +93,10 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		return
 	}
 	var req struct {
-		Message string `json:"message"`
-		Sandbox string `json:"sandbox"`
-		Model   string `json:"model"`
+		Message string              `json:"message"`
+		Sandbox string              `json:"sandbox"`
+		Model   string              `json:"model"`
+		Network *taskNetworkRequest `json:"network_request"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -124,6 +125,13 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		// 沙箱等级是这个 Task 的 effect 上限（Runtime 的 SubmitTaskRequest.effect_ceiling，D-08）：只能比租户策略低，
 		// 高了 Task API 直接拒绝，不悄悄截断。不再改写租户策略文件。
 		"effectCeiling": effectEnum(sandbox),
+	}
+	if req.Network != nil {
+		if err := req.Network.validate(); err != nil {
+			writeMsg(w, r, http.StatusBadRequest, err.Error())
+			return
+		}
+		submit["networkRequest"] = req.Network.wire()
 	}
 	if sess.RuntimeSessionID != "" {
 		submit["sessionId"] = sess.RuntimeSessionID

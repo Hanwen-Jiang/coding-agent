@@ -221,6 +221,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
 	mux.HandleFunc("POST /api/sessions/revoke-all", s.authed(s.handleRevokeAll))
 	mux.HandleFunc("GET /api/me", s.authed(s.handleMe))
+	mux.HandleFunc("GET /api/network-policy", s.authed(s.handleNetworkPolicy))
 	// 第三方登录与账号关联（accounts.go）。
 	mux.HandleFunc("GET /api/auth/{provider}/login", s.handleOAuthLogin)
 	mux.HandleFunc("GET /api/auth/{provider}/callback", s.handleOAuthCallback)

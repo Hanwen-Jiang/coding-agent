@@ -18,11 +18,12 @@ import (
 // fakeTaskAPI 记下收到的 SubmitTask（与那一刻租户策略文件的内容），对 QueryTask 回 status（默认 DONE）与两个 Round 的花费。
 // 没带 sessionId 的提交开一个新的 Runtime Session（ses_<序号>），带了就沿用。
 type fakeTaskAPI struct {
-	submits  []map[string]any
-	tokens   []string
-	queries  int
-	status   string
-	policies string
+	networkPolicy map[string]any
+	submits       []map[string]any
+	tokens        []string
+	queries       int
+	status        string
+	policies      string
 	// 每次 SubmitTask 时策略文件的内容（task-service 在提交那一刻读它）。
 	seenPolicies []string
 	// 收到的 SignalTask；signalError 给了就按这个原因拒绝。
@@ -45,6 +46,8 @@ func (f *fakeTaskAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case r.URL.Path == "/v1/network-policy":
+		_ = json.NewEncoder(w).Encode(f.networkPolicy)
 	case strings.HasSuffix(r.URL.Path, "/SubmitTask"):
 		f.submits = append(f.submits, body)
 		data, _ := os.ReadFile(f.policies)

@@ -3019,7 +3019,7 @@ function updateComposer(force = false) {
 
   // 工具条与下一步只在内容变了时重画，免得打断打开着的菜单。
   const m = meter();
-  const key = [ph.mode, ph.ask && ph.ask.qid, state.settings.sandbox, state.settings.model, meterText(m),
+  const key = [ph.mode, ph.ask && ph.ask.qid, state.settings.sandbox, state.settings.model, JSON.stringify(state.networkRequest), meterText(m),
     state.changes ? state.changes.files.length : -1, ph.mode === "failed" || ph.mode === "done" ? ph.last.id : "",
     state.env && state.env.sandbox ? state.env.sandbox.mode : "", environmentKey()].join("|");
   if (!force && key !== ui.barKey && pop && ui.tools.contains(pop.anchor)) {
@@ -3040,7 +3040,7 @@ function updateComposer(force = false) {
       ui.cOpts.className = "hidden";
       ui.cOpts.replaceChildren();
     }
-    ui.tools.replaceChildren(environmentTool(), sandboxTool(), modelTool(), meterTool(m), h("span", { class: "grow" }), h("div", { class: "c-hint" }, hint(ph)));
+    ui.tools.replaceChildren(environmentTool(), sandboxTool(), networkTool(), modelTool(), meterTool(m), h("span", { class: "grow" }), h("div", { class: "c-hint" }, hint(ph)));
     ui.next.replaceChildren(...nextSteps(ph));
   }
   refreshSend();
@@ -3141,6 +3141,35 @@ function sandboxTool() {
   }, icon(cur.icon, "sm"), h("span", { class: "v" }, cur.label), icon("chevDown", "caret"));
 }
 
+// A network choice authorizes this Task only; environments never grant access.
+function networkTool() {
+  const en = document.documentElement.lang === "en";
+  const label = state.networkRequest ? (state.networkRequest.scope === "public" ? (en ? "All public domains" : "所有公网") : (en ? "Selected hosts" : "指定主机")) : (en ? "Network off" : "不联网");
+  return h("button", { class: "tool", title: en ? "Network access for the next task" : "本次任务的联网授权", onclick: async (e) => {
+    const anchor = e.currentTarget;
+    try {
+      const policy = await api("GET", "/api/network-policy");
+      openPop(anchor, (close) => {
+        const choose = (request) => { state.networkRequest = request; state.networkRequestTenant = state.me?.tenant; close(); updateComposer(true); };
+        const out = [h("div", { class: "pop-title" }, en ? "Network access for this task" : "本次任务联网"),
+          popItem("lock", en ? "Off" : "不联网", "", !state.networkRequest, () => choose(null))];
+        if (!policy.allowed) { out.push(h("p", { class: "muted" }, en ? "Network access is disabled by tenant policy." : "租户策略未允许联网。")); return out; }
+        const modes = policy.modes || ["deny", "allowlist"];
+        const duration = h("select", { "aria-label": en ? "Duration" : "授权时长" }, ...[15, 30, 60].filter((m) => m <= policy.max_grant_minutes).map((m) => h("option", { value: m }, `${m} ${en ? "minutes" : "分钟"}`)));
+        out.push(h("label", { class: "lbl" }, en ? "Duration" : "授权时长", duration));
+        const request = (scope, hosts) => ({ scope, hosts, minutes: Number(duration.value), reason: en ? "Network access requested when submitting this task" : "提交本次任务时申请联网" });
+        if (modes.includes("allowlist")) {
+          const hosts = h("input", { type: "text", value: (policy.hosts || []).join(", "), "aria-label": en ? "Hosts" : "主机名单", placeholder: "api.example.com" });
+          out.push(h("label", { class: "lbl" }, en ? "Hosts (comma separated)" : "主机（逗号分隔）", hosts),
+            popItem("globe", en ? "Selected hosts" : "指定主机", "", state.networkRequest?.scope === "hosts", () => choose(request("hosts", hosts.value.split(/[,，\s]+/).filter(Boolean)))));
+        }
+        if (modes.includes("open")) out.push(popItem("globe", en ? "All public domains" : "所有公网", en ? "Private networks and cloud metadata remain blocked" : "内网、云元数据仍禁止访问", state.networkRequest?.scope === "public", () => choose(request("public", []))));
+        return out;
+      });
+    } catch (ex) { toast(ex.message, true); }
+  } }, icon("globe", "sm"), h("span", { class: "v" }, label), icon("chevDown", "caret"));
+}
+
 function modelTool() {
   const cur = MODELS.find((m) => m.id === state.settings.model) || MODELS[1];
   return h("button", {
@@ -3215,7 +3244,8 @@ async function submit(text) {
       loadEnv();
     }
     const base = sbase();
-    const t = await api("POST", `${base}/tasks`, { message, sandbox: state.settings.sandbox, model: state.settings.model });
+    const t = await api("POST", `${base}/tasks`, { message, sandbox: state.settings.sandbox, model: state.settings.model, network_request: state.networkRequestTenant === state.me?.tenant ? state.networkRequest || undefined : undefined });
+    state.networkRequest = null;
     if (sbase() !== base) return;
     state.pending = null;
     state.tasks.push(t);
