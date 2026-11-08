@@ -113,7 +113,7 @@ func runGitHubProbe(t *testing.T, lang string, config, status any) githubResult 
 
 // runAccountProbe 起真正的页面与假的 API（config 与 extra 由调用方给，extra 的值是 GET 的回答），地址带 ?linked=github 打开账号页，
 // 注入 probe，返回它 POST 到 /__result 的 JSON。找不到浏览器时跳过（G-05、WEB-SEC 共用）。
-func runAccountProbe(t *testing.T, lang, probe string, config any, extra map[string]any) json.RawMessage {
+func runAccountProbe(t *testing.T, lang, probe string, config any, extra map[string]any, viewports ...string) json.RawMessage {
 	t.Helper()
 	browser := findBrowser()
 	if browser == "" {
@@ -178,7 +178,7 @@ func runAccountProbe(t *testing.T, lang, probe string, config any, extra map[str
 			time.Sleep(100 * time.Millisecond)
 		}
 	})
-	ctx, stop := openPage(t, browser, dir, srv.URL+"/#/?linked=github")
+	ctx, stop := openPage(t, browser, dir, srv.URL+"/#/?linked=github", viewports...)
 	defer stop()
 	select {
 	case res := <-results:

@@ -454,10 +454,14 @@ func runInteractionProbe(t *testing.T, browser string) (*interactionSite, intera
 }
 
 // openPage 用 headless 的浏览器打开 url，返回到时的 context 与关掉浏览器的函数。
-func openPage(t *testing.T, browser, dir, url string) (context.Context, func()) {
+func openPage(t *testing.T, browser, dir, url string, viewports ...string) (context.Context, func()) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
-	cmd := exec.CommandContext(ctx, browser, "--headless=new", "--disable-gpu", "--no-sandbox", "--no-first-run", "--no-default-browser-check", "--window-size=1600,1000",
+	viewport := "1600,1000"
+	if len(viewports) > 0 {
+		viewport = viewports[0]
+	}
+	cmd := exec.CommandContext(ctx, browser, "--headless=new", "--disable-gpu", "--no-sandbox", "--no-first-run", "--no-default-browser-check", "--window-size="+viewport,
 		"--user-data-dir="+dir, url)
 	if err := cmd.Start(); err != nil {
 		cancel()

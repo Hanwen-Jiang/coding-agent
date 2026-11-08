@@ -118,6 +118,7 @@ function sessionURL(projectId, sessionId) {
 // ---------------------------------------------------------------- DOM
 
 function h(tag, attrs = {}, ...children) {
+  attrs ||= {};
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v === false || v === null || v === undefined) continue;
@@ -126,6 +127,15 @@ function h(tag, attrs = {}, ...children) {
     else if (k === "value") el.value = v;
     else el.setAttribute(k, v === true ? "" : String(v));
   }
+  // HeroUI v3 BEM styles work with the existing semantic DOM and native events.
+  if (el.classList.contains("btn")) {
+    const variant = el.classList.contains("danger") ? "danger-soft" : el.classList.contains("primary") ? "primary" : el.classList.contains("ghost") ? "ghost" : "outline";
+    el.classList.add("button", `button--${variant}`);
+    if (el.classList.contains("sm") || el.classList.contains("xs")) el.classList.add("button--sm");
+    if (el.classList.contains("icon-only")) el.classList.add("button--icon-only");
+  }
+  if (attrs.title && !attrs["aria-label"] && el.classList.contains("icon-only")) el.setAttribute("aria-label", attrs.title);
+  if (["input", "textarea", "select"].includes(tag) && attrs.placeholder && !attrs["aria-label"]) el.setAttribute("aria-label", attrs.placeholder);
   append(el, children);
   return el;
 }
@@ -689,15 +699,16 @@ function personalTool() {
   return h("button", { class: "tool personal-tools", onclick: () => openPersonalConfig(true), title: t("personal.tools") }, icon("box", "sm"), t("personal.tools"));
 }
 
-async function openPersonalConfig(sessionOnly = false) {
-  if (document.querySelector("dialog.personal-config")) return;
+async function openPersonalConfig(sessionOnly = false, container = null) {
+  if (!container && document.querySelector("dialog.personal-config")) return;
   const choiceKey = personalChoiceKey();
   const body = h("div", { class: "d-body" }, t("common.loading"));
-  const dialog = h("dialog", { class: "personal-config" },
+  const dialog = h(container ? "section" : "dialog", { class: "personal-config" + (container ? " personal-page" : "") },
     h("div", { class: "d-head" }, h("h2", {}, t(sessionOnly ? "personal.tools" : "personal.title"))), body,
-    h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))));
+    container ? null : h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))));
   dialog.addEventListener("close", () => dialog.remove());
-  document.body.append(dialog); dialog.showModal();
+  const finish = () => { if (container) renderSettings(); else dialog.close(); };
+  if (container) container.replaceChildren(dialog); else { document.body.append(dialog); dialog.showModal(); }
   try {
     const [response, skills, mcp, environments] = await Promise.all([
       api("GET", "/api/personal-config"), api("GET", "/api/skills"), api("GET", "/api/mcp"), api("GET", "/api/environments"),
@@ -737,13 +748,13 @@ async function openPersonalConfig(sessionOnly = false) {
       try {
         if (sessionOnly) {
           state.personalChoices.set(choiceKey, { skill_names: skillChoices.values(), mcp_connection_ids: mcpChoices.values() });
-          dialog.close(); updateComposer(true); return;
+          finish(); updateComposer(true); return;
         }
         const document = { instructions: instructions.value, files: fileRows.map((x) => ({ path: x.path.value, content: x.content.value })), defaults: { skillNames: skillChoices.values(), mcpConnectionIds: mcpChoices.values(), environmentId: environment.value } };
         const updated = await api("PUT", "/api/personal-config", { document, expected_version: config.version || "" });
         config = updated.config; state.personalConfig = config;
         if (!state.session) setDraftEnvironment(environment.value);
-        toast(t("personal.saved")); dialog.close();
+        toast(t("personal.saved")); finish();
       } catch (ex) { report(ex); } finally { save.disabled = false; }
     } }, t(sessionOnly ? "personal.use" : "skills.save"));
     body.replaceChildren(h("p", { class: "muted" }, t(sessionOnly ? "personal.sessionNote" : "personal.note")),
@@ -755,7 +766,7 @@ async function openPersonalConfig(sessionOnly = false) {
         h("p", { class: "muted small personal-version" }, config.version ? `${config.version} · ${config.digest}` : "")] : []), save,
       ...(!sessionOnly && config.version ? [h("button", { class: "btn ghost personal-retire", onclick: async () => {
         if (!confirm(t("personal.retireConfirm"))) return;
-        try { await api("DELETE", "/api/personal-config"); state.personalConfig = null; dialog.close(); } catch (ex) { report(ex); }
+        try { await api("DELETE", "/api/personal-config"); state.personalConfig = null; finish(); } catch (ex) { report(ex); }
       } }, t("personal.retire"))] : []));
   } catch (ex) { body.replaceChildren(h("p", { class: "error" }, ex.message)); }
 }
@@ -814,8 +825,8 @@ async function openSecrets() {
 
 // openSkills 是“我的 Skill”（WEB-SKILLS，/api/skills；Runtime 的 N-14）：列出看得到的 Skill（平台、团队的只读，我的可以编辑与收回，
 // 被遮住的写明不会被用到），新建与编辑我的（名字、说明、做法；编辑时名字不能改，原有的文件照旧带上）。
-async function openSkills() {
-  if (document.querySelector("dialog.skills")) return;
+async function openSkills(container = null) {
+  if (!container && document.querySelector("dialog.skills")) return;
   const list = h("div", { class: "skill-list" }, h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading")));
   const name = h("input", { class: "skill-name", placeholder: t("skills.name"), maxlength: 64, autocomplete: "off", spellcheck: "false" });
   const description = h("input", { class: "skill-description", placeholder: t("skills.description"), maxlength: 1024 });
@@ -823,11 +834,11 @@ async function openSkills() {
   const filesNote = h("div", { class: "muted small skill-files" });
   const save = h("button", { class: "btn sm primary skill-save", onclick: () => saveSkill() }, t("skills.save"));
   const cancel = h("button", { class: "btn sm ghost skill-cancel", onclick: () => resetForm() }, t("skills.cancel"));
-  const form = h("div", { class: "skill-form" }, name, description, instructions, filesNote, h("div", { class: "row" }, save, cancel));
-  const dialog = h("dialog", { class: "skills" },
+  const form = h("div", { class: "skill-form" }, h("h3", {}, t("skills.editor")), h("label", { class: "lbl" }, t("skills.name"), name), h("label", { class: "lbl" }, t("skills.description"), description), h("label", { class: "lbl" }, t("skills.instructions"), instructions), filesNote, h("div", { class: "row" }, save, cancel));
+  const dialog = h(container ? "section" : "dialog", { class: "skills" + (container ? " page management-page" : "") },
     h("div", { class: "d-head" }, h("h2", {}, t("skills.title"))),
     h("div", { class: "d-body" }, h("div", { class: "skills-note" }, t("skills.note")), list, form),
-    h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))),
+    container ? null : h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))),
   );
   // 正在编辑的 Skill 原有的文件：页上不改它们，保存时照旧带上。
   let files = null;
@@ -842,17 +853,23 @@ async function openSkills() {
       s.shadowed ? h("div", { class: "m skill-shadowed" }, t("skills.shadowed")) : null),
     s.scope === "user" ? h("button", { class: "btn sm skill-edit", onclick: () => editSkill(s.name) }, t("skills.edit")) : null,
     s.scope === "user" ? h("button", { class: "btn sm skill-retire", onclick: () => retireSkill(s.name) }, t("skills.retire")) : null);
+  const search = h("input", { class: "field management-search", type: "search", placeholder: t("skills.search") });
+  let listed = null;
+  search.addEventListener("input", () => { if (listed) draw(listed); });
+  list.before(search);
   const draw = (data) => {
+    listed = data;
     if (data.available === false) {
       list.replaceChildren(h("div", { class: "muted skills-unavailable" }, t("skills.unavailable")));
       form.remove();
       return;
     }
-    const items = data.skills || [];
+    const q = search.value.trim().toLowerCase();
+    const items = (data.skills || []).filter((item) => !q || `${item.name} ${item.description || ""}`.toLowerCase().includes(q));
     list.replaceChildren(items.length ? h("div", { class: "conn-list" }, items.map(row)) : h("div", { class: "muted" }, t("skills.empty")));
   };
   const reload = async () => {
-    try { draw(await api("GET", "/api/skills")); } catch (ex) { report(ex); }
+    try { draw(await api("GET", "/api/skills")); } catch (ex) { list.replaceChildren(h("div", { class: "error-box", role: "alert" }, ex.message), h("button", { class: "btn", onclick: reload }, t("common.reload"))); }
   };
   async function editSkill(n) {
     try {
@@ -868,7 +885,7 @@ async function openSkills() {
   }
   async function saveSkill() {
     const n = name.value.trim();
-    if (!n || !description.value.trim() || !instructions.value.trim()) return;
+    if (!n || !description.value.trim() || !instructions.value.trim()) { toast(t("skills.required"), true); (!n ? name : !description.value.trim() ? description : instructions).focus(); return; }
     const body = { description: description.value, instructions: instructions.value };
     if (files) body.files = files;
     save.disabled = true;
@@ -890,30 +907,30 @@ async function openSkills() {
   }
   resetForm();
   dialog.addEventListener("close", () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
+  if (container) container.replaceChildren(dialog);
+  else { document.body.append(dialog); dialog.showModal(); }
   await reload();
 }
 
 // openMcp 是“我的 MCP”（/api/mcp；Runtime 的 N-15）：登记自己的远程 MCP Server（https 地址，鉴权头引用“网络密钥”页里的
 // 一个名字，值不经这里），看它的工具，逐个打开并定权限：只读（远端自己说只读的才能选）或不可逆写（每次调用前要你批准）。
 // 新出现与参数变了的工具先关着；删掉连接后，正在跑的任务也不能再调它。任务开始时用的是当时打开的工具。
-async function openMcp() {
-  if (document.querySelector("dialog.mcp")) return;
+async function openMcp(container = null) {
+  if (!container && document.querySelector("dialog.mcp")) return;
   const list = h("div", { class: "mcp-list" }, h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading")));
   const name = h("input", { class: "mcp-name", placeholder: t("mcp.name"), maxlength: 32, autocomplete: "off", spellcheck: "false" });
   const url = h("input", { class: "mcp-url", placeholder: "https://example.com/mcp", autocomplete: "off", spellcheck: "false" });
   const secret = h("select", { class: "mcp-secret" }, h("option", { value: "" }, t("mcp.noSecret")));
   const header = h("input", { class: "mcp-header", placeholder: t("mcp.header"), maxlength: 64, autocomplete: "off", spellcheck: "false" });
   const create = h("button", { class: "btn sm primary mcp-create", onclick: () => createConn() }, t("mcp.create"));
-  const form = h("div", { class: "mcp-form" }, h("div", { class: "t" }, t("mcp.add")), name, url, h("div", { class: "row" }, secret, header), create);
-  const dialog = h("dialog", { class: "mcp" },
+  const form = h("div", { class: "mcp-form" }, h("div", { class: "t" }, t("mcp.add")), h("label", { class: "lbl" }, t("mcp.name"), name), h("label", { class: "lbl" }, t("mcp.url"), url), h("label", { class: "lbl" }, t("mcp.auth"), secret), h("label", { class: "lbl" }, t("mcp.header"), header), state.config.network_secrets ? h("button", { class: "btn ghost sm", onclick: openSecrets }, t("secrets.open")) : null, create);
+  const dialog = h(container ? "section" : "dialog", { class: "mcp" + (container ? " page management-page" : "") },
     h("div", { class: "d-head" }, h("h2", {}, t("mcp.title"))),
     h("div", { class: "d-body" }, h("div", { class: "mcp-note" }, t("mcp.note")), list, form),
-    h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))),
+    container ? null : h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))),
   );
   const open = new Set();
-  const stateText = (c) => c.state === "ready" ? t("mcp.ready", { n: c.tools.filter((x) => x.enabled).length, total: c.tools.length })
+  const stateText = (c) => c.state === "ready" ? t("mcp.ready", { n: (c.tools || []).filter((x) => x.enabled).length, total: (c.tools || []).length })
     : t("mcp.error", { why: t(`mcp.err.${c.error_code}`) === `mcp.err.${c.error_code}` ? c.error_code : t(`mcp.err.${c.error_code}`) });
   const toolRow = (c, tool, edits) => {
     const readOnly = tool.read_only_hint === true;
@@ -966,7 +983,7 @@ async function openMcp() {
       // 列表不带参数 schema；展开的连接另取一次全的。
       items = await Promise.all((data.connections || []).map(async (c) => open.has(c.connection_id) ? (await api("GET", `/api/mcp/${encodeURIComponent(c.connection_id)}`)).connection : c));
       draw();
-    } catch (ex) { report(ex); }
+    } catch (ex) { list.replaceChildren(h("div", { class: "error-box", role: "alert" }, ex.message), h("button", { class: "btn", onclick: reload }, t("common.reload"))); }
   };
   const loadSecrets = async () => {
     if (!state.config.network_secrets) return;
@@ -980,7 +997,7 @@ async function openMcp() {
   }
   async function createConn() {
     const n = name.value.trim(), u = url.value.trim();
-    if (!n || !u) return;
+    if (!n || !u) { toast(t("mcp.required"), true); (!n ? name : url).focus(); return; }
     create.disabled = true;
     try {
       const { connection, created } = await api("POST", "/api/mcp", { name: n, url: u, secret_name: secret.value, header: header.value.trim() });
@@ -1018,8 +1035,8 @@ async function openMcp() {
     } catch (ex) { report(ex); }
   }
   dialog.addEventListener("close", () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
+  if (container) container.replaceChildren(dialog);
+  else { document.body.append(dialog); dialog.showModal(); }
   await Promise.all([reload(), loadSecrets()]);
 }
 
@@ -1230,6 +1247,9 @@ async function route() {
   if (hash.startsWith("#/workspaces")) return go("workspaces");
   if (hash.startsWith("#/activity")) return go("activity");
   if (hash.startsWith("#/environments")) return go("environments");
+  if (hash.startsWith("#/skills")) return goSettings("skills");
+  if (hash.startsWith("#/mcp")) return goSettings("mcp");
+  if (hash.startsWith("#/settings")) return goSettings(hash.split("/")[2]);
   return landing();
 }
 
@@ -1316,6 +1336,29 @@ function go(view) {
   renderApp();
 }
 
+function goSettings(section = "personal") {
+  resetSessionState();
+  state.view = "settings";
+  state.settingsSection = ["personal", "skills", "mcp"].includes(section) ? section : "personal";
+  state.sideOpen = false;
+  setHash(`#/settings/${state.settingsSection}`);
+  renderApp();
+}
+
+function renderSettings() {
+  const section = state.settingsSection || "personal";
+  const content = h("div", { class: "settings-content", role: "tabpanel", id: "settings-panel" });
+  ui.scroll.replaceChildren(h("div", { class: "page settings-page" },
+    h("div", { class: "page-head" }, h("h1", {}, t("settings.title"))),
+    h("nav", { class: "settings-tabs seg", role: "tablist", "aria-label": t("settings.title") },
+      [["personal", "personal.title"], ["skills", "skills.title"], ["mcp", "mcp.title"]].map(([key, label]) =>
+        h("button", { role: "tab", "aria-selected": String(section === key), "aria-controls": "settings-panel", class: section === key ? "active" : "", onclick: () => goSettings(key) }, t(label)))),
+    content));
+  if (section === "skills") openSkills(content);
+  else if (section === "mcp") openMcp(content);
+  else openPersonalConfig(false, content);
+}
+
 // newSession 是左栏的“新建会话”：在当前工作区（没有时取最近活动的一个）开草稿；还没有工作区就先建一个。
 function newSession() {
   const p = state.project || findProject((state.sessions[0] || {}).project_id) || state.projects[0];
@@ -1358,6 +1401,7 @@ function renderApp() {
   if (state.view === "workspaces") renderWorkspaces();
   else if (state.view === "activity") renderActivity();
   else if (state.view === "environments") renderEnvironments();
+  else if (state.view === "settings") renderSettings();
   else renderThread(true);
   if (composing) updateComposer(true);
   renderStatus();
@@ -1377,6 +1421,7 @@ function updateTitle() {
   const name = state.view === "workspaces" ? t("nav.workspaces")
     : state.view === "activity" ? t("nav.activity")
       : state.view === "environments" ? t("nav.environments")
+      : state.view === "settings" ? t("settings.title")
       : state.session ? state.session.title || t("session.untitled")
         : state.project ? t("session.newIn", { name: state.project.name }) : "";
   document.title = `${live ? "● " : ""}${name ? name + " · " : ""}Coding Agent`;
@@ -1569,6 +1614,7 @@ function userMenu(close) {
   const conns = state.me.connections || [];
   const names = conns.map((c) => providerInfo(c.provider).name).join(t("list.sep"));
   return [
+    popItem("box", t("settings.title"), null, false, () => { close(); goSettings(); }),
     popItem("link", t("account.title"), conns.length ? t("account.connectedList", { n: conns.length, names }) : t("account.connectHint"), false, () => { close(); openAccount(); }),
     h("div", { class: "pop-sep" }),
     h("div", { class: "pop-title" }, t("menu.appearance")),
@@ -1596,6 +1642,7 @@ function renderTopbar() {
   if (state.view === "workspaces") parts.push(h("span", { class: "title" }, t("nav.workspaces")));
   else if (state.view === "activity") parts.push(h("span", { class: "title" }, t("nav.activity")));
   else if (state.view === "environments") parts.push(h("span", { class: "title" }, t("nav.environments")));
+  else if (state.view === "settings") parts.push(h("span", { class: "title" }, t("settings.title")));
   else if (p) {
     parts.push(h("button", { class: "crumb ellipsis", title: t("ws.overview"), onclick: () => go("workspaces") }, p.name));
     parts.push(h("span", { class: "crumb-sep" }, "/"));
@@ -1646,12 +1693,12 @@ function renderWorkspaces() {
         h("button", { class: "btn primary sm", onclick: () => openDraft(p.id) }, icon("plus", "sm"), t("nav.newSession")),
         p.layout === "WORKSPACE_LAYOUT_MULTI" ? h("button", { class: "btn sm", onclick: () => openWorkspaceRepos(p, null) }, t("repos.manage")) : null,
         h("span", { class: "grow" }),
-        h("button", { class: "btn ghost sm danger", onclick: () => deleteProject(p) }, icon("trash", "sm"), t("ws.delete"))),
+        h("button", { class: "btn ghost sm danger icon-only", title: t("ws.delete"), onclick: () => deleteProject(p) }, icon("trash", "sm"))),
     );
   });
   ui.scroll.replaceChildren(h("div", { class: "page" },
     h("div", { class: "page-head" },
-      h("div", { class: "grow" }, h("h1", {}, t("nav.workspaces"))),
+      h("div", { class: "grow" }, h("h1", {}, t("nav.workspaces")), h("p", {}, t("ws.lead"))),
       h("button", { class: "btn primary", onclick: () => openNewProject() }, icon("plus", "sm"), t("ws.create"))),
     cards.length ? h("div", { class: "ws-grid" }, cards) : welcome(),
   ));
@@ -4285,115 +4332,176 @@ function openWorkspaceRepos(project, session) {
 // ---------------------------------------------------------------- 项目
 
 function openNewProject(initial) {
+  closePop();
+  if (document.querySelector("dialog.new-workspace")) return;
   const conns = gitConnections();
-  let mode = initial || (conns.length ? "git" : state.samples.length ? "sample" : "git");
-  let sample = state.samples[0] ? state.samples[0].id : "";
-  let provider = conns[0] ? conns[0].provider : "";
-  const repoCache = {}; // 平台 → 仓库列表（"loading" 表示在读）
-  let filter = "";
-  const name = h("input", { class: "field", placeholder: t("new.name") });
-  const gitUrl = h("input", { class: "field", placeholder: "https://github.com/owner/repo.git" });
-  const branch = h("input", { class: "field", placeholder: t("new.branchPh") });
-  const err = h("div", { class: "err-text" });
-  const seg = h("div", { class: "seg" });
+  let mode = initial === "multi" ? "git" : initial || "git";
+  let sample = state.samples[0]?.id || "";
+  let provider = conns[0]?.provider || "";
+  const repoCache = {};
+  const selected = new Map();
+  const completed = new Set();
+  let filter = "", created = null, running = false;
+  const name = h("input", { class: "field", placeholder: t("new.name"), "aria-label": t("new.name"), maxlength: 80 });
+  const gitUrl = h("input", { class: "field", placeholder: "https://github.com/owner/repo.git", "aria-label": t("new.url") });
+  const branch = h("input", { class: "field", placeholder: t("new.branchPh"), "aria-label": t("env.branch") });
+  const err = h("div", { class: "err-text", role: "alert" });
+  const progress = h("div", { class: "workspace-progress", role: "status", "aria-live": "polite" });
+  const seg = h("div", { class: "seg workspace-source-tabs", role: "tablist", "aria-label": t("new.source") });
   const body = h("div", { class: "col" });
-  const create = h("button", { class: "btn primary" }, t("new.create"));
+  const create = h("button", { class: "btn primary", "data-workspace-create": "" }, t("new.create"));
   const cancel = h("button", { class: "btn ghost" }, t("common.cancel"));
-  const dialog = h("dialog", {},
-    h("div", { class: "d-head" }, h("h2", {}, t("new.title"))),
-    h("div", { class: "d-body" }, seg, body, err),
-    h("div", { class: "d-foot" }, cancel, create),
-  );
-  const repoList = h("div", { class: "pick-list" });
+  const dialog = h("dialog", { class: "new-workspace" },
+    h("div", { class: "d-head" }, h("h2", {}, t("new.title")), h("p", { class: "muted small" }, t("new.selectHint"))),
+    h("div", { class: "d-body" }, seg, body, err, progress),
+    h("div", { class: "d-foot" }, cancel, create));
+  const repoList = h("div", { class: "pick-list", "aria-label": t("new.myRepos") });
+  const selection = h("div", { class: "repo-selection" });
+  const nextPath = (fullName) => {
+    const base = fullName.split("/").pop().replace(/\.git$/, "").replace(/[^A-Za-z0-9._-]/g, "-").replace(/^[^A-Za-z0-9_]+/, "").slice(0, 54) || "repo";
+    const paths = new Set([...selected.values()].map((r) => r.path));
+    let candidate = base, suffix = 2;
+    while (paths.has(candidate)) candidate = `${base}-${suffix++}`;
+    return candidate;
+  };
+  const summarize = () => {
+    selection.replaceChildren(
+      h("div", { class: "selection-head" }, h("strong", {}, t("new.selected", { n: selected.size })), h("span", { class: "muted small" }, t("new.selectionHint"))),
+      ...[...selected.entries()].map(([key, r]) => {
+        const ref = h("input", { class: "field repo-ref", value: r.ref, placeholder: t("new.branchPh"), "aria-label": `${r.full_name} · ${t("env.branch")}`, disabled: !!created });
+        ref.addEventListener("input", () => { r.ref = ref.value; });
+        const mount = h("input", { class: "field repo-path", value: r.path, "aria-label": `${r.full_name} · ${t("repos.path")}`, title: t("repos.path"), maxlength: 64, disabled: !!created });
+        mount.addEventListener("input", () => { r.path = mount.value; });
+        return h("div", { class: "selected-repo", "data-selected-repo": key },
+          icon("branch", "sm"), h("span", { class: "grow ellipsis", title: r.full_name }, r.full_name),
+          r.can_push === false ? h("span", { class: "chip" }, t("repos.readOnly")) : null,
+          ref, mount, h("button", { class: "btn ghost sm icon-only", title: t("new.removeRepo"), disabled: !!created, onclick: () => { selected.delete(key); drawRepos(); summarize(); } }, icon("x", "sm")));
+      }));
+    selection.hidden = !selected.size;
+  };
+  const addRepo = (r) => {
+    if (created || running) return;
+    const key = r.clone_url;
+    if (selected.has(key)) selected.delete(key);
+    else selected.set(key, { ...r, ref: r.default_branch || "", path: nextPath(r.full_name) });
+    if (!name.value && selected.size) name.value = [...selected.values()][0].full_name.split("/").pop();
+    drawRepos(); summarize();
+  };
   const drawRepos = () => {
     const p = provider;
     if (!p) return repoList.replaceChildren();
     if (repoCache[p] === undefined) {
       repoCache[p] = "loading";
       api("GET", `/api/git/${p}/repos`).then((r) => { repoCache[p] = r; if (provider === p) drawRepos(); })
-        .catch((ex) => { repoCache[p] = []; err.textContent = ex.message; if (provider === p) drawRepos(); });
+        .catch((ex) => { repoCache[p] = null; err.textContent = ex.message; if (provider === p) drawRepos(); });
     }
     const repos = repoCache[p];
     if (repos === "loading") return repoList.replaceChildren(h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("new.loadingRepos", { name: providerInfo(p).name })));
+    if (!repos) return repoList.replaceChildren(h("button", { class: "btn", onclick: () => { delete repoCache[p]; err.textContent = ""; drawRepos(); } }, t("common.reload")));
     const q = filter.trim().toLowerCase();
-    const shown = repos.filter((r) => !q || r.full_name.toLowerCase().includes(q)).slice(0, 100);
-    // 服务端已把自己名下的排在前面：两组都有时各加一个小标题（别人的多是协作者或私有 fork 继承来的权限）。
-    const grouped = shown.some((r) => r.mine) && shown.some((r) => !r.mine);
-    const rows = [];
-    shown.forEach((r, i) => {
-      if (grouped && (i === 0 || shown[i - 1].mine !== r.mine)) rows.push(h("div", { class: "pick-group" }, t(r.mine ? "new.yourRepos" : "new.sharedRepos")));
-      rows.push(h("button", {
-        class: "pick" + (gitUrl.value === r.clone_url ? " active" : ""),
-        onclick: () => { gitUrl.value = r.clone_url; branch.value = r.default_branch || ""; name.value = r.full_name.split("/").pop(); drawRepos(); },
-      }, badge(r.provider, "sm"), h("span", { class: "mono grow ellipsis" }, r.full_name),
+    const shown = repos.filter((r) => !q || r.full_name.toLowerCase().includes(q));
+    const rows = shown.map((r) => {
+      const checked = selected.has(r.clone_url);
+      const check = h("input", { type: "checkbox", checked, disabled: !!created || running, "aria-label": r.full_name, "data-repository": r.clone_url });
+      check.addEventListener("change", () => addRepo(r));
+      return h("label", { class: "pick repo-choice" + (checked ? " active" : "") }, check, badge(r.provider || p, "sm"),
+        h("span", { class: "grow ellipsis", title: r.full_name }, r.full_name),
         r.private ? h("span", { class: "chip" }, t("new.private")) : null,
-        r.can_push ? null : h("span", { class: "chip warn" }, t("new.readOnly"))));
+        r.can_push ? null : h("span", { class: "chip" }, t("new.readOnly")));
     });
     repoList.replaceChildren(...(rows.length ? rows : [h("div", { class: "muted" }, t("new.noRepos"))]));
   };
+  const addURL = () => {
+    const value = gitUrl.value.trim();
+    try { const u = new URL(value); if (u.protocol !== "https:" || u.username || u.password) throw Error(); }
+    catch { err.textContent = t("new.invalidURL"); gitUrl.focus(); return false; }
+    if (!selected.has(value)) selected.set(value, { clone_url: value, full_name: value.replace(/^https:\/\//, "").replace(/\.git$/, ""), ref: branch.value.trim(), path: nextPath(value), can_push: true });
+    if (!name.value) name.value = value.split("/").pop().replace(/\.git$/, "");
+    gitUrl.value = ""; branch.value = ""; err.textContent = "";
+    drawRepos(); summarize(); return true;
+  };
   const draw = () => {
-    seg.replaceChildren(...[["git", "branch", conns.length ? t("new.myRepos") : t("new.gitUrl")], ["sample", "box", t("new.sample")], ["empty", "folder", t("source.empty")], ["multi", "layers", t("repos.multi")]].map(([k, ic, l]) =>
-      h("button", { class: mode === k ? "active" : "", onclick: () => { mode = k; draw(); } }, icon(ic, "sm"), l)));
+    seg.replaceChildren(...[["git", "branch", conns.length ? t("new.myRepos") : t("new.gitUrl")], ["sample", "box", t("new.sample")], ["empty", "folder", t("source.empty")]].map(([key, ic, label]) =>
+      h("button", { class: mode === key ? "active" : "", type: "button", role: "tab", "aria-selected": String(mode === key), disabled: !!created || running, onclick: () => { mode = key; draw(); } }, icon(ic, "sm"), label)));
     const parts = [];
     if (mode === "git") {
       if (conns.length) {
-        if (conns.length > 1) {
-          parts.push(h("div", { class: "pv-tabs" }, conns.map((c) => h("button", {
-            class: "pv-tab" + (c.provider === provider ? " active" : ""),
-            onclick: () => { provider = c.provider; filter = ""; draw(); },
-          }, badge(c.provider, "xs"), providerInfo(c.provider).name))));
-        }
-        const search = h("input", { class: "field", placeholder: t("new.searchPh", { name: providerInfo(provider).name }), value: filter });
+        parts.push(h("div", { class: "pv-tabs" }, conns.map((c) => h("button", { class: "pv-tab" + (c.provider === provider ? " active" : ""), onclick: () => { provider = c.provider; filter = ""; draw(); } }, badge(c.provider, "xs"), providerInfo(c.provider).name))));
+        const search = h("input", { class: "field", type: "search", placeholder: t("new.searchPh", { name: providerInfo(provider).name }), value: filter });
         search.addEventListener("input", () => { filter = search.value; drawRepos(); });
-        parts.push(h("div", { class: "col" }, search, repoList));
-        drawRepos();
+        parts.push(search, repoList); drawRepos();
       }
       const connectable = providerList().filter((p) => p.git && p.configured && !connection(p.id));
-      if (connectable.length) {
-        parts.push(h("div", { class: "connect-row" }, h("span", { class: "muted small" }, conns.length ? t("new.alsoConnect") : t("new.connect")),
-          connectable.map((p) => h("a", { class: "btn xs", href: `/api/auth/${p.id}/login?link=1` }, badge(p.id, "xs"), p.name))));
-      }
-      parts.push(h("div", {}, h("label", { class: "lbl" }, conns.length ? t("new.orUrl") : t("new.url")), gitUrl));
-      parts.push(h("div", { class: "row" }, h("div", { class: "grow" }, h("label", { class: "lbl" }, t("new.name")), name), h("div", { class: "grow" }, h("label", { class: "lbl" }, t("env.branch")), branch)));
+      if (connectable.length) parts.push(h("div", { class: "connect-row" }, h("span", { class: "muted small" }, t("new.connect")), connectable.map((p) => h("a", { class: "btn xs", href: `/api/auth/${p.id}/login?link=1` }, badge(p.id, "xs"), p.name))));
+      parts.push(selection);
+      const urlFields = h("div", { class: "col url-fields" }, h("label", { class: "lbl" }, t("new.url"), gitUrl),
+        h("div", { class: "row" }, branch, h("button", { class: "btn sm", disabled: !!created, onclick: addURL }, t("new.addURL"))));
+      parts.push(conns.length ? h("details", { class: "repo-url-disclosure" }, h("summary", {}, t("new.orUrl")), urlFields) : urlFields);
+      parts.push(h("label", { class: "lbl" }, t("new.name"), name)); summarize();
     } else if (mode === "sample") {
-      parts.push(...state.samples.map((s) => h("div", {
-        class: "sample-card" + (sample === s.id ? " active" : ""),
-        onclick: () => { sample = s.id; name.value = s.name; draw(); },
-      }, h("div", { class: "row" }, icon("box", "sm"), h("strong", {}, s.name)), h("div", { class: "muted" }, s.description))));
-      if (!name.value && state.samples[0]) name.value = (state.samples.find((s) => s.id === sample) || state.samples[0]).name;
-      parts.push(h("div", {}, h("label", { class: "lbl" }, t("new.name")), name));
-    } else {
-      parts.push(h("div", { class: "muted" }, t(mode === "multi" ? "repos.createDesc" : "new.emptyDesc")), h("div", {}, h("label", { class: "lbl" }, t("new.name")), name));
-    }
+      parts.push(...state.samples.map((item) => h("button", { class: "sample-card" + (sample === item.id ? " active" : ""), onclick: () => { sample = item.id; name.value = item.name; draw(); } }, h("strong", {}, item.name), h("div", { class: "muted" }, item.description))));
+      if (!name.value && state.samples[0]) name.value = state.samples[0].name;
+      parts.push(h("label", { class: "lbl" }, t("new.name"), name));
+    } else parts.push(h("p", { class: "muted" }, t("new.emptyDesc")), h("label", { class: "lbl" }, t("new.name"), name));
     body.replaceChildren(...parts);
   };
   draw();
-  cancel.addEventListener("click", () => dialog.close());
+  cancel.addEventListener("click", () => { if (running) return; dialog.close(); if (created) openDraft(created.id); });
+  dialog.addEventListener("cancel", (event) => { if (running) event.preventDefault(); });
   dialog.addEventListener("close", () => dialog.remove());
   create.addEventListener("click", async () => {
+    if (running) return;
     err.textContent = "";
-    create.disabled = true;
-    create.textContent = mode === "git" ? t("new.cloning") : t("new.creating");
-    const req = { name: name.value || (mode === "git" ? (gitUrl.value.split("/").pop() || "").replace(/\.git$/, "") : "") };
-    if (mode === "git") Object.assign(req, { git_url: gitUrl.value, branch: branch.value });
-    if (mode === "sample") req.sample = sample;
-    if (mode === "multi") req.layout = "WORKSPACE_LAYOUT_MULTI";
+    if (mode === "git" && gitUrl.value.trim() && !addURL()) return;
+    if (mode === "git" && !selected.size) { err.textContent = t("new.chooseRepo"); return; }
+    if (!name.value.trim()) { err.textContent = t("new.nameRequired"); name.focus(); return; }
+    const submittedMode = mode;
+    const submittedName = name.value.trim();
+    const submittedSample = sample;
+    const entries = [...selected.entries()].map(([key, repo]) => [key, { ...repo, ref: repo.ref.trim(), path: repo.path.trim() }]);
+    const paths = entries.map(([, repo]) => repo.path);
+    if (submittedMode === "git" && (new Set(paths).size !== paths.length || paths.some((path) => !/^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$/.test(path)))) { err.textContent = t("new.invalidPath"); return; }
+    running = true; create.disabled = true; cancel.disabled = true; name.disabled = true;
+    body.inert = true; seg.inert = true;
+    for (const control of [...body.querySelectorAll("input,select,button,textarea"), ...seg.querySelectorAll("button")]) control.disabled = true;
+    create.textContent = t("new.creating");
     try {
-      const p = await api("POST", "/api/projects", req);
-      state.projects.unshift(p);
-      dialog.close();
-      openDraft(p.id);
-      if (mode === "multi") openWorkspaceRepos(p, null);
-      const s = mode === "sample" ? state.samples.find((x) => x.id === sample) : null;
-      if (s) setComposer(s.prompt);
+      if (!created) {
+        const req = { name: submittedName };
+        if (submittedMode === "git") req.layout = "WORKSPACE_LAYOUT_MULTI";
+        if (submittedMode === "sample") req.sample = submittedSample;
+        created = await api("POST", "/api/projects", req);
+        state.projects.unshift(created); renderSide();
+      }
+      if (submittedMode === "git") {
+        // Resolve uncertain replies before retrying: never create a duplicate workspace or attachment.
+        const current = (await api("GET", `/api/projects/${created.id}/repos`)).repos || [];
+        const normalizedURL = (url) => url.replace(/\/$/, "").replace(/\.git$/, "");
+        for (let i = 0; i < entries.length; i++) {
+          const [key, repo] = entries[i];
+          if (completed.has(key) || current.some((r) => normalizedURL(r.url) === normalizedURL(repo.clone_url) && r.path === repo.path)) { completed.add(key); continue; }
+          const repoName = repo.path;
+          progress.textContent = t("new.attachProgress", { n: i + 1, total: entries.length, name: repo.full_name });
+          await api("POST", `/api/projects/${created.id}/repos`, { repo: { name: repoName, path: repoName, url: repo.clone_url, ref: repo.ref, access: repo.can_push === false ? "REPO_ACCESS_READ" : "REPO_ACCESS_WRITE", primary: current.length === 0 && i === 0 } });
+          completed.add(key);
+        }
+      }
+      dialog.close(); openDraft(created.id);
+      const chosenSample = submittedMode === "sample" ? state.samples.find((item) => item.id === submittedSample) : null;
+      if (chosenSample) setComposer(chosenSample.prompt);
     } catch (ex) {
-      if (ex.message !== "unauthorized") err.textContent = ex.message;
-      create.disabled = false;
-      create.textContent = t("new.create");
+      err.textContent = created ? t("new.partial", { n: completed.size, error: ex.message }) : ex.message;
+      progress.textContent = "";
+      create.textContent = created ? t("new.retryRemaining") : t("new.create");
+      if (created) cancel.textContent = t("new.openCreated");
+    } finally {
+      running = false; create.disabled = false; cancel.disabled = false; body.inert = false; seg.inert = false;
+      for (const control of body.querySelectorAll("input,select,button,textarea")) control.disabled = false;
+      name.disabled = !!created;
+      if (dialog.isConnected) draw();
     }
   });
-  document.body.append(dialog);
-  dialog.showModal();
+  document.body.append(dialog); dialog.showModal();
 }
 
 async function deleteProject(p) {
