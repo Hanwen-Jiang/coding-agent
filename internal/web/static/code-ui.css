@@ -190,6 +190,14 @@ input[type="checkbox"],input[type="radio"] { width: 16px; height: 16px; accent-c
 .settings-tabs button { white-space: nowrap; }
 .settings-content .management-page { padding: 0; }
 .settings-content .management-page .d-head h2 { font-size: 20px; }
+.settings-content :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  color: var(--text);
+  min-height: 38px;
+  padding: 9px 12px;
+}
+.settings-content :is(input, textarea)::placeholder { color: var(--muted); opacity: 1; }
 .settings-content .personal-page { max-width: 720px; }
 .personal-page .d-head { padding: 0 0 20px; border: 0; }
 .personal-page .d-body { padding: 0; max-height: none; overflow: visible; gap: 16px; }
