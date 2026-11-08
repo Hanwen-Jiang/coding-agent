@@ -211,7 +211,7 @@ try {
   check(blocked.innerText.includes(t('env.statusBlocked')) && !$('.env-record'), 'blocked text: ' + blocked.innerText);
 
   // 复制会话：新会话从这个会话的工作副本复制，标题按语言加“副本”。
-  $('.topbar button[title="' + t('session.menuTitle') + '"]').click();
+  $('.topbar [data-topbar-menu]').click();
   const dup = await wait(() => [...$$('.pop-item')].find((b) => b.innerText.includes(t('session.duplicate'))), 'duplicate item');
   const title = (await session()).title;
   dup.click();

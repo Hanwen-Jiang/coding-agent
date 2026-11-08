@@ -116,6 +116,7 @@ const wait=async(test,label)=>{const end=Date.now()+10000;while(Date.now()<end){
 const check=(ok,message)=>{if(!ok)throw Error(message);};
 const post=async(path,body)=>{const r=await fetch(path,{method:'POST',headers:{'X-Coding-Web':'1','Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error(await r.text());return r.json();};
 try {
+ (await wait(()=>$('[data-topbar-menu]'),'workspace menu')).click();
  (await wait(()=>$('[data-repo-manage]'),'manage repositories')).click();
  await wait(()=>$('dialog [data-repo-attach]'),'attach form');
  const input=key=>$('dialog [aria-label="'+t(key)+'"]');
@@ -141,7 +142,7 @@ try {
  commit.click();
  await wait(()=>document.body.innerText.includes(t('commit.done',{hash:'abc'})),'scoped commit');
  document.querySelector('.drawer-head button[title="'+t('drawer.close')+'"]').click();
- $('[data-repo-manage]').click();await wait(()=>$('dialog [data-repo-name="docs"]'),'repo manager');
+ $('[data-topbar-menu]').click();(await wait(()=>$('[data-repo-manage]'),'manage repositories')).click();await wait(()=>$('dialog [data-repo-name="docs"]'),'repo manager');
  let confirmations=0;window.confirm=()=>{confirmations++;return true;};
  $('dialog [data-repo-name="docs"] button').click();
  await wait(()=>!$('dialog [data-repo-name="docs"]')&&!$('dialog [data-repo-attach]').disabled,'confirmed detach');

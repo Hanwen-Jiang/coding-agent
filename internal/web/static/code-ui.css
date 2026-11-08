@@ -400,3 +400,31 @@ dialog > .discovery-body { padding: 20px 28px; overflow-y: auto; max-height: 64d
 .network-approval-grid dt { color: var(--muted); }
 .network-approval-grid dd { margin: 0; overflow-wrap: anywhere; }
 .network-approval-details > p { margin: 10px 0 0; line-height: 1.6; }
+
+/* Compact context first; repository management and secondary navigation live in More. */
+.topbar-chat { gap: 12px; padding-inline: 24px; }
+.topbar-context { display: flex; flex: 1 1 auto; flex-direction: column; justify-content: center; min-width: 0; gap: 3px; }
+.topbar-context .crumb { display: block; max-width: 100%; width: fit-content; padding: 0; font: 11px/1.35 var(--font-sans); color: var(--muted); text-align: left; }
+.topbar-context .title { display: block; max-width: 100%; font: 550 14px/1.4 var(--font-sans); }
+.topbar-repository { flex: 0 1 160px; min-width: 0; }
+.topbar .topbar-repository select[data-repo-picker] { width: 100%; min-width: 0; max-width: 160px; height: 32px; padding: 5px 26px 5px 10px; font-size: 12px; text-overflow: ellipsis; background: var(--surface-2); border-color: transparent; }
+.topbar-actions { display: flex; align-items: center; flex: none; gap: 4px; }
+.topbar-actions .btn.icon-only { min-width: 32px; width: 32px; height: 32px; min-height: 32px; border-radius: 8px; }
+.topbar-menu-context { display: flex; flex-direction: column; gap: 5px; padding: 10px 9px 12px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.topbar-menu-context strong { font-weight: 600; }
+.topbar-menu-context > span { color: var(--muted); }
+.topbar-menu a.pop-item { text-decoration: none; color: var(--text); }
+.topbar-menu .pop-item .d { overflow-wrap: anywhere; }
+.topbar-utility { height: 0; min-height: 0; padding: 0; border: 0; }
+.topbar-utility.has-toggle { height: 44px; min-height: 44px; padding: 8px 24px 0; }
+@media(max-width:760px) {
+ .topbar-chat { height: 56px; min-height: 56px; padding-inline: 12px; gap: 8px; }
+ .topbar-chat .topbar-context .crumb { display: block; font-size: 10px; }
+ .topbar-context .title { font-size: 13px; }
+ .topbar-repository { flex: 0 0 104px; }
+ .topbar .topbar-repository select[data-repo-picker] { font-size: 11px; padding-left: 8px; padding-right: 20px; }
+ .topbar-actions { gap: 0; }
+ .topbar-utility,.topbar-utility.has-toggle { height: 44px; min-height: 44px; padding: 6px 12px 0; }
+}
+
+.topbar-chat > .btn.icon-only,.topbar-utility > .btn.icon-only { width: 32px; min-width: 32px; height: 32px; min-height: 32px; }

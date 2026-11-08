@@ -1910,42 +1910,66 @@ function userMenu(close) {
 
 // ---------------------------------------------------------------- 顶栏
 
+function topbarMenu(project, session, close) {
+  const repo = project.layout === "WORKSPACE_LAYOUT_MULTI" ? gitProject() : project;
+  const git = session ? gitSessionState() : {};
+  const source = repoURL(repo) || repo.source || "";
+  const branch = git.branch || repo.base_branch;
+  const items = [h("div", {class:"topbar-menu-context"},
+    h("strong",{},project.name),
+    h("span",{},session?.title || t("session.new")),
+    branch ? h("span",{class:"mono muted"},branch) : null)];
+  if (/^https:\/\//.test(source)) items.push(h("a", {class:"pop-item",href:source,target:"_blank",rel:"noopener noreferrer","data-topbar-source":""},icon("external","sm"),h("div",{class:"grow"},h("div",{class:"t"},t("topbar.repository")),h("div",{class:"d"},repo.repo || source))));
+  if (git.pr_url) items.push(h("a", {class:"pop-item",href:git.pr_url,target:"_blank",rel:"noopener noreferrer"},icon("branch","sm"),h("div",{class:"t"},t("topbar.review",{type:requestName(repo)}))));
+  if (project.layout === "WORKSPACE_LAYOUT_MULTI") {
+    const manage=popItem("folder",t("repos.manage"),null,false,()=>{close();openWorkspaceRepos(project,session);});
+    manage.dataset.repoManage="";items.push(manage);
+  }
+  if (session) {
+    for (const [tab,ic,label] of [["files","file","drawer.files"],["history","clock","drawer.history"]]) {
+      const action=popItem(ic,t(label),null,false,()=>{close();openDrawer(tab);});
+      action.dataset.topbarDrawer=tab;items.push(action);
+    }
+    items.push(h("div",{class:"pop-sep"}),...sessionMenu(project,session,close));
+  }
+  return items;
+}
+
 function renderTopbar() {
   if (!ui.topbar) return;
-  const p = state.project;
-  const s = state.session;
-  const parts = [
-    h("button", { class: "btn ghost sm icon-only only-narrow", title: t("side.open"), onclick: () => { state.sideOpen = true; applyLayout(); } }, icon("menu", "sm")),
-    state.sideCollapsed ? h("button", { class: "btn ghost sm icon-only only-wide", title: t("side.expand"), onclick: () => { state.sideCollapsed = false; ls.set("cw_side", "1"); applyLayout(); renderTopbar(); } }, icon("panelLeft", "sm")) : null,
+  const p=state.project,s=state.session;
+  const navigation=[
+    h("button",{class:"btn ghost sm icon-only only-narrow",title:t("side.open"),onclick:()=>{state.sideOpen=true;applyLayout();}},icon("menu","sm")),
+    state.sideCollapsed ? h("button",{class:"btn ghost sm icon-only only-wide",title:t("side.expand"),onclick:()=>{state.sideCollapsed=false;ls.set("cw_side","1");applyLayout();renderTopbar();}},icon("panelLeft","sm")) : null,
   ];
-  if (state.view === "workspaces") parts.push(h("span", { class: "title" }, t("nav.workspaces")));
-  else if (state.view === "activity") parts.push(h("span", { class: "title" }, t("nav.activity")));
-  else if (state.view === "environments") parts.push(h("span", { class: "title" }, t("nav.environments")));
-  else if (state.view === "settings") parts.push(h("span", { class: "title" }, t("settings.title")));
-  else if (p) {
-    parts.push(h("button", { class: "crumb ellipsis", title: t("ws.overview"), onclick: () => go("workspaces") }, p.name));
-    parts.push(h("span", { class: "crumb-sep" }, "/"));
-    parts.push(h("span", { class: "title ellipsis" }, s ? s.title || t("session.untitled") : t("session.new")));
-    parts.push(h("div", { class: "chips" },
-      p.repo ? h("a", { class: "chip", href: repoURL(p), target: "_blank", rel: "noopener" }, badge(p.git_provider, "xs"), p.repo) : null,
-      s && s.branch ? h("span", { class: "chip run mono" }, icon("branch", "xs"), s.branch) : p.base_branch ? h("span", { class: "chip mono" }, icon("branch", "xs"), p.base_branch) : null,
-      s && s.pr_url ? h("a", { class: "chip ok", href: s.pr_url, target: "_blank", rel: "noopener" }, `PR #${s.pr_number}`, icon("external", "xs")) : null,
-    ));
+  // Page views already have an h1 in their content; keep only the navigation affordance.
+  if (state.view !== "session" || !p) {
+    ui.topbar.className="topbar topbar-utility"+(state.sideCollapsed?" has-toggle":"");
+    ui.topbar.replaceChildren(...navigation.filter(Boolean));return;
   }
-  if (p && p.layout === "WORKSPACE_LAYOUT_MULTI" && state.view === "session") {
-    if (state.session && state.repos.length) {
-      const picker = h("select", { class: "field", "aria-label": t("repos.select"), "data-repo-picker": "" },
-        state.repos.map((repo) => h("option", { value: repo.name, selected: repo.name === state.repoName }, `${repo.name}${repo.access === "REPO_ACCESS_WRITE" ? "" : " · " + t("repos.readOnly")}`)));
-      picker.addEventListener("change", () => { state.repoName = picker.value; state.changes = null; renderTopbar(); renderStatus(); loadChanges(); if (state.drawer) renderDrawer(); });
-      parts.push(picker);
-    }
-    parts.push(h("button", { class: "btn sm", onclick: () => openWorkspaceRepos(p, state.session), "data-repo-manage": "" }, icon("folder", "sm"), t("repos.manage")));
+  ui.topbar.className="topbar topbar-chat";
+  const parts=[...navigation];
+  if (p) {
+    const title=s?.title || t("session.new");
+    parts.push(h("div",{class:"topbar-context"},
+      h("button",{class:"crumb ellipsis",title:p.name,"aria-label":t("ws.overview"),onclick:()=>go("workspaces")},p.name),
+      h("span",{class:"title ellipsis",title},title)));
+  } else parts.push(h("span",{class:"grow"}));
+  if (p?.layout === "WORKSPACE_LAYOUT_MULTI" && s && state.repos.length) {
+    const selected=selectedRepo();
+    const picker=h("select",{class:"field","aria-label":t("repos.select"),title:selected?.name || t("repos.select"),"data-repo-picker":""},
+      state.repos.map((repo)=>h("option",{value:repo.name,selected:repo.name===state.repoName},`${repo.name}${repo.access==="REPO_ACCESS_WRITE"?"":" · "+t("repos.readOnly")}`)));
+    picker.addEventListener("change",()=>{state.repoName=picker.value;state.changes=null;renderTopbar();renderStatus();loadChanges();if(state.drawer)renderDrawer();});
+    parts.push(h("div",{class:"topbar-repository"},picker));
   }
-  parts.push(h("span", { class: "grow" }));
-  if (inSession()) {
-    parts.push(h("button", { class: "btn ghost sm icon-only", title: t("drawer.title"), onclick: () => openDrawer("changes") }, icon("diff", "sm")));
-    parts.push(h("button", { class: "btn ghost sm icon-only", title: t("session.menuTitle"), onclick: (e) => openPop(e.currentTarget, (close) => sessionMenu(p, s, close)) }, icon("more", "sm")));
-    parts.push(h("button", { class: "btn ghost sm icon-only", title: state.statusOpen ? t("status.hide") : t("status.show"), onclick: toggleStatus }, icon("panelRight", "sm")));
+  if(p){
+    const actions=h("div",{class:"topbar-actions"});
+    if(inSession())actions.append(
+      h("button",{class:"btn ghost sm icon-only",title:t("drawer.title"),"data-topbar-drawer":"changes",onclick:()=>openDrawer("changes")},icon("diff","sm")),
+      h("button",{class:"btn ghost sm icon-only",title:t(state.statusOpen?"status.hide":"status.show"),"aria-pressed":String(state.statusOpen),onclick:toggleStatus},icon("panelRight","sm")));
+    const hasMenu = inSession() || p.layout === "WORKSPACE_LAYOUT_MULTI" || /^https:\/\//.test(repoURL(p) || p.source || "");
+    if (hasMenu) actions.append(h("button",{class:"btn ghost sm icon-only",title:t("topbar.actions"),"aria-haspopup":"menu","data-topbar-menu":"",onclick:(event)=>openPop(event.currentTarget,(close)=>topbarMenu(p,s,close),{className:"topbar-menu"})},icon("more","sm")));
+    if (actions.childElementCount) parts.push(actions);
   }
   ui.topbar.replaceChildren(...parts.filter(Boolean));
 }

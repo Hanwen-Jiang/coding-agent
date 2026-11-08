@@ -6,6 +6,9 @@
 const plural = (n, one, many) => (Number(n) === 1 ? one : many);
 
 const ZH = {
+  "topbar.actions": "更多操作",
+  "topbar.repository": "打开仓库",
+  "topbar.review": "查看 {type}",
   "network.durationUnavailable": "当前策略不支持所选授权时长。",
   "network.unlimited": "本任务不限时",
   "network.unlimitedHint": "不设分钟上限；任务结束或撤销授权时失效。",
@@ -930,6 +933,9 @@ const ZH = {
 };
 
 const EN = {
+  "topbar.actions": "More actions",
+  "topbar.repository": "Open repository",
+  "topbar.review": "Open {type}",
   "network.durationUnavailable": "The selected duration is not supported by the current policy.",
   "network.unlimited": "No time limit for this task",
   "network.unlimitedHint": "No minute limit. Access ends when the task finishes or the grant is revoked.",
