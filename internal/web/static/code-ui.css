@@ -5,7 +5,7 @@
   --page: #ffffff; --bg: #fafafa; --bg-side: #fafafa; --surface: #ffffff; --surface-2: #f4f4f5;
   --sunken: #f0f0f2; --user: #f4f4f5; --text: #18181b; --text-2: #3f3f46; --muted: #71717a;
   --faint: #a1a1aa; --line: #e8e8ec; --line-2: #d4d4d8;
-  --accent: #2563eb; --accent-2: #1d4ed8; --accent-soft: #eff6ff; --accent-ink: #fff;
+  /* Keep the established terracotta accent tokens from style.css in every theme. */
   --background: var(--page); --foreground: var(--text); --surface-secondary: var(--surface-2);
   --surface-tertiary: var(--sunken); --border: var(--line); --separator: var(--line);
   --accent-foreground: var(--accent-ink); --accent-soft-foreground: var(--accent-2);
@@ -19,14 +19,12 @@
   --page: #09090b; --bg: #09090b; --bg-side: #09090b; --surface: #18181b; --surface-2: #202024;
   --sunken: #27272a; --user: #202024; --text: #f4f4f5; --text-2: #d4d4d8; --muted: #a1a1aa;
   --faint: #71717a; --line: #27272a; --line-2: #3f3f46;
-  --accent: #60a5fa; --accent-2: #93c5fd; --accent-soft: #172554; --accent-ink: #07152c;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --page: #09090b; --bg: #09090b; --bg-side: #09090b; --surface: #18181b; --surface-2: #202024;
     --sunken: #27272a; --user: #202024; --text: #f4f4f5; --text-2: #d4d4d8; --muted: #a1a1aa;
     --faint: #71717a; --line: #27272a; --line-2: #3f3f46;
-    --accent: #60a5fa; --accent-2: #93c5fd; --accent-soft: #172554; --accent-ink: #07152c;
   }
 }
 button, a, summary, input[type="checkbox"] { cursor: var(--cursor-interactive); }
@@ -63,7 +61,7 @@ h1 { font-weight: 650; } h2 { font-weight: 600; }
 .ws-card .src { font-size: 12px; margin-top: 3px; }
 .ws-card .ws-icon { background: var(--surface-2); border-radius: 12px; color: var(--muted); }
 .ws-card .stats { margin-top: 18px; font-variant-numeric: tabular-nums; }
-.ws-card .actions { padding-top: 18px; margin-top: 18px; }
+.ws-card .actions { padding-top: 18px; margin-top: auto; }
 .ws-recent { margin-top: 14px; }
 .btn { border-radius: 10px; font-weight: 500; min-height: 36px; box-shadow: none; transition: background-color .12s; }
 .btn.sm { min-height: 32px; font-size: 12px; }
