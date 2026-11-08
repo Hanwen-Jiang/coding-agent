@@ -43,12 +43,18 @@ try{
  (await wait(()=>$('dialog.account'),'account')).close();location.hash='#/w/p/s/s';
  await wait(()=>$('[data-repo-picker]'),'repository selector');
  const bar=$('.topbar'),r=bar.getBoundingClientRect(),title=$('.topbar-context .title');
+ check(r.height===44,'chat header must stay 44px tall');
+ const statusHead=$('.status-head')?.getBoundingClientRect();
+ if(statusHead?.height)check(statusHead.height===44,'status header does not align with chat header');
+ const titleRect=title.getBoundingClientRect(),crumbRect=$('.topbar-context .crumb').getBoundingClientRect();
+ check(Math.abs((titleRect.top+titleRect.bottom)/2-(r.top+r.bottom)/2)<=1,'title not vertically centered');
+ if(innerWidth>760)check(Math.abs((titleRect.top+titleRect.bottom)/2-(crumbRect.top+crumbRect.bottom)/2)<=1,'context wraps into two rows');
  check(bar.scrollWidth<=bar.clientWidth&&r.right<=innerWidth,'header horizontal overflow');
  check(title.getBoundingClientRect().width>=36,'session title squeezed away');
  check(title.title.includes('Investigate')&&$('.topbar-context .crumb').title.includes('Customer analytics'),'full context lost');
  check(!$('.topbar .chips')&&!$('.topbar [data-repo-manage]'),'secondary metadata still consumes header space');
  check($$('.topbar-actions button').length===3,'unexpected header action count');
- for(const control of $$('.topbar-actions button')){const b=control.getBoundingClientRect();check(b.width>=30&&b.height>=30&&b.bottom<=r.bottom,'action hit area clipped');}
+ for(const control of $$('.topbar-actions button')){const b=control.getBoundingClientRect();check(b.width>=32&&b.height>=32&&b.top>=r.top&&b.bottom<=r.bottom,'action hit area clipped');}
  $('[data-topbar-menu]').click();
  await wait(()=>$('.topbar-menu [data-repo-manage]'),'repository management in menu');
  check(!!$('.topbar-menu [data-topbar-drawer="files"]')&&!!$('.topbar-menu [data-topbar-drawer="history"]'),'file/history shortcuts missing');
