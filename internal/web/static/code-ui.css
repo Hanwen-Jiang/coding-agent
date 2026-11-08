@@ -390,3 +390,7 @@ dialog > .discovery-body { padding: 20px 28px; overflow-y: auto; max-height: 64d
 .ctx-budget-title { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 2px; }
 .ctx-overflow { color: var(--warn); }
 .ctx-thresholds { line-height: 1.5; font-size: 11px; }
+.network-approval-grid { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 6px 14px; font-size: 12px; line-height: 1.6; margin: 10px 0; }
+.network-approval-grid dt { color: var(--muted); }
+.network-approval-grid dd { margin: 0; overflow-wrap: anywhere; }
+.network-approval-details > p { margin: 10px 0 0; line-height: 1.6; }

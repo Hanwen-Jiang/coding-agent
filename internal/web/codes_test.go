@@ -104,6 +104,8 @@ func codeCases() []codeCase {
 	}
 	out = append(out,
 		question("budget_exhausted", params{"budget": "wall_clock", "limit": 30, "used": 31.5}, "30", "31.5"),
+		question("network_permission_hosts", params{"hosts": []string{"docs.example.com", "api.example.com"}, "ports": []string{"443"}, "minutes": 15, "reason": "Check current documentation"}, "docs.example.com", "api.example.com", "443", "15", "Check current documentation"),
+		question("network_permission_public", params{"hosts": []string{}, "ports": []string{"80", "443"}, "minutes": 30, "reason": "Verify official sources"}, "80", "443", "30", "Verify official sources"),
 		question("finish_rejected", params{"count": 2}, "2"),
 		question("rule_recipe_over_ceiling", params{"recipe": "r1", "risk": "write_irreversible", "ceiling": "read"}, "r1"),
 

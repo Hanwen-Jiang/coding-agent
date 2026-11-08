@@ -4,7 +4,7 @@
 // 输入框随阶段变化）、工作区一览或进行中的任务。右栏是当前会话的环境、上下文、输出、改动与后台任务；diff、文件与提交历史在宽抽屉里打开。
 // DOM 一律用 textContent 构造，不拼 HTML。界面文字一律经 i18n.js 的 t() 取（中文与英文）。
 
-import { abortMarkdown, doneWhenText, errorText, exitWhenText, goalText, questionText, reasonText, retryDetail, retryTitle } from "./codes.js";
+import { abortMarkdown, doneWhenText, errorText, exitWhenText, goalText, networkPermission, questionText, reasonText, retryDetail, retryTitle } from "./codes.js";
 import { LANGS, lang, locale, setLang, t } from "./i18n.js";
 import { installScrollbars } from "./scrollbars.js";
 
@@ -2348,7 +2348,7 @@ function pendingAsk(task) {
     if (state.replied.has(qid) || events.slice(i + 1).some((e) => !QUIET.has(e.type) || interruptApplied(e))) return null;
     const raw = pick(v, "options", "choices") || ["approve", "reject"];
     const options = raw.map((o) => (typeof o === "string" ? { id: o, label: o } : { id: pick(o, "id", "value", "option"), label: pick(o, "label", "text", "id", "value") }));
-    return { qid, question: questionText(v) || pick(v, "question", "prompt", "summary", "message") || t("ask.default"), options };
+    return { qid, permission: networkPermission(v), question: questionText(v) || pick(v, "question", "prompt", "summary", "message") || t("ask.default"), options };
   }
   return null;
 }
@@ -3504,6 +3504,18 @@ function queuedEdited(task, v) {
   api("POST", `${sbase()}/tasks/${task.id}/message/result`, { applied }).catch(() => { /* 只影响这里记的消息，下次再说 */ });
 }
 
+function networkApprovalDetails(task, permission) {
+  const field = (label,value) => [h("dt",{},label),h("dd",{},value)];
+  return h("div",{class:"network-approval-details","data-network-task":task.id},
+    h("dl",{class:"network-approval-grid"},
+      field(t("networkApproval.task"),task.message || task.id),
+      field(t("networkApproval.purpose"),permission.reason),
+      field(t("networkApproval.scope"),permission.scope === "public" ? t("network.public") : permission.hosts.join(t("list.sep"))),
+      field(t("networkApproval.ports"),permission.ports.join(t("list.sep"))),
+      field(t("network.duration"),t("network.minutes",{minutes:permission.minutes}))),
+    h("p",{class:"muted small"},t("networkApproval.limit")));
+}
+
 function updateComposer(force = false) {
   if (!ui.composer || !state.project) return;
   const ph = phase();
@@ -3526,7 +3538,8 @@ function updateComposer(force = false) {
 
   if (ph.mode === "waiting") {
     ui.cAsk.className = "c-ask";
-    ui.cAsk.replaceChildren(h("div", { class: "h" }, icon("alert", "xs"), t("ask.title")), h("div", { class: "q" }, ph.ask.question));
+    ui.cAsk.replaceChildren(h("div", { class: "h" }, icon(ph.ask.permission ? "globe" : "alert", "xs"), t(ph.ask.permission ? "networkApproval.title" : "ask.title")),
+      ph.ask.permission ? networkApprovalDetails(ph.current,ph.ask.permission) : h("div", { class: "q" }, ph.ask.question));
   } else {
     ui.cAsk.className = "hidden";
     ui.cAsk.replaceChildren();
@@ -3551,7 +3564,8 @@ function updateComposer(force = false) {
       ui.cOpts.replaceChildren(...ph.ask.options.map((o) => h("button", {
         class: "btn sm" + (/approve|yes|continue/i.test(o.id) ? " primary" : ""),
         onclick: () => reply(ph.current, ph.ask, o.id),
-      }, optionLabel(o.label))));
+        "data-network-approval": ph.ask.permission ? o.id : null,
+      }, ph.ask.permission && ["approve","reject"].includes(o.id) ? t(`networkApproval.${o.id}`) : optionLabel(o.label))));
     } else {
       ui.cRight.replaceChildren(sendButton(ph));
       ui.cOpts.className = "hidden";
