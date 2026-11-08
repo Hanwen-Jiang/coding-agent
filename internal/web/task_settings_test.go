@@ -69,8 +69,8 @@ try{
  await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
  (await wait(()=>$('.task-settings-trigger'),'composer settings')).click();
  await wait(()=>$('.task-settings-panel'),'settings panel');
- check($$('.c-tools > .tool').length===2,'primary toolbar must only contain model and task settings');
- check(!!$('.composer-footer .c-hint'),'keyboard hints need their own row');
+ check($$('.c-tools-start > .tool').length===2,'primary toolbar must only contain model and task settings');
+ check(!$('.composer-footer') && $('#composer').title.includes('Enter'),'shortcuts must be in a tooltip, not another row');
  check($('.network-duration-field').hidden,'offline mode must hide grant duration');
  check($('[data-network-mode="open"]').disabled===(C.scope!=='public'),'public scope ignores policy');
  if(!C.allowed){check($('[data-network-mode="allowlist"]').disabled,'disabled policy exposes host access');}

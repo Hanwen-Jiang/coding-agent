@@ -3268,14 +3268,14 @@ function dock() {
   ui.cAsk = h("div", { class: "hidden" });
   ui.cRight = h("div", { class: "c-right" });
   ui.cOpts = h("div", { class: "hidden" });
-  ui.input = h("textarea", { class: "c-input", rows: 1, id: "composer", "aria-label": t("composer.aria") });
+  ui.input = h("textarea", { class: "c-input", rows: 1, id: "composer", "aria-label": t("composer.aria"), "aria-describedby": "composer-help" });
   ui.input.addEventListener("input", () => { autosize(); refreshSend(); });
   ui.input.addEventListener("keydown", onComposerKey);
-  ui.composer = h("div", { class: "composer" }, ui.cStatus, ui.cAsk, h("div", { class: "c-row" }, ui.input, ui.cRight), ui.cOpts);
+  ui.cHelp = h("span", {class:"composer-help",id:"composer-help"});
+  ui.composer = h("div", { class: "composer" }, ui.cStatus, ui.cAsk, h("div", { class: "c-row" }, ui.input, ui.cRight), ui.cOpts, ui.cHelp);
   ui.tools = h("div", { class: "c-tools" });
-  ui.cFooter = h("div", {class:"composer-footer"});
   ui.barKey = "";
-  return h("div", { class: "dock" }, h("div", { class: "dock-inner" }, ui.next, ui.composer, ui.tools, ui.cFooter));
+  return h("div", { class: "dock" }, h("div", { class: "dock-inner" }, ui.next, ui.composer, ui.tools));
 }
 
 function autosize() {
@@ -3571,8 +3571,11 @@ function updateComposer(force = false) {
       ui.cOpts.className = "hidden";
       ui.cOpts.replaceChildren();
     }
-    ui.tools.replaceChildren(modelTool(), taskSettingsTool(), h("span", { class: "grow" }), h("div", { class: "composer-usage" }, meterTool(m)));
-    ui.cFooter.replaceChildren(h("div", { class: "c-hint" }, hint(ph)));
+    ui.tools.replaceChildren(h("div", {class:"c-tools-start"}, modelTool(), taskSettingsTool()), h("div", {class:"c-tools-end"}, meterTool(m)));
+    const shortcuts = hint(ph).map((item) => item.textContent).join(" · ");
+    ui.cHelp.textContent = shortcuts;
+    ui.input.title = shortcuts;
+    if (ui.send?.isConnected && shortcuts) ui.send.title = shortcuts;
     ui.next.replaceChildren(...nextSteps(ph));
   }
   refreshSend();
@@ -3799,10 +3802,17 @@ function meterText(m) {
   return m.hasUsage ? t("meter.text", { tokens: fmtTokens(m.input + m.output), cost: fmtUSD(m.cost) }) : fmtUSD(m.cost);
 }
 
+function compactCost(value) {
+  if (value >= 1000000) return `$${Number((value / 1000000).toFixed(1))}M`;
+  if (value >= 1000) return `$${Number((value / 1000).toFixed(1))}k`;
+  return fmtUSD(value);
+}
+
 function meterTool(m) {
   return h("button", {
-    class: "tool",
-    title: t("meter.title"),
+    class: "tool usage-tool",
+    title: `${t("meter.title")} · ${meterText(m)}`,
+    "aria-label": `${t("meter.title")} · ${meterText(m)}`,
     onclick: (e) => openPop(e.currentTarget, () => {
       const mm = meter();
       const row = (k, v) => [h("span", { class: "k" }, k), h("span", { class: "v" }, v)];
@@ -3815,7 +3825,7 @@ function meterTool(m) {
           mm.hasUsage ? [row(t("meter.input"), fmtTokens(mm.input)), row(t("meter.output"), fmtTokens(mm.output)), row(t("meter.cache"), fmtTokens(mm.cacheRead))] : null),
       ];
     }),
-  }, icon("gauge", "sm"), h("span", { class: "v keep" }, meterText(m)));
+  }, h("span", { class: "v keep" }, compactCost(m.cost)));
 }
 
 // submit 发出一条任务。草稿时先开会话（复制工作副本，标题取这条消息的第一行），再提交。
@@ -4076,8 +4086,8 @@ function ctxPercent(tokens, total) {
   return `${(total > 0 ? (tokens / total) * 100 : 0).toFixed(1)}%`;
 }
 
-// 可用长度：超过它 Runtime 就开始压缩（压缩线），不超过模型的窗口。条形图以它为满格（Runtime 的 docs/plan/feedback-2026-11-01.md N-17）：
-// 模型窗口常有 100 万 token，按窗口画的话几万 token 的上下文只占一条细线，看不出多少。总数是这次实际计费的输入 token，各类按估算的比例分摊。
+// 本次预算作为占比的统一分母，不超过模型窗口。具体清理旧工具输出和摘要压缩阈值
+// 由事件提供；不能从预算本身推断压缩从何时开始。总量来自供应商，分类按估算比例分摊。
 function ctxUsable(usage) {
   const windowTokens = num(usage.window_tokens);
   const line = num(usage.effective_tokens);
