@@ -6,6 +6,11 @@
 const plural = (n, one, many) => (Number(n) === 1 ? one : many);
 
 const ZH = {
+  "network.durationUnavailable": "当前策略不支持所选授权时长。",
+  "network.unlimited": "本任务不限时",
+  "network.unlimitedHint": "不设分钟上限；任务结束或撤销授权时失效。",
+  "question.network_permission_hosts_unlimited": "是否允许本任务不限时访问 {hosts}？端口：{ports}。用途：{reason}。授权仅对本任务生效，任务结束或撤销时失效，仍受租户策略限制。",
+  "question.network_permission_public_unlimited": "是否允许本任务不限时访问全部公网？端口：{ports}。用途：{reason}。授权仅对本任务生效，任务结束或撤销时失效，仍受租户策略限制；内网与云元数据不在授权范围内。",
   "question.network_permission_hosts": "是否允许本任务临时访问 {hosts}？端口：{ports}；时长：{minutes} 分钟。用途：{reason}。仅对本任务生效，仍受租户策略限制。",
   "question.network_permission_public": "是否允许本任务临时访问全部公网？端口：{ports}；时长：{minutes} 分钟。用途：{reason}。仅对本任务生效，仍受租户策略限制；内网与云元数据不在授权范围内。",
   "networkApproval.title": "临时联网授权",
@@ -133,7 +138,7 @@ const ZH = {
   "network.minutes": "{minutes} 分钟",
   "network.reason": "提交本次任务时申请联网",
   "network.hostInput": "主机名单",
-  "network.hostsLabel": "主机（逗号分隔）",
+  "network.hostsLabel": "主机名单",
   "network.publicHint": "内网、云元数据仍禁止访问",
 
   "common.loading": "正在读取…",
@@ -925,6 +930,11 @@ const ZH = {
 };
 
 const EN = {
+  "network.durationUnavailable": "The selected duration is not supported by the current policy.",
+  "network.unlimited": "No time limit for this task",
+  "network.unlimitedHint": "No minute limit. Access ends when the task finishes or the grant is revoked.",
+  "question.network_permission_hosts_unlimited": "Allow this task access to {hosts} without a time limit? Ports: {ports}. Purpose: {reason}. This grant applies only to this task, ends on task completion or revocation, and remains subject to tenant policy.",
+  "question.network_permission_public_unlimited": "Allow this task access to all public hosts without a time limit? Ports: {ports}. Purpose: {reason}. This grant applies only to this task, ends on task completion or revocation, and remains subject to tenant policy. Private networks and cloud metadata are excluded.",
   "question.network_permission_hosts": "Allow this task temporary access to {hosts}? Ports: {ports}; duration: {minutes} minutes. Purpose: {reason}. This applies only to this task and remains subject to tenant policy.",
   "question.network_permission_public": "Allow this task temporary access to all public hosts? Ports: {ports}; duration: {minutes} minutes. Purpose: {reason}. This applies only to this task and remains subject to tenant policy. Private networks and cloud metadata are excluded.",
   "networkApproval.title": "Temporary network access",

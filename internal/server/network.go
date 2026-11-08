@@ -8,11 +8,12 @@ import (
 )
 
 type taskNetworkRequest struct {
-	Scope   string   `json:"scope"`
-	Hosts   []string `json:"hosts,omitempty"`
-	Ports   []int    `json:"ports,omitempty"`
-	Minutes int      `json:"minutes"`
-	Reason  string   `json:"reason"`
+	Scope     string   `json:"scope"`
+	Hosts     []string `json:"hosts,omitempty"`
+	Ports     []int    `json:"ports,omitempty"`
+	Minutes   int      `json:"minutes"`
+	Unlimited bool     `json:"unlimited,omitempty"`
+	Reason    string   `json:"reason"`
 }
 
 func (n *taskNetworkRequest) validate() error {
@@ -28,8 +29,14 @@ func (n *taskNetworkRequest) validate() error {
 	if n.Scope == "hosts" && len(n.Hosts) == 0 {
 		return msg("按主机联网需要填写主机名单")
 	}
-	if n.Minutes != 15 && n.Minutes != 30 && n.Minutes != 60 {
-		return msg("联网授权时长只能是 15、30、60 分钟")
+	if n.Minutes == 0 && !n.Unlimited {
+		return msg("不限时授权需要显式 unlimited=true")
+	}
+	if n.Minutes != 0 && n.Unlimited {
+		return msg("unlimited=true 只能与 minutes=0 一起使用")
+	}
+	if n.Minutes != 0 && n.Minutes != 15 && n.Minutes != 30 && n.Minutes != 60 {
+		return msg("联网授权时长只能是 0（本任务不限时）、15、30、60 分钟")
 	}
 	return nil
 }
@@ -38,7 +45,11 @@ func (n taskNetworkRequest) wire() map[string]any {
 	if n.Scope == "public" {
 		scope = "NETWORK_SCOPE_PUBLIC"
 	}
-	return map[string]any{"scope": scope, "hosts": n.Hosts, "ports": n.Ports, "minutes": n.Minutes, "reason": n.Reason}
+	out := map[string]any{"scope": scope, "hosts": n.Hosts, "ports": n.Ports, "minutes": n.Minutes, "reason": n.Reason}
+	if n.Unlimited {
+		out["unlimited"] = true
+	}
+	return out
 }
 
 // The Runtime authenticates the forwarded token and selects the tenant.
@@ -63,11 +74,12 @@ func (s *Server) handleNetworkPolicy(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	var policy struct {
-		Allowed    bool     `json:"allowed"`
-		Modes      []string `json:"modes"`
-		Hosts      []string `json:"hosts"`
-		MaxMinutes int      `json:"max_grant_minutes"`
-		Approver   string   `json:"approver"`
+		Allowed           bool     `json:"allowed"`
+		Modes             []string `json:"modes"`
+		Hosts             []string `json:"hosts"`
+		MaxMinutes        int      `json:"max_grant_minutes"`
+		Approver          string   `json:"approver"`
+		SupportsUnlimited bool     `json:"supports_unlimited"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&policy) != nil {
 		writeMsg(w, r, http.StatusBadGateway, "暂时无法读取联网策略")

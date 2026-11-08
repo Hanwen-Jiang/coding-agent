@@ -33,9 +33,9 @@ try{
  out.steps.approvedSameTask=replies[0].path==='/api/projects/p1/sessions/s1/tasks/t1/reply'&&replies[0].body.question_id==='network-hosts-1'&&replies[0].body.option==='approve';
  await push('tool_status',{tool:'web_fetch',target:'https://docs.example.com',state:'succeeded',round_seq:1});
  check(!!$('#turn-t1'),'approval replaced original task');
- await push('human_input_required',{question_id:'network-public-2',kind:'tool_approval',question_code:'network_permission_public',text:'RAW irreversible fallback',params:{hosts:[],ports:['80','443'],minutes:30,reason:'核对公开来源'},options:['approve','reject']});
+ await push('human_input_required',{question_id:'network-public-2',kind:'tool_approval',question_code:'network_permission_public_unlimited',text:'RAW irreversible fallback',params:{hosts:[],ports:['80','443'],minutes:0,reason:'核对公开来源'},options:['approve','reject']});
  const publicCard=await wait(()=>$('[data-network-task="t1"]'),'public approval');
- check(publicCard.textContent.includes('所有公网')&&publicCard.textContent.includes('30')&&publicCard.textContent.includes('80')&&publicCard.textContent.includes('核对公开来源'),'public scope fields missing');out.steps.publicVisible=true;
+ check(publicCard.textContent.includes('所有公网')&&publicCard.textContent.includes('本任务不限时')&&publicCard.textContent.includes('任务结束或撤销')&&publicCard.textContent.includes('80')&&publicCard.textContent.includes('核对公开来源'),'public scope fields missing');out.steps.publicVisible=true;
  $('[data-network-approval="reject"]').click();await wait(()=>replies.length===2,'rejected');
  out.steps.rejectedSameTask=replies[1].path===replies[0].path&&replies[1].body.question_id==='network-public-2'&&replies[1].body.option==='reject';
  out.steps.noAutoGrant=!requests.some(path=>/network.grant|network-grant|network_grant/.test(path));

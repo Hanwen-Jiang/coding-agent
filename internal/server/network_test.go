@@ -42,3 +42,24 @@ func TestNetworkPolicyProjectionUsesSessionToken(t *testing.T) {
 		t.Fatal("missing forwarded auth")
 	}
 }
+
+func TestUnlimitedNetworkRequestNeedsExplicitChoice(t *testing.T) {
+	for _, req := range []taskNetworkRequest{{Scope: "public", Minutes: 0}, {Scope: "public", Minutes: 60, Unlimited: true}} {
+		if req.validate() == nil {
+			t.Fatal("implicit or contradictory unlimited choice accepted")
+		}
+	}
+	req := taskNetworkRequest{Scope: "public", Minutes: 0, Unlimited: true}
+	if err := req.validate(); err != nil {
+		t.Fatal(err)
+	}
+	if req.wire()["unlimited"] != true || req.wire()["minutes"] != 0 {
+		t.Fatal(req.wire())
+	}
+	c, fake, _, _ := signed(t)
+	fake.networkPolicy = map[string]any{"allowed": true, "modes": []string{"deny", "allowlist", "open"}, "supports_unlimited": true, "max_grant_minutes": 60}
+	status, body, _ := c.do("GET", "/api/network-policy", nil)
+	if status != 200 || body["supports_unlimited"] != true {
+		t.Fatal(status, body)
+	}
+}

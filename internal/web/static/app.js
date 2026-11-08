@@ -1336,23 +1336,60 @@ function openPop(anchor, build, opts = {}) {
   closePop();
   const el = h("div", { class: "pop" + (opts.className ? " " + opts.className : ""), role: opts.role || "menu", "aria-label": opts.label || null });
   append(el, build(closePop));
-  const r = anchor.getBoundingClientRect();
-  if (opts.matchWidth) el.style.width = `${Math.max(r.width, 220)}px`;
+  if (opts.matchWidth) el.style.width = `${Math.max(anchor.getBoundingClientRect().width, 220)}px`;
+  el.style.overflowY = opts.internalScroll ? "hidden" : "auto";
   document.body.append(el);
-  const left = Math.min(Math.max(8, r.left), window.innerWidth - el.offsetWidth - 8);
-  let top = r.top - el.offsetHeight - 6;
-  if (top < 8) top = Math.min(r.bottom + 6, window.innerHeight - el.offsetHeight - 8);
-  el.style.left = `${left}px`;
-  el.style.top = `${top}px`;
+  let frame = 0;
+  const viewport = window.visualViewport;
+  const setStyle = (name,value) => {if (el.style[name] !== value) el.style[name]=value;};
+  const position = () => {
+    if (!anchor.isConnected || !el.isConnected) {if(pop?.el===el)closePop();return;}
+    const margin=8,gap=6;
+    const leftEdge=viewport?.offsetLeft || 0,topEdge=viewport?.offsetTop || 0;
+    const width=viewport?.width || innerWidth,height=viewport?.height || innerHeight;
+    const rightEdge=leftEdge+width,bottomEdge=topEdge+height;
+    const r=anchor.getBoundingClientRect();
+    const above=Math.max(0,r.top-topEdge-margin-gap),below=Math.max(0,bottomEdge-r.bottom-margin-gap);
+    const placeAbove=above>=below;
+    const available=placeAbove?above:below;
+    // Constrain height to the chosen side; on cramped visual viewports use the
+    // viewport itself so the settings footer remains reachable above the keyboard.
+    setStyle("maxHeight",`${Math.max(1,Math.min(height-margin*2,available<180?height-margin*2:available))}px`);
+    setStyle("maxWidth",`${Math.max(1,width-margin*2)}px`);
+    const box=el.getBoundingClientRect();
+    const left=Math.max(leftEdge+margin,Math.min(r.left,rightEdge-box.width-margin));
+    const preferred=placeAbove?r.top-gap-box.height:r.bottom+gap;
+    const top=Math.max(topEdge+margin,Math.min(preferred,bottomEdge-box.height-margin));
+    setStyle("left",`${left}px`);setStyle("top",`${top}px`);
+  };
+  const schedule = () => {
+    if (frame) return;
+    frame=requestAnimationFrame(()=>{frame=0;if(pop?.el===el)position();});
+  };
+  const observer=new ResizeObserver(schedule);
+  observer.observe(el);observer.observe(anchor);
+  for(const child of el.querySelectorAll("textarea"))observer.observe(child);
+  const mutations=new MutationObserver(schedule);
+  mutations.observe(el,{subtree:true,childList:true,attributes:true,attributeFilter:["hidden"]});
+  window.addEventListener("resize",schedule);
+  window.addEventListener("scroll",schedule,true);
+  viewport?.addEventListener("resize",schedule);viewport?.addEventListener("scroll",schedule);
   anchor.classList.add("open");
-  pop = { el, anchor };
+  pop={el,anchor,reposition:position,cleanup:()=>{
+    if(frame)cancelAnimationFrame(frame);
+    observer.disconnect();mutations.disconnect();
+    window.removeEventListener("resize",schedule);window.removeEventListener("scroll",schedule,true);
+    viewport?.removeEventListener("resize",schedule);viewport?.removeEventListener("scroll",schedule);
+  }};
+  position();
 }
 
 function closePop() {
   if (!pop) return;
-  pop.el.remove();
-  pop.anchor.classList.remove("open");
-  pop = null;
+  const previous=pop;pop=null;
+  previous.cleanup?.();
+  previous.el.remove();
+  previous.anchor.classList.remove("open");
   if (ui.barDirty) updateComposer(true);
 }
 
@@ -3512,8 +3549,8 @@ function networkApprovalDetails(task, permission) {
       field(t("networkApproval.purpose"),permission.reason),
       field(t("networkApproval.scope"),permission.scope === "public" ? t("network.public") : permission.hosts.join(t("list.sep"))),
       field(t("networkApproval.ports"),permission.ports.join(t("list.sep"))),
-      field(t("network.duration"),t("network.minutes",{minutes:permission.minutes}))),
-    h("p",{class:"muted small"},t("networkApproval.limit")));
+      field(t("network.duration"),permission.minutes===0 ? t("network.unlimited") : t("network.minutes",{minutes:permission.minutes}))),
+    h("p",{class:"muted small"},[permission.minutes===0?t("network.unlimitedHint"):"",t("networkApproval.limit")].filter(Boolean).join(" ")));
 }
 
 function updateComposer(force = false) {
@@ -3687,11 +3724,14 @@ function taskSettingsTool() {
       environment.value = environmentID;
       const hosts = h("textarea", { class: "field network-hosts-input", rows: 3, "aria-label": t("network.hostInput"), placeholder: "api.example.com\ndocs.example.com", value: (state.networkRequest?.hosts || policy.hosts || []).join("\n"), spellcheck: "false" });
       const limit = Math.max(1, Number(policy.max_grant_minutes) || 15);
-      const lengths = [...new Set([...([15, 30, 60].filter((minutes) => minutes <= limit)), Math.min(60,limit)])].sort((a,b)=>a-b);
-      const duration = h("select", { class: "field", "aria-label": t("network.duration") }, lengths.map((minutes) => h("option", { value: minutes }, t("network.minutes", { minutes }))));
+      const lengths = [15,30,60].filter((minutes) => minutes <= limit);
+      if (policy.allowed && policy.supports_unlimited === true) lengths.push(0);
+      const duration = h("select", { class: "field", "aria-label": t("network.duration") }, lengths.map((minutes) => h("option", { value: minutes }, minutes === 0 ? t("network.unlimited") : t("network.minutes", { minutes }))));
       duration.value = String(lengths.includes(state.networkRequest?.minutes) ? state.networkRequest.minutes : lengths[0]);
       const hostField = h("label", { class: "lbl network-hosts-field" }, t("network.hostsLabel"), hosts);
-      const durationField = h("label", { class: "lbl network-duration-field" }, t("network.duration"), duration);
+      const durationHint = h("span", {class:"muted small network-duration-hint",hidden:duration.value!=="0"},t("network.unlimitedHint"));
+      duration.addEventListener("change",()=>{durationHint.hidden=duration.value!=="0";});
+      const durationField = h("label", { class: "lbl network-duration-field" }, t("network.duration"), duration, durationHint);
       const note = h("p", { class: "muted small network-policy-note" });
       const options = h("div", { class: "network-mode-options", role: "radiogroup", "aria-label": t("network.title") });
       const error = h("div", { class: "err-text", role: "alert" });
@@ -3701,29 +3741,32 @@ function taskSettingsTool() {
           return h("button", { type: "button", role: "radio", "aria-checked": String(mode === id), class: "network-mode" + (mode === id ? " selected" : ""), disabled: !enabled, "data-network-mode": id, title: enabled ? t(key) : t("network.policyLimited"), onclick: () => {mode=id;draw();} }, t(key), !enabled ? icon("lock","xs") : null);
         }));
         hostField.hidden = mode !== "allowlist"; durationField.hidden = mode === "deny";
-        note.textContent = policy.error || (!policy.allowed ? t("network.disabled") : !modes.includes("open") ? t("network.publicLimited") : t("network.publicHint"));
+        note.textContent = policy.error || (!policy.allowed ? t("network.disabled") : !modes.includes("open") ? t("network.publicLimited") : "");
+        note.hidden = !note.textContent;
       };
       const apply = () => {
         error.textContent = "";
         const selectedHosts = [...new Set(hosts.value.split(/[,，\s]+/).map((value)=>value.trim()).filter(Boolean))];
         if (mode === "allowlist" && !selectedHosts.length) {error.textContent=t("network.hostRequired");hosts.focus();return false;}
         if (mode !== "deny" && (!policy.allowed || !modes.includes(mode))) {error.textContent=t("network.policyLimited");return false;}
+        if (mode !== "deny" && (!duration.value || (duration.value === "0" && policy.supports_unlimited !== true))) {error.textContent=t("network.durationUnavailable");return false;}
         state.settings.sandbox = sandbox.value; ls.set("cw_sandbox",sandbox.value);
         if (!state.session) {state.draftEnvironment=environment.value;ls.set(draftEnvironmentKey(),environment.value);}
-        state.networkRequest = mode === "deny" ? null : {scope:mode === "open" ? "public" : "hosts",hosts:mode === "open" ? [] : selectedHosts,minutes:Number(duration.value),reason:t("network.reason")};
+        state.networkRequest = mode === "deny" ? null : {scope:mode === "open" ? "public" : "hosts",hosts:mode === "open" ? [] : selectedHosts,minutes:Number(duration.value),...(duration.value === "0" ? {unlimited:true} : {}),reason:t("network.reason")};
         state.networkRequestTenant = state.me?.tenant;
         close();updateComposer(true);renderStatus();return true;
       };
       const panel = h("div", { class: "task-settings-panel" },
         h("div", { class: "task-settings-heading" }, h("strong", {}, t("taskSettings.title"))),
-        h("label", { class: "lbl" }, t("sandbox.heading"), sandbox),
-        h("div", { class: "task-settings-network" }, h("div", { class: "lbl" }, t("network.title")), options, hostField, durationField, note),
-        h("label", { class: "lbl" }, t("envcfg.heading"), environment),
-        h("button", { class: "btn task-settings-tools personal-tools", onclick: () => {if(apply())openPersonalConfig(true);} }, icon("box","sm"), t("personal.tools")),
-        error,
+        h("div", {class:"task-settings-scroll"},
+          h("label", { class: "lbl" }, t("sandbox.heading"), sandbox),
+          h("div", { class: "task-settings-network" }, h("div", { class: "lbl" }, t("network.title")), options, hostField, durationField, note),
+          h("label", { class: "lbl" }, t("envcfg.heading"), environment),
+          h("button", { class: "btn task-settings-tools personal-tools", onclick: () => {if(apply())openPersonalConfig(true);} }, icon("box","sm"), t("personal.tools")),
+          error),
         h("div", { class: "task-settings-actions" }, h("button", { class: "btn ghost sm", onclick: close }, t("common.cancel")), h("button", { class: "btn primary sm", "data-task-settings-apply": "", onclick: apply }, t("taskSettings.apply"))));
       draw();return panel;
-    }, {className:"task-settings-pop",role:"dialog",label:t("taskSettings.title")});
+    }, {className:"task-settings-pop",role:"dialog",label:t("taskSettings.title"),internalScroll:true});
   } }, icon("box","sm"), t("taskSettings.title"));
 }
 
@@ -4932,7 +4975,7 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("mousedown", (e) => {
   if (pop && !pop.el.contains(e.target) && !pop.anchor.contains(e.target)) closePop();
 });
-window.addEventListener("resize", closePop);
+// Open popovers observe their anchor, content and visual viewport until closed.
 
 // 浏览器的前进、后退：地址变了而且不是自己刚设的，就按地址重新打开。
 window.addEventListener("hashchange", () => {

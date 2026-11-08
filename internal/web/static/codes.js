@@ -35,23 +35,26 @@ export function reasonText(v) {
 
 // Only recognized, complete typed requests get the structured network approval UI.
 // The original HumanChannel question remains the fallback for older/malformed events.
+const NETWORK_QUESTIONS = new Set(["network_permission_hosts", "network_permission_public", "network_permission_hosts_unlimited", "network_permission_public_unlimited"]);
 export function networkPermission(v) {
-  if (!["network_permission_hosts", "network_permission_public"].includes(v.question_code)) return null;
+  if (!NETWORK_QUESTIONS.has(v.question_code)) return null;
   const p = v.params;
   if (!p || !Array.isArray(p.hosts) || !Array.isArray(p.ports) || !p.ports.length ||
       !p.hosts.every((host) => typeof host === "string" && host.trim()) ||
       !p.ports.every((port) => typeof port === "string" && port.trim()) ||
-      !Number.isInteger(p.minutes) || p.minutes <= 0 || typeof p.reason !== "string" || !p.reason.trim()) return null;
-  const scope = v.question_code === "network_permission_public" ? "public" : "hosts";
+      !Number.isInteger(p.minutes) || p.minutes < 0 || typeof p.reason !== "string" || !p.reason.trim()) return null;
+  if (v.question_code.endsWith("_unlimited") && p.minutes !== 0) return null;
+  const scope = v.question_code.startsWith("network_permission_public") ? "public" : "hosts";
   if (scope === "hosts" && !p.hosts.length) return null;
   return { scope, hosts:p.hosts, ports:p.ports, minutes:p.minutes, reason:p.reason };
 }
 
 // questionText 规则生成的问题用 Verdict 的代码：理由加上固定的三选一。翻不了时是事件的 text。
 export function questionText(v) {
-  if (["network_permission_hosts", "network_permission_public"].includes(v.question_code) && !networkPermission(v)) return v.text || "";
+  if (NETWORK_QUESTIONS.has(v.question_code) && !networkPermission(v)) return v.text || "";
   const params = messageParams(v.params);
-  const own = tCode(`question.${v.question_code}`, params);
+  const code = networkPermission(v)?.minutes === 0 ? `${v.question_code.replace(/_unlimited$/, "")}_unlimited` : v.question_code;
+  const own = tCode(`question.${code}`, params);
   if (own) return own;
   const why = tCode(`reason.${v.question_code}`, params);
   return why ? t("question.fromReason", { why }) : v.text || "";
