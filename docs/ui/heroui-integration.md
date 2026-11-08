@@ -17,3 +17,20 @@ Settings are reached from the account menu. Personal configuration, Skills and M
 Repository creation uses a single picker with multi-select, independent branches and mount directories. A submitted selection is frozen during creation. Each attachment uses the existing async workspace operation and idempotency mechanism. If an attachment fails, the dialog retains the created workspace, reads its current repository list and retries only unfinished attachments. Existing root-layout workspaces remain supported.
 
 Validation includes the existing Go/browser suite and `TestRepositoryMultiSelectAndManagementRoutesInBrowser` in both languages, checking the public request contract, read-only permissions, directory collisions, retained selection during search, frozen submission and retry behavior.
+
+## React conversation islands
+
+Assistant answers and streaming drafts now use real `ChatMessage.Assistant`, `Markdown` and `CodeBlock` components from `@heroui-pro/react` 1.0.0-beta.11, rendered by React 19.3.1. The TypeScript/TSX source is under `ui/chat`. Existing task transport, SSE replay, approvals, steering, file delivery and the composer remain application-owned JavaScript. This is a gradual React migration, not a full rewrite.
+
+`mountAnswer(container, props)` returns stable `update(props)` and `unmount()` methods. An answer retains its DOM host while its stream changes; disconnected hosts are unmounted after DOM mutations. Markdown disallows executable HTML and dangerous link protocols, and external links use `noopener noreferrer`. Code copying uses a native action because the library's animated copy button injects inline styles that the application's existing CSP rejects. The real Pro code block and Shiki rendering remain intact. No CSP exception was added.
+
+The bundle uses a finite Shiki grammar set with its JavaScript regex engine, so syntax highlighting requires no CDN, worker or WASM fetch. Unsupported languages render as plain code. Upstream Pro CSS for the three components is enclosed in `@scope (.pro-chat)` and cannot reset the rest of the application.
+
+Rebuild with the licensed, installed component packages supplied by the project:
+
+```sh
+npm ci --prefix ui --ignore-scripts --legacy-peer-deps
+node ui/build.mjs /path/to/node_modules
+```
+
+The build verifies the package versions, bundles all runtime dependencies into same-origin `chat-ui.js`, writes scoped `chat-ui.css`, and records component/version/size metadata in `ui/build-meta.json`. Production still runs the Go service with checked-in embedded assets; it does not need Node. The existing public API interfaces are unchanged.

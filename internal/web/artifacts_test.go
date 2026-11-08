@@ -22,7 +22,7 @@ func TestTheResultListsFilesBeforeTheAnswer(t *testing.T) {
 	if fn == "" {
 		t.Fatal("找不到 result()")
 	}
-	files, answer := strings.Index(fn, `class: "deliverables"`), strings.Index(fn, `class: "answer"`)
+	files, answer := strings.Index(fn, `class: "deliverables"`), strings.Index(fn, `richAnswer(text,task.id,false)`)
 	if files < 0 || answer < 0 || files > answer {
 		t.Fatalf("交付区要先列文件（deliverables）再给文字（answer）：files=%d answer=%d", files, answer)
 	}

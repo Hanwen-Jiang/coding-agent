@@ -169,7 +169,9 @@ try {
   panel.querySelector('details.env-older summary').click();
   const older = await wait(() => $('.env-older-row'), 'older record');
   check(older.querySelector('.chip').innerText === t('env.state.unconfirmed'), 'unconfirmed READY: ' + older.innerText);
+  $('.task-settings-trigger').click();await wait(()=>$('[data-environment-select]'),'task settings');
   check($('[data-environment-select]').disabled && $('[data-environment-select]').innerText.includes(C.env), 'composer shows the bound environment');
+  $('[data-task-settings-apply]').click();
 
   // 拉取 main（sync）：会话的基线提交变成远端的最新提交。
   const sync = await wait(() => $('[data-action="sync"]'), 'sync button');

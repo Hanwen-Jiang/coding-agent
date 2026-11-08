@@ -1,0 +1,13 @@
+{
+  "packages": {
+    "@heroui-pro/react": "1.0.0-beta.11",
+    "react": "19.3.1",
+    "shiki": "4.6.0"
+  },
+  "output_bytes": 2275036,
+  "components": [
+    "chat-message",
+    "markdown",
+    "code-block"
+  ]
+}

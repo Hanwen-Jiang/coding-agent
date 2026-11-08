@@ -1,0 +1,36 @@
+{
+  "name": "coding-agent-chat-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@react-aria/ssr": "3.10.1",
+    "esbuild": "0.28.2"
+  },
+  "peerDependencies": {
+    "@heroui-pro/react": "1.0.0-beta.11",
+    "@heroui/react": "3.2.7",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "shiki": "4.6.0"
+  },
+  "peerDependenciesMeta": {
+    "@heroui-pro/react": {
+      "optional": true
+    },
+    "@heroui/react": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "shiki": {
+      "optional": true
+    }
+  }
+}

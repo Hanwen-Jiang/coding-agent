@@ -699,6 +699,76 @@ function personalTool() {
   return h("button", { class: "tool personal-tools", onclick: () => openPersonalConfig(true), title: t("personal.tools") }, icon("box", "sm"), t("personal.tools"));
 }
 
+function builtinSkillSummary(skill) {
+  return lang === "zh" && skill.scope === "platform" && ["commit-and-pr", "deliver-files", "explore-repo", "write-tests"].includes(skill.name)
+    ? t(`skills.summary.${skill.name}`) : "";
+}
+
+async function viewSkill(name) {
+  const content = h("div", { class: "d-body discovery-preview-content" }, t("common.loading"));
+  const dialog = h("dialog", { class: "discovery-preview skill-preview" },
+    h("div", { class: "d-head" }, h("h2", {}, name)), content,
+    h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))));
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog); dialog.showModal();
+  try {
+    const { skill } = await api("GET", `/api/skills/${encodeURIComponent(name)}`);
+    if (!dialog.isConnected) return;
+    content.replaceChildren(h("span", { class: "chip" }, t(`skills.scope.${skill.scope || "user"}`)),
+      h("p", { class: "muted small" }, builtinSkillSummary(skill) || skill.description || ""),
+      h("div", { class: "skill-instructions-document" }, md(skill.instructions || "")),
+      skill.files?.length ? h("details", {}, h("summary", {}, t("skills.files", { n: skill.files.length })), h("ul", {}, skill.files.map((file) => h("li", { class: "mono small" }, file.path)))) : null);
+  } catch (error) { content.replaceChildren(h("p", { class: "err-text", role: "alert" }, error.message)); }
+}
+
+// Tool selections keep their identity, summary and provenance separate. Search only
+// changes the visible rows; selection remains attached to stable API identifiers.
+function toolChoices(items, selected, key, label, inheritEmpty = false) {
+  const present = new Set(items.map((item) => item.id));
+  const options = [...items];
+  for (const id of selected || []) if (!present.has(id)) options.push({ id, name: id, description: "", source: t("personal.missing"), missing: true });
+  const checked = new Set(selected || options.map((item) => item.id));
+  const search = h("input", { type: "search", class: "field tool-choice-search", placeholder: t("personal.searchTools"), "aria-label": `${label} · ${t("personal.searchTools")}` });
+  const count = h("span", { class: "tool-choice-count", "aria-live": "polite" });
+  const list = h("div", { class: "tool-choice-list" });
+  const updateCount = () => {
+    const n = rows.filter((row) => row.input.checked).length;
+    count.textContent = inheritEmpty && rows.length && !n ? t("personal.inheritAll") : t("personal.selectedTools", { n, total: rows.length });
+  };
+  const rows = options.map((item) => {
+    const input = h("input", { type: "checkbox", checked: checked.has(item.id), "data-reference": item.id, "aria-label": item.name });
+    const title = h("span", { class: "tool-choice-name" }, item.name);
+    const summary = h("span", { class: "tool-choice-description" }, item.summary || item.description || t("personal.noDescription"));
+    const select = h("label", { class: "tool-choice-select" },
+      h("span", { class: "tool-choice-icon", "aria-hidden": "true" }, icon(key === "personal-skills" ? "sparkles" : "link", "sm")),
+      h("span", { class: "tool-choice-copy" }, h("span", { class: "tool-choice-heading" }, title, item.source ? h("span", { class: "tool-choice-source" }, item.source) : null), summary),
+      input);
+    const row = h("div", { class: "tool-choice" + (input.checked ? " selected" : "") + (item.missing ? " unavailable" : ""), "data-tool-choice": item.id }, select,
+      (item.summary || item.description?.length > 130) ? h("details", { class: "tool-choice-detail" }, h("summary", {}, t("personal.fullDescription")), h("p", {}, item.description)) : null);
+    input.addEventListener("change", () => { row.classList.toggle("selected", input.checked); updateCount(); });
+    return { input, row, searchText: `${item.name} ${item.summary || ""} ${item.description || ""} ${item.source || ""}`.toLowerCase() };
+  });
+  const draw = () => {
+    const query = search.value.trim().toLowerCase();
+    const shown = rows.filter((item) => !query || item.searchText.includes(query));
+    list.replaceChildren(...(shown.length ? shown.map((item) => item.row) : [h("p", { class: "tool-choice-empty" }, t(rows.length ? "personal.noMatch" : "personal.empty"))]));
+    updateCount();
+  };
+  const selectVisible = (value) => {
+    const query = search.value.trim().toLowerCase();
+    for (const item of rows) if (!query || item.searchText.includes(query)) { item.input.checked = value; item.row.classList.toggle("selected", value); }
+    updateCount();
+  };
+  search.addEventListener("input", draw);
+  const el = h("fieldset", { class: `${key} tool-choice-group` }, h("legend", {}, label),
+    h("div", { class: "tool-choice-toolbar" }, search, count), list,
+    rows.length ? h("div", { class: "tool-choice-actions" },
+      h("button", { type: "button", class: "btn ghost xs", onclick: () => selectVisible(true) }, t("personal.selectVisible")),
+      h("button", { type: "button", class: "btn ghost xs", onclick: () => selectVisible(false) }, t("personal.clearVisible"))) : null);
+  draw();
+  return { el, values: () => rows.filter((item) => item.input.checked).map((item) => item.row.dataset.toolChoice) };
+}
+
 async function openPersonalConfig(sessionOnly = false, container = null) {
   if (!container && document.querySelector("dialog.personal-config")) return;
   const choiceKey = personalChoiceKey();
@@ -729,17 +799,10 @@ async function openPersonalConfig(sessionOnly = false, container = null) {
       fileRows.push(item); fileList.append(row);
     };
     (doc.files || []).forEach(addFile);
-    const choices = (items, selected, key, label) => {
-      const present = new Set(items.map((x) => x.id));
-      for (const id of selected || []) if (!present.has(id)) items.push({ id, name: `${id} · ${t("personal.missing")}` });
-      const checked = new Set(selected || items.map((x) => x.id));
-      const inputs = items.map((item) => ({ id: item.id, name: item.name, input: h("input", { type: "checkbox", checked: checked.has(item.id), "data-reference": item.id }) }));
-      return { el: h("fieldset", { class: key }, h("legend", {}, label), inputs.length ? inputs.map((x) => h("label", { class: "row" }, x.input, x.name)) : h("p", { class: "muted" }, t("personal.empty"))), values: () => inputs.filter((x) => x.input.checked).map((x) => x.id) };
-    };
     const skillDefault = defaults.skillNames?.length ? defaults.skillNames : undefined;
     const mcpDefault = defaults.mcpConnectionIds?.length ? defaults.mcpConnectionIds : undefined;
-    const skillChoices = choices((skills.skills || []).filter((x) => !x.shadowed).map((x) => ({ id: x.name, name: `${x.name} · ${x.description || ""}` })), chosen?.skill_names ?? (sessionOnly ? skillDefault : defaults.skillNames || []), "personal-skills", t("skills.open"));
-    const mcpChoices = choices((mcp.connections || []).filter((x) => x.tools?.some((tool) => tool.enabled)).map((x) => ({ id: x.connection_id, name: x.name })), chosen?.mcp_connection_ids ?? (sessionOnly ? mcpDefault : defaults.mcpConnectionIds || []), "personal-mcp", t("mcp.open"));
+    const skillChoices = toolChoices((skills.skills || []).filter((x) => !x.shadowed).map((x) => ({ id: x.name, name: x.name, description: x.description || "", summary: builtinSkillSummary(x), source: t(`skills.scope.${x.scope || "user"}`) })), chosen?.skill_names ?? (sessionOnly ? skillDefault : defaults.skillNames || []), "personal-skills", t("skills.open"), !sessionOnly);
+    const mcpChoices = toolChoices((mcp.connections || []).filter((x) => x.tools?.some((tool) => tool.enabled)).map((x) => ({ id: x.connection_id, name: x.name, description: x.server_name || x.url || "", source: t("mcp.enabledCount", { n: (x.tools || []).filter((tool) => tool.enabled).length }) })), chosen?.mcp_connection_ids ?? (sessionOnly ? mcpDefault : defaults.mcpConnectionIds || []), "personal-mcp", t("mcp.open"), !sessionOnly);
     const environment = h("select", { class: "personal-environment", "aria-label": t("personal.environment") }, h("option", { value: "" }, t("personal.noEnvironment")), ...environments.map((x) => h("option", { value: x.id }, x.name)));
     if (defaults.environmentId && !environments.some((x) => x.id === defaults.environmentId)) environment.append(h("option", { value: defaults.environmentId }, `${defaults.environmentId} · ${t("personal.missing")}`));
     environment.value = defaults.environmentId || "";
@@ -763,7 +826,8 @@ async function openPersonalConfig(sessionOnly = false, container = null) {
         h("p", { class: "muted" }, t("personal.defaultNote"))] : []),
       skillChoices.el, mcpChoices.el,
       ...(!sessionOnly ? [h("label", { class: "lbl" }, t("personal.environment"), environment),
-        h("p", { class: "muted small personal-version" }, config.version ? `${config.version} · ${config.digest}` : "")] : []), save,
+        h("p", { class: "muted small personal-version" }, config.version ? `${config.version} · ${config.digest}` : ""),
+        h("p", { class: "muted small personal-inherit-hint" }, t("personal.inheritHint"))] : []), save,
       ...(!sessionOnly && config.version ? [h("button", { class: "btn ghost personal-retire", onclick: async () => {
         if (!confirm(t("personal.retireConfirm"))) return;
         try { await api("DELETE", "/api/personal-config"); state.personalConfig = null; finish(); } catch (ex) { report(ex); }
@@ -823,6 +887,167 @@ async function openSecrets() {
   await reload();
 }
 
+function publicSourceLink(url, label, cls = "") {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return null;
+    return h("a", { class: cls, href: parsed.href, target: "_blank", rel: "noopener noreferrer" }, label, icon("external", "xs"));
+  } catch { return null; }
+}
+
+function discoveryTabs(dialog, kind, onChoose) {
+  const owned = dialog.querySelector(".d-body");
+  const browse = h("div", { class: "discovery-body", hidden: true });
+  const tabs = h("div", { class: "seg discovery-tabs", role: "tablist", "aria-label": t("explore.views") });
+  const mine = h("button", { type: "button", role: "tab", class: "active", "aria-selected": "true", "data-discovery-tab": "mine" }, t("explore.mine"));
+  const explore = h("button", { type: "button", role: "tab", "aria-selected": "false", "data-discovery-tab": "explore" }, t("explore.title"));
+  let loaded = false;
+  const show = (isExplore) => {
+    owned.hidden = isExplore; browse.hidden = !isExplore;
+    mine.classList.toggle("active", !isExplore); explore.classList.toggle("active", isExplore);
+    mine.setAttribute("aria-selected", String(!isExplore)); explore.setAttribute("aria-selected", String(isExplore));
+    if (isExplore && !loaded) { loaded = true; renderDiscovery(browse, kind, async (item) => { await onChoose(item); show(false); }); }
+  };
+  mine.onclick = () => show(false); explore.onclick = () => show(true);
+  tabs.append(mine, explore);
+  dialog.querySelector(".d-head").append(tabs);
+  owned.after(browse);
+}
+
+function renderDiscovery(root, kind, onChoose) {
+  const isSkill = kind === "skills";
+  const query = h("input", { type: "search", class: "field discovery-query", placeholder: t(isSkill ? "explore.skillSearch" : "explore.mcpSearch"), "aria-label": t("explore.search") });
+  const search = h("button", { class: "btn", type: "submit" }, t("explore.search"));
+  const repository = h("input", { class: "field discovery-repo", value: "anthropics/skills", placeholder: "owner/repository", "aria-label": t("explore.repository") });
+  const sources = h("select", { class: "field discovery-sources", "aria-label": t("explore.source") }, h("option", { value: "anthropics/skills" }, "Anthropic"), h("option", { value: "custom" }, t("explore.customRepo")));
+  const sourceRow = h("div", { class: "discovery-source-row" }, sources, repository);
+  const results = h("div", { class: "discovery-results" });
+  const notice = h("div", { class: "discovery-notice", role: "status", "aria-live": "polite" });
+  const more = h("button", { class: "btn discovery-more", type: "button", hidden: true }, t("explore.more"));
+  const warnings = h("div", { class: "discovery-warnings" });
+  const searchForm = h("form", { class: "discovery-search-form" }, isSkill ? sourceRow : null, h("div", { class: "discovery-search-row" }, query, search));
+  let next = "", pageItems = [], sequence = 0, lastParams = null;
+  const summary = h("p", { class: "discovery-lead" }, t(isSkill ? "explore.skillLead" : "explore.mcpLead"));
+  root.replaceChildren(summary, searchForm, notice, warnings, results, more);
+  repository.hidden = true;
+  sources.onchange = () => {
+    repository.hidden = sources.value !== "custom";
+    searchForm.classList.toggle("custom-repository", sources.value === "custom");
+    if (sources.value !== "custom") { repository.value = sources.value; load(false); }
+    else { repository.value = ""; repository.focus(); }
+  };
+  searchForm.onsubmit = (event) => { event.preventDefault(); load(false); };
+  more.onclick = () => load(true);
+  const description = (text) => text ? h("p", { class: "discovery-description" }, text) : null;
+  const row = (item) => {
+    const canConnect = (item.remotes || []).some((remote) => remote.connectable !== false && remote.transport === "streamable-http" && /^https:\/\//.test(remote.url));
+    return h("article", { class: "discovery-card", "data-discovery-id": item.id || item.name },
+      h("div", { class: "discovery-card-heading" }, h("span", { class: "discovery-icon", "aria-hidden": "true" }, icon(isSkill ? "sparkles" : "link", "sm")),
+        h("div", { class: "grow" }, h("h3", {}, item.name), h("span", { class: "discovery-source" }, isSkill ? item.repository : item.version || "MCP Registry"))),
+      description(item.description),
+      h("div", { class: "discovery-card-foot" },
+        !isSkill ? h("span", { class: "chip" }, t(canConnect ? "explore.remote" : "explore.local")) : h("span", { class: "discovery-source" }, item.path?.replace(/\/SKILL\.md$/, "") || "SKILL.md"),
+        h("button", { type: "button", class: "btn sm", "data-discovery-preview": "", onclick: () => preview(item) }, t("explore.preview"))));
+  };
+  async function load(append) {
+    const text = query.value.trim();
+    if (!isSkill && text && [...text].length < 3) { notice.textContent = t("explore.minQuery"); return; }
+    if (isSkill && !repository.value.trim()) { notice.textContent = t("explore.repoRequired"); repository.focus(); return; }
+    const request = ++sequence;
+    const params = append && lastParams ? new URLSearchParams(lastParams) : new URLSearchParams({ query: text });
+    if (isSkill && !append) params.set("repo", repository.value.trim());
+    if (append && next) params.set("cursor", next);
+    else { lastParams = params.toString(); pageItems = []; results.replaceChildren(); warnings.replaceChildren(); }
+    search.disabled = true; more.disabled = true; notice.replaceChildren(h("span", { class: "spinner" }), t("common.loading"));
+    try {
+      const data = await api("GET", `/api/discovery/${kind}?${params}`);
+      if (request !== sequence || !root.isConnected) return;
+      if (isSkill && data.sources?.length) {
+        const selected = sources.value;
+        sources.replaceChildren(...data.sources.map((source) => h("option", { value: source.repository }, source.name)), h("option", { value: "custom" }, t("explore.customRepo")));
+        sources.value = [...sources.options].some((option) => option.value === selected) ? selected : "custom";
+      }
+      const seen = new Set(pageItems.map((item) => item.id || `${item.name}:${item.version || ""}`));
+      pageItems.push(...(data.items || []).filter((item) => !seen.has(item.id || `${item.name}:${item.version || ""}`)));
+      next = data.next_cursor || "";
+      if (isSkill && data.ref) {
+        const pinned = new URLSearchParams(lastParams); pinned.set("ref", data.ref); lastParams = pinned.toString();
+      }
+      warnings.replaceChildren(...(data.warnings?.length ? [h("details", {}, h("summary", {}, t("explore.skipped", { n: data.warnings.length })), h("ul", {}, data.warnings.map((warning) => h("li", {}, warning))))] : []));
+      notice.textContent = pageItems.length ? t("explore.resultCount", { n: pageItems.length }) : t("explore.noResults");
+      results.replaceChildren(...pageItems.map(row)); more.hidden = !next;
+    } catch (error) {
+      if (request !== sequence) return;
+      notice.replaceChildren(h("span", { class: "err-text" }, error.message), h("button", { class: "btn sm", type: "button", onclick: () => load(append) }, t("common.reload")));
+    } finally {
+      if (request === sequence) { search.disabled = false; more.disabled = false; }
+    }
+  }
+  const packageDetails = (pkg) => {
+    const runtime = pkg.runtime_hint || pkg.runtimeHint;
+    const argumentsList = [...(pkg.runtime_arguments || pkg.runtimeArguments || []), ...(pkg.package_arguments || pkg.packageArguments || [])];
+    const variables = pkg.environment_variables || pkg.environmentVariables || [];
+    return h("div", { class: "discovery-package" },
+      h("div", { class: "row" }, h("strong", { class: "mono" }, pkg.identifier || pkg.name), h("span", { class: "chip" }, pkg.registry_type || pkg.registryType || "package")),
+      h("p", { class: "muted small" }, [pkg.version, typeof pkg.transport === "string" ? pkg.transport : pkg.transport?.type].filter(Boolean).join(" · ")),
+      runtime ? h("dl", { class: "discovery-package-meta" }, h("dt", {}, t("explore.runtime")), h("dd", { class: "mono" }, runtime)) : null,
+      argumentsList.length ? h("div", { class: "discovery-package-options" }, h("h4", {}, t("explore.arguments")), argumentsList.map((arg) => h("div", {},
+        h("code", {}, arg.secret ? arg.name || t("explore.secretArgument") : arg.value || arg.name || ""),
+        arg.description ? h("span", { class: "muted small" }, arg.description) : null))) : null,
+      variables.length ? h("div", { class: "discovery-package-options" }, h("h4", {}, t("explore.environment")), variables.map((variable) => h("div", {},
+        h("code", {}, variable.name), variable.required || variable.isRequired ? h("span", { class: "chip" }, t("explore.required")) : null,
+        variable.description ? h("p", { class: "muted small" }, variable.description) : null))) : null);
+  };
+  async function preview(item) {
+    const content = h("div", { class: "d-body discovery-preview-content" }, t("common.loading"));
+    const close = h("button", { type: "button", class: "btn ghost", onclick: () => dialog.close() }, t("common.close"));
+    const actions = h("div", { class: "d-foot" }, close);
+    const dialog = h("dialog", { class: "discovery-preview" }, h("div", { class: "d-head" }, h("h2", {}, item.name)), content, actions);
+    dialog.addEventListener("close", () => dialog.remove());
+    document.body.append(dialog); dialog.showModal();
+    try {
+      if (isSkill) {
+        const params = new URLSearchParams({ repo: item.repository, path: item.path, ref: item.ref || "HEAD" });
+        const detail = await api("GET", `/api/discovery/skills/detail?${params}`);
+        if (!dialog.isConnected) return;
+        content.replaceChildren(
+          h("p", { class: "discovery-preview-description" }, detail.description || item.description || ""),
+          publicSourceLink(detail.url || item.url, detail.repository || item.repository, "discovery-source-link"),
+          detail.has_supporting_files ? h("div", { class: "discovery-supporting" }, h("strong", {}, t("explore.supportingTitle")), h("p", {}, t("explore.supportingNote")),
+            h("ul", {}, (detail.reference_files || []).slice(0, 30).map((path) => h("li", { class: "mono" }, path)))) : null,
+          h("details", { class: "discovery-document", open: true }, h("summary", {}, "SKILL.md"), h("pre", {}, detail.instructions || "")));
+        if (detail.importable === true) {
+          const importName = h("input", { class: "field discovery-import-name", value: String(detail.name || item.name).toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^[^a-z]+/, "").slice(0, 64), maxlength: 64, "aria-label": t("explore.importName") });
+          const error = h("div", { class: "err-text", role: "alert" });
+          const add = h("button", { class: "btn primary", type: "button", "data-discovery-add": "", onclick: async () => {
+            if (!/^[a-z][a-z0-9_-]{0,63}$/.test(importName.value.trim())) { error.textContent = t("explore.invalidName"); importName.focus(); return; }
+            add.disabled = true;
+            try { await onChoose({ ...detail, name: importName.value.trim() }); dialog.close(); }
+            catch (failure) { error.textContent = failure.message; }
+            finally { add.disabled = false; }
+          } }, t("explore.addSkill"));
+          content.append(h("label", { class: "lbl" }, t("explore.importName"), importName), error);
+          actions.append(add);
+        } else if (!detail.has_supporting_files) content.append(h("p", { class: "muted small" }, t("explore.cannotImport")));
+      } else {
+        const remotes = item.remotes || [], packages = item.packages || [];
+        content.replaceChildren(h("p", { class: "discovery-preview-description" }, item.description || ""),
+          publicSourceLink(typeof item.repository === "string" && item.repository.startsWith("https:") ? item.repository : item.repository?.url || item.url, t("explore.sourceCode"), "discovery-source-link"),
+          remotes.length ? h("section", { class: "discovery-remotes" }, h("h3", {}, t("explore.endpoints")), remotes.map((remote) => {
+            const supported = remote.connectable !== false && remote.transport === "streamable-http" && /^https:\/\//.test(remote.url);
+            return h("div", { class: "discovery-remote" }, h("div", { class: "grow" }, h("span", { class: "chip" }, remote.transport || "remote"),
+              h("p", { class: "mono" }, remote.url), h("p", { class: "muted small" }, t(remote.auth_required ? "explore.authRequired" : "explore.authUnknown")),
+              remote.headers?.length ? h("p", { class: "small" }, t("explore.authHeaders"), " ", remote.headers.map((entry) => entry.name).join(", ")) : null),
+              supported ? h("button", { class: "btn sm primary", type: "button", "data-discovery-connect": "", onclick: async () => { await onChoose({ ...item, remote }); dialog.close(); } }, t("explore.configure")) : h("span", { class: "muted small" }, t("explore.transportUnsupported")));
+          })) : null,
+          packages.length ? h("section", { class: "discovery-packages" }, h("h3", {}, t("explore.packages")), h("p", { class: "muted small" }, t("explore.packageNote")), packages.map(packageDetails)) : null,
+          !remotes.length && !packages.length ? h("p", { class: "muted" }, t("explore.noEndpoint")) : null);
+      }
+    } catch (error) { content.replaceChildren(h("p", { class: "err-text", role: "alert" }, error.message)); }
+  }
+  load(false);
+}
+
 // openSkills 是“我的 Skill”（WEB-SKILLS，/api/skills；Runtime 的 N-14）：列出看得到的 Skill（平台、团队的只读，我的可以编辑与收回，
 // 被遮住的写明不会被用到），新建与编辑我的（名字、说明、做法；编辑时名字不能改，原有的文件照旧带上）。
 async function openSkills(container = null) {
@@ -849,8 +1074,10 @@ async function openSkills(container = null) {
   const row = (s) => h("div", { class: "conn-row skill-row", "data-name": s.name, "data-scope": s.scope },
     h("div", { class: "grow" },
       h("div", { class: "t" }, s.name, h("span", { class: "chip" }, t(`skills.scope.${s.scope}`))),
-      h("div", { class: "m" }, s.description || ""),
+      h("div", { class: "m skill-row-summary" }, builtinSkillSummary(s) || s.description || ""),
+      (builtinSkillSummary(s) || s.description?.length > 130) ? h("details", { class: "skill-row-details" }, h("summary", {}, t("personal.fullDescription")), h("p", {}, s.description || "")) : null,
       s.shadowed ? h("div", { class: "m skill-shadowed" }, t("skills.shadowed")) : null),
+    h("button", { class: "btn sm skill-view", onclick: () => viewSkill(s.name) }, t("skills.view")),
     s.scope === "user" ? h("button", { class: "btn sm skill-edit", onclick: () => editSkill(s.name) }, t("skills.edit")) : null,
     s.scope === "user" ? h("button", { class: "btn sm skill-retire", onclick: () => retireSkill(s.name) }, t("skills.retire")) : null);
   const search = h("input", { class: "field management-search", type: "search", placeholder: t("skills.search") });
@@ -905,6 +1132,13 @@ async function openSkills(container = null) {
       await reload();
     } catch (ex) { report(ex); }
   }
+  discoveryTabs(dialog, "skills", async (skill) => {
+    const available = await api("GET", "/api/skills");
+    if ((available.skills || []).some((item) => item.name === skill.name)) throw new Error(t("explore.nameExists"));
+    await api("PUT", `/api/skills/${encodeURIComponent(skill.name)}`, { description: skill.description, instructions: skill.instructions });
+    toast(t("skills.saved", { name: skill.name }));
+    await reload();
+  });
   resetForm();
   dialog.addEventListener("close", () => dialog.remove());
   if (container) container.replaceChildren(dialog);
@@ -1034,6 +1268,14 @@ async function openMcp(container = null) {
       await reload();
     } catch (ex) { report(ex); }
   }
+  discoveryTabs(dialog, "mcp", async (item) => {
+    name.value = String(item.name).split("/").pop().toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^[^a-z]+/, "").slice(0, 32);
+    url.value = item.remote.url;
+    const declaredHeaders = item.remote.headers || [];
+    header.value = declaredHeaders.length === 1 && declaredHeaders[0].name !== "Authorization" ? declaredHeaders[0].name : "";
+    secret.value = "";
+    requestAnimationFrame(() => { form.scrollIntoView({ block: "nearest" }); name.focus(); });
+  });
   dialog.addEventListener("close", () => dialog.remove());
   if (container) container.replaceChildren(dialog);
   else { document.body.append(dialog); dialog.showModal(); }
@@ -1092,7 +1334,7 @@ let pop = null;
 function openPop(anchor, build, opts = {}) {
   if (pop && pop.anchor === anchor) return closePop();
   closePop();
-  const el = h("div", { class: "pop", role: "menu" });
+  const el = h("div", { class: "pop" + (opts.className ? " " + opts.className : ""), role: opts.role || "menu", "aria-label": opts.label || null });
   append(el, build(closePop));
   const r = anchor.getBoundingClientRect();
   if (opts.matchWidth) el.style.width = `${Math.max(r.width, 220)}px`;
@@ -2227,7 +2469,7 @@ function turn(task) {
   const running = !TERMINAL.has(status);
   let tail = null;
   if (finished) tail = result(task, finished.value);
-  else if (running) tail = draftView(run) || waitingLine(task);
+  else if (running) tail = draftView(run,task.id) || waitingLine(task);
   else if (!run) tail = h("div", { class: "result-foot" }, statusChip(status), h("button", { class: "btn ghost sm", onclick: () => loadRun(task, true) }, t("turn.load")));
   // 每来一个事件整轮重画：这里不带进场动画（只有刚发出的那一轮在“提交中”时升上来一次）。
   const queued = status === "TASK_STATUS_QUEUED";
@@ -2326,10 +2568,45 @@ function draftDelta(run, type, v) {
 }
 
 // draftView 是还在生成的回答：有正文画正文（前面没收全时带省略号），只有思考时画思考的末尾。
-function draftView(run) {
+const answerIslands = new Map();
+let chatComponentsPromise;
+let answerObserver;
+function releaseAnswers() {
+  for (const [id,entry] of answerIslands) {
+    if (!entry.element.isConnected) {entry.handle?.unmount();answerIslands.delete(id);}
+  }
+}
+function richAnswer(text, id, streaming = false) {
+  if (!answerObserver) {
+    answerObserver = new MutationObserver(releaseAnswers);
+    answerObserver.observe(document.getElementById("app"), {childList:true,subtree:true});
+  }
+  let entry = answerIslands.get(id);
+  if (!entry) {
+    const host = h("div", {class:"pro-chat"});
+    entry = {element:h("div", {class:"answer"}, host),host,handle:null,loading:false};
+    answerIslands.set(id,entry);
+  }
+  entry.element.className = "answer" + (streaming ? " draft" : "");
+  entry.props = {id,text,streaming,copyLabel:t("common.copy"),copiedLabel:t("common.copied"),copyFailedLabel:t("common.copyFailed")};
+  if (entry.handle) entry.handle.update(entry.props);
+  else {
+    entry.host.replaceChildren(md(text));
+    if (!entry.loading) {
+      entry.loading = true;
+      chatComponentsPromise ||= import("./chat-ui.js");
+      chatComponentsPromise.then(({mountAnswer}) => {
+        if (entry.element.isConnected && answerIslands.get(id) === entry) entry.handle = mountAnswer(entry.host,entry.props);
+      }).catch(() => {entry.host.dataset.proError="unavailable";}).finally(() => {entry.loading=false;});
+    }
+  }
+  return entry.element;
+}
+
+function draftView(run,taskId) {
   if (!run || !run.drafts || !run.drafts.size) return null;
   const d = [...run.drafts.values()].pop();
-  if (d.text.chars.length) return h("div", { class: "answer draft" }, md((d.text.base ? "…" : "") + d.text.chars.join("")));
+  if (d.text.chars.length) return richAnswer((d.text.base ? "…" : "") + d.text.chars.join(""), taskId, true);
   const thinking = d.thinking.chars;
   if (!thinking.length) return null;
   return h("div", { class: "draft-thinking" }, (thinking.length > 400 || d.thinking.base ? "…" : "") + thinking.slice(-400).join(""));
@@ -2642,7 +2919,7 @@ function result(task, r) {
   const files = artifactItems(task);
   return h("div", { class: "col" },
     files ? h("div", { class: "deliverables" }, files) : null,
-    text ? h("div", { class: "answer" }, md(text)) : null,
+    text ? richAnswer(text,task.id,false) : null,
     r.error ? h("div", { class: "error-box" }, typeof r.error === "string" ? r.error : pick(r.error, "message") || JSON.stringify(r.error)) : null,
     h("div", { class: "result-foot" },
       statusChip(r.status),
@@ -2996,8 +3273,9 @@ function dock() {
   ui.input.addEventListener("keydown", onComposerKey);
   ui.composer = h("div", { class: "composer" }, ui.cStatus, ui.cAsk, h("div", { class: "c-row" }, ui.input, ui.cRight), ui.cOpts);
   ui.tools = h("div", { class: "c-tools" });
+  ui.cFooter = h("div", {class:"composer-footer"});
   ui.barKey = "";
-  return h("div", { class: "dock" }, h("div", { class: "dock-inner" }, ui.next, ui.composer, ui.tools));
+  return h("div", { class: "dock" }, h("div", { class: "dock-inner" }, ui.next, ui.composer, ui.tools, ui.cFooter));
 }
 
 function autosize() {
@@ -3279,7 +3557,8 @@ function updateComposer(force = false) {
       ui.cOpts.className = "hidden";
       ui.cOpts.replaceChildren();
     }
-    ui.tools.replaceChildren(environmentTool(), personalTool(), sandboxTool(), networkTool(), modelTool(), meterTool(m), h("span", { class: "grow" }), h("div", { class: "c-hint" }, hint(ph)));
+    ui.tools.replaceChildren(modelTool(), taskSettingsTool(), h("span", { class: "grow" }), h("div", { class: "composer-usage" }, meterTool(m)));
+    ui.cFooter.replaceChildren(h("div", { class: "c-hint" }, hint(ph)));
     ui.next.replaceChildren(...nextSteps(ph));
   }
   refreshSend();
@@ -3364,6 +3643,71 @@ function sandboxDesc(s) {
   if (s.id !== "write_reversible") return s.desc;
   const mode = state.env && state.env.sandbox && state.env.sandbox.mode;
   return mode === "host" ? t("sandbox.hostDesc") : s.desc;
+}
+
+function taskSettingsTool() {
+  const summary = [t(state.settings.sandbox === "read" ? "sandbox.read" : "sandbox.write"), t(state.networkRequest ? state.networkRequest.scope === "public" ? "network.public" : "network.hosts" : "network.off")].join(" · ");
+  return h("button", { class: "tool task-settings-trigger", title: summary, "aria-label": t("taskSettings.title"), onclick: async (event) => {
+    const anchor = event.currentTarget;
+    const context = personalChoiceKey();
+    let policy;
+    try { policy = await api("GET", "/api/network-policy"); }
+    catch (error) { policy = { allowed: false, modes: [], error: error.message }; }
+    if (context !== personalChoiceKey()) return;
+    const currentAnchor = anchor.isConnected ? anchor : ui.tools?.querySelector(".task-settings-trigger");
+    if (!currentAnchor?.isConnected) return;
+    openPop(currentAnchor, (close) => {
+      let mode = state.networkRequest?.scope === "public" ? "open" : state.networkRequest?.scope === "hosts" ? "allowlist" : "deny";
+      const modes = policy.allowed ? policy.modes || ["deny", "allowlist"] : ["deny"];
+      if (!modes.includes(mode)) mode = "deny";
+      const sandbox = h("select", { class: "field", "aria-label": t("sandbox.heading"), disabled: !state.config.sandbox_control },
+        SANDBOX.filter((item) => !item.disabled).map((item) => h("option", { value: item.id }, item.label)));
+      sandbox.value = state.settings.sandbox;
+      const environment = h("select", { class: "field", "data-environment-select": "", "aria-label": t("envcfg.heading"), disabled: !!state.session },
+        h("option", { value: "" }, t("envcfg.default")), (state.environments || []).map((item) => h("option", { value: item.id }, item.name)));
+      const environmentID = state.session?.environment_id || draftEnvironment();
+      if (environmentID && !(state.environments || []).some((item) => item.id === environmentID)) environment.append(h("option", {value:environmentID}, state.env?.environment?.name || t("envcfg.missing")));
+      environment.value = environmentID;
+      const hosts = h("textarea", { class: "field network-hosts-input", rows: 3, "aria-label": t("network.hostInput"), placeholder: "api.example.com\ndocs.example.com", value: (state.networkRequest?.hosts || policy.hosts || []).join("\n"), spellcheck: "false" });
+      const limit = Math.max(1, Number(policy.max_grant_minutes) || 15);
+      const lengths = [...new Set([...([15, 30, 60].filter((minutes) => minutes <= limit)), Math.min(60,limit)])].sort((a,b)=>a-b);
+      const duration = h("select", { class: "field", "aria-label": t("network.duration") }, lengths.map((minutes) => h("option", { value: minutes }, t("network.minutes", { minutes }))));
+      duration.value = String(lengths.includes(state.networkRequest?.minutes) ? state.networkRequest.minutes : lengths[0]);
+      const hostField = h("label", { class: "lbl network-hosts-field" }, t("network.hostsLabel"), hosts);
+      const durationField = h("label", { class: "lbl network-duration-field" }, t("network.duration"), duration);
+      const note = h("p", { class: "muted small network-policy-note" });
+      const options = h("div", { class: "network-mode-options", role: "radiogroup", "aria-label": t("network.title") });
+      const error = h("div", { class: "err-text", role: "alert" });
+      const draw = () => {
+        options.replaceChildren(...[["deny","network.off"],["allowlist","network.hosts"],["open","network.public"]].map(([id,key]) => {
+          const enabled = id === "deny" || (policy.allowed && modes.includes(id));
+          return h("button", { type: "button", role: "radio", "aria-checked": String(mode === id), class: "network-mode" + (mode === id ? " selected" : ""), disabled: !enabled, "data-network-mode": id, title: enabled ? t(key) : t("network.policyLimited"), onclick: () => {mode=id;draw();} }, t(key), !enabled ? icon("lock","xs") : null);
+        }));
+        hostField.hidden = mode !== "allowlist"; durationField.hidden = mode === "deny";
+        note.textContent = policy.error || (!policy.allowed ? t("network.disabled") : !modes.includes("open") ? t("network.publicLimited") : t("network.publicHint"));
+      };
+      const apply = () => {
+        error.textContent = "";
+        const selectedHosts = [...new Set(hosts.value.split(/[,，\s]+/).map((value)=>value.trim()).filter(Boolean))];
+        if (mode === "allowlist" && !selectedHosts.length) {error.textContent=t("network.hostRequired");hosts.focus();return false;}
+        if (mode !== "deny" && (!policy.allowed || !modes.includes(mode))) {error.textContent=t("network.policyLimited");return false;}
+        state.settings.sandbox = sandbox.value; ls.set("cw_sandbox",sandbox.value);
+        if (!state.session) {state.draftEnvironment=environment.value;ls.set(draftEnvironmentKey(),environment.value);}
+        state.networkRequest = mode === "deny" ? null : {scope:mode === "open" ? "public" : "hosts",hosts:mode === "open" ? [] : selectedHosts,minutes:Number(duration.value),reason:t("network.reason")};
+        state.networkRequestTenant = state.me?.tenant;
+        close();updateComposer(true);renderStatus();return true;
+      };
+      const panel = h("div", { class: "task-settings-panel" },
+        h("div", { class: "task-settings-heading" }, h("strong", {}, t("taskSettings.title"))),
+        h("label", { class: "lbl" }, t("sandbox.heading"), sandbox),
+        h("div", { class: "task-settings-network" }, h("div", { class: "lbl" }, t("network.title")), options, hostField, durationField, note),
+        h("label", { class: "lbl" }, t("envcfg.heading"), environment),
+        h("button", { class: "btn task-settings-tools personal-tools", onclick: () => {if(apply())openPersonalConfig(true);} }, icon("box","sm"), t("personal.tools")),
+        error,
+        h("div", { class: "task-settings-actions" }, h("button", { class: "btn ghost sm", onclick: close }, t("common.cancel")), h("button", { class: "btn primary sm", "data-task-settings-apply": "", onclick: apply }, t("taskSettings.apply"))));
+      draw();return panel;
+    }, {className:"task-settings-pop",role:"dialog",label:t("taskSettings.title")});
+  } }, icon("box","sm"), t("taskSettings.title"));
 }
 
 function sandboxTool() {
@@ -3710,6 +4054,7 @@ function latestUsage(task) {
 }
 
 function ctxTokens(n) {
+  if (n >= 1000000) return `${Number((n / 1000000).toFixed(1))}M`;
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
@@ -3730,36 +4075,33 @@ function ctxUsage(usage) {
   const windowTokens = num(usage.window_tokens);
   const usable = ctxUsable(usage);
   const total = num(usage.total_tokens);
-  const full = Math.max(usable, total);
+  const full = usable || total;
   const byName = new Map((usage.categories || []).map((c) => [c.name, num(c.tokens)]));
   const rows = [...CTX_CATEGORIES.map((name) => [name, byName.get(name) || 0, t(`ctx.cat.${name}`)]), ["free", Math.max(0, usable - total), t("ctx.free")]];
   const tools = usage.tools || [];
   const segment = (name, tokens) => {
-    const seg = h("span", { class: "seg", "data-cat": name, title: `${t(name === "free" ? "ctx.free" : `ctx.cat.${name}`)} ${ctxTokens(tokens)}` });
-    seg.style.width = ctxPercent(tokens, full);
-    // 很小的一类也看得见（至少 2px），占比的数字照实写在下面。
-    if (tokens > 0 && name !== "free") seg.style.minWidth = "2px";
+    const seg = h("span", { class: "ctx-segment", "data-cat": name, title: `${t(name === "free" ? "ctx.free" : `ctx.cat.${name}`)} ${ctxTokens(tokens)}` });
+    seg.style.width = `${full > 0 ? tokens / full * 100 : 0}%`;
     return seg;
   };
   return h("div", { class: "ctx-usage" },
+    h("div", { class: "ctx-budget-title" }, t("ctx.usageTitle")),
     h("div", { class: "ctx-head" },
       h("span", { class: "ctx-used" }, t("ctx.used", { used: ctxTokens(total), usable: ctxTokens(usable) })),
-      h("span", { class: "ctx-pct-total" }, ctxPercent(total, usable))),
+      h("span", { class: "ctx-pct-total" }, ctxPercent(total, full))),
     h("div", { class: "ctx-bar", role: "img", "aria-label": t("ctx.used", { used: ctxTokens(total), usable: ctxTokens(usable) }) },
-      rows.map(([name, tokens]) => segment(name, tokens)),
-      total > usable ? (() => {
-        const mark = h("span", { class: "ctx-mark" });
-        mark.style.left = ctxPercent(usable, full);
-        return mark;
-      })() : null),
+      rows.filter(([,tokens]) => tokens > 0).map(([name, tokens]) => segment(name, tokens))),
+    usable > 0 && total > usable ? h("div", {class:"ctx-overflow small",role:"status"},t("ctx.overBudget",{n:ctxTokens(total-usable)})) : null,
     h("div", { class: "ctx-rows" }, rows.map(([name, tokens, label]) => h("div", { class: "ctx-row", "data-cat": name },
-      h("span", { class: "ctx-dot", "data-cat": name }),
+      h("span", { class: "ctx-dot", "data-cat": name, "data-empty": tokens <= 0 ? "true" : null }),
       h("span", { class: "ctx-label" }, label),
       h("span", { class: "ctx-num" }, ctxTokens(tokens)),
-      h("span", { class: "ctx-pct" }, ctxPercent(tokens, usable))))),
+      h("span", { class: "ctx-pct" }, ctxPercent(tokens, full))))),
     h("div", { class: "ctx-line muted small" },
-      windowTokens > usable ? t("ctx.window", { window: ctxTokens(windowTokens), usable: ctxTokens(usable) }) : t("ctx.compactionLine", { n: ctxTokens(usable) }),
+      usage.window_source === "effective_fallback" ? t("ctx.unknownWindow", {usable:ctxTokens(usable)}) : windowTokens > 0 ? t("ctx.window", { window: ctxTokens(windowTokens), usable: ctxTokens(usable) }) : t("ctx.compactionLine", { n: ctxTokens(usable) }),
       (usage.applied || []).length ? ` · ${t("ctx.applied", { steps: usage.applied.join(t("list.sep")) })}` : ""),
+    (num(usage.mask_at_tokens)>0 || num(usage.summarize_at_tokens)>0) ? h("div", {class:"ctx-thresholds muted small"},
+      [num(usage.mask_at_tokens)>0 ? t("ctx.maskAt",{n:ctxTokens(num(usage.mask_at_tokens))}) : "",num(usage.summarize_at_tokens)>0 ? t("ctx.summarizeAt",{n:ctxTokens(num(usage.summarize_at_tokens))}) : ""].filter(Boolean).join(" · ")) : null,
     tools.length ? toggled("ctx-tools", state.ctxToolsOpen, (v) => { state.ctxToolsOpen = v; }, t("ctx.tools"),
       tools.map((x) => h("div", { class: "ctx-tool" }, h("span", { class: "mono small" }, x.name), x.mcp ? h("span", { class: "chip" }, "MCP") : null, h("span", { class: "grow" }), h("span", { class: "ctx-num" }, ctxTokens(num(x.tokens)))))) : null,
   );

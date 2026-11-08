@@ -198,16 +198,18 @@ try {
   await wait(() => !$('.environment-editor'), 'editor cancelled');
   for (let i=0; i<3; i++) {
     location.hash = '#/w/' + projects[i % 2] + '/new';
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    (await wait(()=>$('.task-settings-trigger'),'task settings')).click();
     const select = await wait(() => $('[data-environment-select]:not(:disabled)'), 'draft selector');
-    select.click();
-    const option = await wait(() => $('[data-environment-option="' + (i===2 ? '' : id) + '"]'), 'environment option');
-    option.click();
+    select.value = i===2 ? '' : id;
+    $('[data-task-settings-apply]').click();
     const input = $('.composer textarea');
     check(input, 'composer input');
     input.value = ['configured one','configured two','deployment default'][i];
     input.dispatchEvent(new Event('input', {bubbles:true}));
     $('.send').click();
-    await wait(() => /\/s\//.test(location.hash) && $('[data-environment-select]').disabled, 'session binding');
+    await wait(() => /\/s\//.test(location.hash), 'session binding');
+    $('.task-settings-trigger').click();await wait(()=>$('[data-environment-select]')?.disabled,'bound environment');$('[data-task-settings-apply]').click();
     // 发出后输入框清空，发送按钮按原来的做法变灰；任务提交完成的标志是对话里出现这一轮（不再是“提交中”）。
     await wait(() => document.querySelector('section.turn[id^="turn-"]') && !document.querySelector('section.turn.pending'), 'session submission');
   }
@@ -225,6 +227,7 @@ try {
   location.hash = '#/w/' + used.project_id + '/s/' + used.id;
   const gone = await wait(() => $('[data-env-config-deleted]'), 'deleted environment note');
   check(gone.innerText.includes('creation-time settings') && gone.innerText.includes('secrets'), 'deleted note: ' + gone.innerText);
+  $('.task-settings-trigger').click();await wait(()=>$('[data-environment-select]'),'task settings');
   check($('[data-environment-select]').disabled, 'still bound');
   await fetch('/__environment_result', {method:'POST',body:'ok'});
 } catch (err) {

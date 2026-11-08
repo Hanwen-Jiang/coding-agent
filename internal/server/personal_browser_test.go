@@ -131,7 +131,8 @@ const wait=async(fn,label)=>{const end=Date.now()+15000;while(Date.now()<end){le
 const check=(ok,message)=>{if(!ok)throw Error(message);};
 const request=async(method,path,body)=>{const r=await fetch(path,{method,headers:{'X-Coding-Web':'1','Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});if(!r.ok)throw Error(await r.text());return r.json();};
 try {
- await wait(()=>$('[data-environment-select]')?.textContent.includes('Environment alice'),'personal default environment');
+ (await wait(()=>$('.task-settings-trigger'),'task settings')).click();
+ await wait(()=>$('[data-environment-select]')?.textContent.includes('Environment alice'),'personal default environment');$('[data-task-settings-apply]').click();
  $('.profile').click();$$('.pop-item').find(x=>x.textContent.includes(t('account.title'))).click();
  (await wait(()=>$('.personal-open'),'personal configuration entry')).click();
  const instructions=await wait(()=>$('.personal-instructions'),'personal editor');
@@ -141,7 +142,7 @@ try {
  $('dialog.account').close();
  const stored=await request('GET','/api/personal-config');check(stored.config.document.instructions==='Prefer concise answers','save did not reach service');
  const history=await fetch('/api/personal-config?version=user%2Fv2');check(history.headers.get('Cache-Control')==='no-store','personal history was cacheable');
- $('.personal-tools').click();await wait(()=>$('.personal-skills input'),'session tools');
+ $('.task-settings-trigger').click();(await wait(()=>$('.personal-tools'),'session tool settings')).click();await wait(()=>$('.personal-skills input'),'session tools');
  check($('.personal-skills input[data-reference="review"]').checked,'default skill not selected');
  check(!$('.personal-skills input[data-reference="test"]').checked,'default subset expanded');
  $$('.personal-skills input,.personal-mcp input').forEach(x=>x.checked=false);$('.personal-save').click();
@@ -151,7 +152,7 @@ try {
  const sid=location.hash.split('/s/')[1].split('?')[0];
  let list=await request('GET','/api/sessions');const session=list.find(x=>x.id===sid);
  check(session.personal_config?.skill_names?.length===0&&session.personal_config?.mcp_connection_ids?.length===0,'empty session selection lost');
- await wait(()=>$('.personal-tools'),'session tool button');$('.personal-tools').click();await wait(()=>$('.personal-skills input'),'session tools reopened');
+ (await wait(()=>$('.task-settings-trigger'),'task settings')).click();(await wait(()=>$('.personal-tools'),'session tool button')).click();await wait(()=>$('.personal-skills input'),'session tools reopened');
  check(!$$('.personal-skills input').some(x=>x.checked),'explicit empty reset to defaults');$('dialog.personal-config').close();
  $('.profile').click();$$('.pop-item').find(x=>x.textContent.includes(t('menu.logout'))).click();
  await wait(()=>$('input[autocomplete=username]'),'logout');
@@ -159,9 +160,11 @@ try {
  $('input[autocomplete=organization]').value='acme';$('input[autocomplete=username]').value='bob';$('form').requestSubmit();
  await wait(()=>$('.profile')?.textContent.includes('bob'),'login Bob');
  location.hash='#/w/'+C.pid+'/new';
- await wait(()=>$('[data-environment-select]')?.textContent.includes('Environment bob'),'account-specific default environment');
+ await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+ (await wait(()=>$('.task-settings-trigger'),'task settings')).click();
+ await wait(()=>$('[data-environment-select]')?.textContent.includes('Environment bob'),'account-specific default environment');$('[data-task-settings-apply]').click();
  list=await request('GET','/api/sessions');check(!list.find(x=>x.id===sid).personal_config,'Alice session references leaked to Bob');
- $('.personal-tools').click();await wait(()=>$('.personal-skills input'),'Bob tool defaults');
+ $('.task-settings-trigger').click();(await wait(()=>$('.personal-tools'),'session tool settings')).click();await wait(()=>$('.personal-skills input'),'Bob tool defaults');
  check($('.personal-skills input[data-reference="review"]').checked,'Bob inherited Alice empty override');
  await fetch('/__personal_result',{method:'POST',body:'ok'});
 } catch(err){await fetch('/__personal_result',{method:'POST',body:String(err.stack||err)});}

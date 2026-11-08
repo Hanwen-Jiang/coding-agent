@@ -268,7 +268,7 @@ try {
   out.steps.usageShown = !!usage;
   if (usage) {
     for (const row of $$(".ctx-row", usage)) out.context[row.dataset.cat] = text($(".ctx-label", row)) + "|" + text($(".ctx-num", row)) + "|" + text($(".ctx-pct", row));
-    out.steps.segments = $$(".ctx-bar .seg", usage).map((e) => e.dataset.cat);
+    out.steps.segments = $$(".ctx-bar .ctx-segment", usage).map((e) => e.dataset.cat);
     out.steps.compactionLine = text($(".ctx-line", usage));
     out.steps.toolsCollapsed = !$(".ctx-tool", usage) || !$(".ctx-tools", usage).open;
     const tools = $(".ctx-tools", usage);

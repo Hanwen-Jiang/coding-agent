@@ -93,9 +93,10 @@ type Config struct {
 
 // Server 是 coding-web。
 type Server struct {
-	cfg      Config
-	ingress  tokens
-	sessions *sessions
+	discovery *discoveryService
+	cfg       Config
+	ingress   tokens
+	sessions  *sessions
 	// github 是 GitHub App 一侧的进程内状态（G-03，githubrepo.go）。
 	github    githubState
 	store     *Store
@@ -185,6 +186,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	api := NewTaskAPI(strings.TrimRight(cfg.TaskAPI, "/"))
 	s := &Server{
+		discovery: newDiscoveryService(),
 		allowed:   allowed,
 		cfg:       cfg,
 		ingress:   tok,
@@ -240,6 +242,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/secrets/{name}", s.authed(s.handlePutSecret))
 	mux.HandleFunc("DELETE /api/secrets/{name}", s.authed(s.handleDeleteSecret))
 	// 我的 Skill（WEB-SKILLS，Runtime 的 N-14）：转调 Runtime 的 SkillService；Runtime 没有它时列表回 available false。
+	mux.HandleFunc("GET /api/discovery/skills", s.authed(s.handleExploreSkills))
+	mux.HandleFunc("GET /api/discovery/skills/detail", s.authed(s.handleExploreSkillDetail))
+	mux.HandleFunc("GET /api/discovery/mcp", s.authed(s.handleExploreMCP))
 	mux.HandleFunc("GET /api/skills", s.authed(s.handleListSkills))
 	mux.HandleFunc("GET /api/personal-config", s.authed(s.handleGetPersonalConfig))
 	mux.HandleFunc("PUT /api/personal-config", s.authed(s.handlePutPersonalConfig))
