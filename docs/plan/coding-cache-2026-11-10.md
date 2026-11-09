@@ -41,3 +41,5 @@ CACHE-01 原先接入 Runtime task-service 的事件流、限流和工作区读�
 - 生产缺少配置、错误口令和错误地址均拒绝启动，错误不泄露连接凭据。
 
 代码和部署清单的更新不等同于线上已部署；上线需同时更新 coding-web 镜像及环境变量，并确认对应 Secret 可用。
+
+本次本地验证：16 个新增缓存/配置测试通过；真实 Redis 8.8.0（回环地址、随机认证、不持久化）验证兼容接入。`cmd/coding-web`、`internal/github`、`internal/server`、`internal/web` 各包的 race 检查通过，浏览器验收显式使用本机 Chrome。检查过程中修复了两个测试替身的并发记录竞争。`go build ./...`、`go vet ./...` 和差异空白检查通过；未部署线上。
