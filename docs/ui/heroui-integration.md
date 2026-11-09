@@ -58,8 +58,8 @@ without a call index match the pending calls by tool and target in call order;
 multiple identical calls are preserved. Late tool results update
 their original group. The optional message is ordinary assistant text returned
 with tool calls; `thinking_delta` and rationale are never displayed as progress.
-An explicit custom stage goal can open the flow; generic coded or fast goals
-stay in diagnostics. Final answers remain separate. Existing histories without
+Planner stage goals stay in the collapsed plan; they are execution instructions,
+not assistant messages. Final answers remain separate. Existing histories without
 public progress fields still show their actual tool calls. The same projection
 is rebuilt from SSE and snapshots, so reload cannot duplicate progress notes.
 Truncated snapshots paint immediately, then backfill from the existing paged

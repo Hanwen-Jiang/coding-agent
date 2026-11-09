@@ -33,10 +33,12 @@ const signature=()=>$$('#turn-t1 .conversation-flow > div').map(el=>el.matches('
 try{
  await wait(()=>$('#turn-t1'),'turn');
  if(!saved){
+  await push('stage_started',{round_seq:1,triage_level:'full',goal:'先公开一句简短进展，本轮暂不修改。',nodes:[]});
   await push('token_delta',{node_id:'work',offset:0,text:'先读取项目入口与现有测试。'},true);
   await wait(()=>$('#turn-t1 .answer.draft'),'streamed public text');
   await push('tool_status',call(1,'running',{progress_message:'先读取项目入口与现有测试。'}));
   await wait(()=>$('#turn-t1 [data-public-progress]'),'public progress');
+  check(!$('#turn-t1 .conversation-flow').textContent.includes('先公开一句'),'planner instruction exposed as assistant prose');
   check(!$('#turn-t1 .answer.draft'),'tool-loop text duplicated as final answer draft');out.steps.draftCleared=true;
   await push('tool_status',call(1,'running',{call_index:1,tool:'repo_grep',target:'parseInput'}));
   await push('tool_status',call(2,'running',{tool:'shell_run',target:'go test ./internal/parser',progress_message:'调用入口已经确认，接下来运行解析器测试。'}));

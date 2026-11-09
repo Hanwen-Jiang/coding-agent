@@ -16,12 +16,8 @@ export function conversationFlow(events) {
       seen.add(String(event.event_id));
     }
     const value = event.value || {};
-    if (event.type === "stage_started") {
-      if (!value.goal_code && value.triage_level !== "fast") {
-        note(`stage:${event.event_id}`, value.goal, "stage_goal");
-      }
-      continue;
-    }
+    // Planner goals instruct execution; they are not messages addressed to the
+    // user. The collapsible plan already exposes those details when requested.
     if (event.type !== "tool_status") continue;
     const stepKey = value.step != null
       ? `tool:${value.round_seq ?? ""}:${value.node_id ?? ""}:${value.step}`

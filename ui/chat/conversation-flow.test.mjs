@@ -27,13 +27,13 @@ test('only explicit public fields become prose, and legacy tools still work',()=
   event(3,'thinking_delta',{text:'PRIVATE THINKING'}),
   event(4,'node_finished',{rationale:'PRIVATE RATIONALE'}),
   tool(5,1,'running',{rationale:'PRIVATE RATIONALE'}),tool(6,1,'succeeded'),
-  event(7,'stage_started',{goal:'Run the existing parser tests.'}),
+  event(7,'stage_started',{goal:'先公开一句简短进展，本轮暂不修改。',triage_level:'full'}),
   tool(8,1,'running',{round_seq:2,progress_message:'   '}),tool(9,1,'succeeded',{round_seq:2}),
  ]);
- assert.deepEqual(parts.map(p=>p.kind),['tools','progress','tools']);
- assert.equal(parts[1].message,'Run the existing parser tests.');
- assert.equal(parts.filter(p=>p.kind==='progress').length,1);
- assert.notEqual(parts[0].id,parts[2].id);
+ assert.deepEqual(parts.map(p=>p.kind),['tools']);
+ assert.equal(parts.filter(p=>p.kind==='progress').length,0);
+ assert.equal(parts[0].calls.length,2);
+ assert.equal(JSON.stringify(parts).includes('先公开一句'),false);
 });
 
 test('repeated running status cannot undo completion or duplicate a public note',()=>{
