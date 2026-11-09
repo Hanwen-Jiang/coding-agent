@@ -62,6 +62,10 @@ An explicit custom stage goal can open the flow; generic coded or fast goals
 stay in diagnostics. Final answers remain separate. Existing histories without
 public progress fields still show their actual tool calls. The same projection
 is rebuilt from SSE and snapshots, so reload cannot duplicate progress notes.
+Truncated snapshots paint immediately, then backfill from the existing paged
+session-event API. Backfill merges by event ID into the active run, preserving
+its SSE connection, newer events and streaming draft. It stops at the captured
+snapshot cursor instead of chasing a task that is still producing events.
 
 Internal
 accepted/round/triage/node/reviewer events remain in one collapsed **Run details**

@@ -3071,10 +3071,12 @@ function toEvent(data, msgType = "message", lastEventId = 0) {
 // 已经结束的不再开事件流，没结束的从 cursor 续传（事件流地址带 last_event_id）。没有 seed 时从头回放。
 function loadRun(t, force = false, seed = null) {
   if (state.runs.has(t.id) && !force) return state.runs.get(t.id).promise;
+  const previous=state.runs.get(t.id);
+  if(force)previous?.es?.close();
   const base = sbase();
-  const run = { events: [], done: false, es: null };
+  const run = { events: [], done: false, es: null, drafts: previous?.drafts };
   state.runs.set(t.id, run);
-  const seen = new Set();
+  const seen = run.seen = new Set();
   for (const data of (seed && seed.events) || []) {
     const ev = toEvent(data);
     if (ev.event_id && seen.has(ev.event_id)) continue;
@@ -3104,6 +3106,7 @@ function loadRun(t, force = false, seed = null) {
     run.es = es;
     let timer = null;
     const finish = () => { es.close(); run.done = true; clearTimeout(timer); resolve(); };
+    run.finish=finish;
     const onEvent = (msg) => {
       if (sbase() !== base) return finish();
       if (msg.type === "resnapshot_required") {
@@ -3177,6 +3180,7 @@ async function paintFromSnapshot(base) {
   try { snap = await api("GET", base + "/snapshot"); } catch { return false; }
   if (sbase() !== base || !snap || !Array.isArray(snap.tasks)) return false;
   const byId = new Map(snap.tasks.map((s) => [s.task_id, s]));
+  const truncated=[],through=new Map();
   for (const t of state.tasks.slice(-REPLAY_LIMIT)) {
     const s = byId.get(t.id);
     if (s) {
@@ -3184,9 +3188,16 @@ async function paintFromSnapshot(base) {
       if (s.plan && !events.some((e) => e.event_id === s.plan.event_id)) events.unshift(s.plan);
       events.sort((a, b) => Number(a.event_id || 0) - Number(b.event_id || 0));
       loadRun(t, true, { events, cursor: Number(s.last_event_id) || 0 });
+      if(s.events_truncated){truncated.push(t);through.set(t.id,Number(s.last_event_id)||0);}
     } else if (!TERMINAL.has(t.status)) {
       loadRun(t, true);
     }
+  }
+  if(truncated.length){
+    const left=await paintFromEvents(base,truncated,{merge:true,through});
+    if(sbase()!==base)return true;
+    // Older servers without paged history can still replay the persisted stream.
+    for(const task of left||truncated)loadRun(task,true);
   }
   return true;
 }
@@ -3231,12 +3242,12 @@ async function replayTasks() {
 // paintFromEvents 用批量取的事件（HIST-01，Runtime 的 ListSessionEvents）画历史：每个任务从头取，有 more 的拿 next_after_event_id
 // 接着取；取全了的任务带着事件与游标接上（结束的不再开事件流，没结束的从游标续传）。返回 Runtime 给不了、要逐个回放的任务
 // （不存在、events_unavailable、没取完）；第一次就取不到（老的 Runtime 或 coding-web）时返回 null，由调用方全部逐个回放。
-async function paintFromEvents(base, recent) {
+async function paintFromEvents(base, recent, {merge=false,through=null}={}) {
   if (!recent.length) return [];
   const cursors = new Map(recent.map((t) => [t.id, 0]));
   const events = new Map(recent.map((t) => [t.id, []]));
   const done = new Map();
-  for (let round = 0; cursors.size && round < 50; round++) {
+  for (let round = 0; cursors.size && (through || round < 50); round++) {
     let page = null;
     historyTraffic.requests++;
     try {
@@ -3256,16 +3267,34 @@ async function paintFromEvents(base, recent) {
       }
       events.get(id).push(...(x.events || []));
       const next = Number(x.next_after_event_id) || 0;
-      if (x.more && next > cursors.get(id)) cursors.set(id, next);
-      else {
+      const target=through?.get(id),reached=target!=null&&next>=target;
+      if (x.more && next > cursors.get(id) && !reached) cursors.set(id, next);
+      else if((!x.more||reached)&&(target==null||reached)) {
         cursors.delete(id);
         done.set(id, next);
-      }
+      }else cursors.delete(id); // A stalled/incomplete page is a replay fallback, not complete history.
     }
   }
   const left = [];
   for (const t of recent) {
-    if (done.has(t.id)) loadRun(t, true, { events: events.get(t.id), cursor: done.get(t.id) });
+    if (done.has(t.id)) {
+      const run=merge&&state.runs.get(t.id);
+      if(run){
+        // Keep the live stream and draft while backfilling older persisted events.
+        // Events arriving during pagination win and share the SSE dedupe set.
+        const all=new Map(events.get(t.id).map(data=>{const ev=toEvent(data);return [ev.event_id,ev];}));
+        for(const ev of run.events)all.set(ev.event_id,ev);
+        run.events=[...all.values()].sort((a,b)=>a.event_id-b.event_id);
+        for(const id of all.keys())if(id)run.seen.add(id);
+        const finished=run.events.find(ev=>ev.type==="task_finished");
+        if(finished){
+          const newlyFinished=!run.done;
+          t.status=finished.value.status||t.status;run.drafts=null;run.finish?.();run.done=true;
+          if(newlyFinished){guidanceTaskFinished(t);afterFinish(t);}
+        }
+        scheduleTurn(t.id);scheduleChrome();
+      }else loadRun(t, true, { events: events.get(t.id), cursor: done.get(t.id) });
+    }
     else left.push(t);
   }
   return left;
