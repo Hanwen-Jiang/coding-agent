@@ -459,6 +459,13 @@ dialog > .discovery-body { padding: 20px 28px; overflow-y: auto; max-height: 64d
 .main .pro-chat .markdown td,.main .pro-chat .markdown th { border-color: var(--line); padding: 9px 12px; }
 .main .pro-chat .markdown :not(pre) > code { background: var(--surface-2); padding: 2px 5px; border-radius: 5px; font: .9em var(--font-mono); }
 .main .pro-worklog { border: 0; margin: 0; background: transparent; }
+.main .conversation-flow { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.main .progress-note-island:not(:first-child) { margin-top: 10px; }
+.main .progress-message { width: 100%; padding: 0; }
+.main .progress-message .markdown { color: var(--text); font-size: 14px; line-height: 1.8; }
+.main .progress-message .markdown > :last-child { margin-bottom: 0; }
+.main .progress-message .markdown p { margin: 0 0 10px; }
+.main .progress-note { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.8; margin: 0; }
 .main .pro-worklog .worklog-head { width: auto; max-width: 100%; min-height: 30px; padding: 3px 0; gap: 8px; font-size: 12px; color: var(--muted); border: 0; background: transparent; }
 .main .pro-worklog .execution-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .main .pro-worklog .execution-content { margin-top: 8px; }

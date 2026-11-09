@@ -7,6 +7,7 @@
 import { abortMarkdown, doneWhenText, errorText, exitWhenText, goalText, networkPermission, questionText, reasonText, retryDetail, retryTitle } from "./codes.js";
 import { LANGS, lang, locale, setLang, t } from "./i18n.js";
 import { installScrollbars } from "./scrollbars.js";
+import { conversationFlow, toolGroupCounts } from "./conversation-flow.js";
 
 const EVENT_TYPES = [
   "task_accepted", "round_started", "stage_started", "node_started", "node_finished",
@@ -2653,7 +2654,7 @@ function waitingLine(task) {
 function draftDelta(run, type, v) {
   const piece = String(v.text || "");
   if (!piece) return;
-  const node = String(v.node_id || "");
+  const node = draftNodeKey(run, v);
   const offset = Math.max(0, Number(v.offset) || 0);
   run.drafts = run.drafts || new Map();
   const d = run.drafts.get(node) || { text: { base: 0, chars: [] }, thinking: { base: 0, chars: [] } };
@@ -2666,7 +2667,13 @@ function draftDelta(run, type, v) {
   run.drafts.set(node, d);
 }
 
-// draftView 是还在生成的回答：有正文画正文（前面没收全时带省略号），只有思考时画思考的末尾。
+function draftNodeKey(run, value) {
+  const node=String(value.node_id||"");
+  const round=value.round_seq??[...(run.events||[])].reverse().find(ev=>ev.type==="round_started")?.value?.round_seq??"";
+  return `${round}:${node}`;
+}
+
+// Only ordinary answer text is public. Reasoning deltas are never a progress note.
 const answerIslands = new Map();
 const presentationIslands = new Map();
 let chatComponentsPromise;
@@ -2724,9 +2731,7 @@ function draftView(run,taskId) {
   if (!run || !run.drafts || !run.drafts.size) return null;
   const d = [...run.drafts.values()].pop();
   if (d.text.chars.length) return richAnswer((d.text.base ? "…" : "") + d.text.chars.join(""), taskId, true);
-  const thinking = d.thinking.chars;
-  if (!thinking.length) return null;
-  return h("div", { class: "draft-thinking" }, (thinking.length > 400 || d.thinking.base ? "…" : "") + thinking.slice(-400).join(""));
+  return null;
 }
 
 // pendingTurn 是正在提交的那一轮：消息先出现，下面说明在做什么、等了多久（开会话要复制工作副本，借沙箱要几秒到十几秒）。
@@ -2773,17 +2778,26 @@ function asks(events) {
 }
 
 function worklog(task, events, running, finished) {
-  const steps=workSteps(events).filter(ev=>ev.type==="tool_status");
+  const parts=conversationFlow(events);
   const before=h("div",{class:"execution-plan"},planArea(events),subAgentArea(events));
-  if(!steps.length&&!before.childElementCount)return null;
-  const first=events[0],elapsed=first?(finished?new Date(finished.time):Date.now())-new Date(first.time):0;
-  const title=running?t("work.actionsRunning",{n:steps.length}):t("work.actionsDone",{n:steps.length,dur:fmtDuration(elapsed)});
-  const latest=[...events].reverse().find(ev=>ev.type==="tool_status");
-  const current=running&&latest?.value?.state==="running"?toolText(latest.value,false):"";
-  const props={title,current,running,expanded:state.open.has(task.id),before,
-    onExpandedChange:(open)=>{if(open){state.open.add(task.id);state.closed.delete(task.id);}else{state.open.delete(task.id);state.closed.add(task.id);}renderTurn(task.id);},
-    steps:steps.map(ev=>{const info=stepInfo(ev);return {id:String(ev.event_id),title:info.title,detail:info.detail || String(ev.value?.target || ""),tool:String(ev.value?.tool||""),state:ev.value?.state==="failed"?"output-error":"output-available",time:fmtClock(ev.time)};})};
-  return proPresentation("progress-"+task.id,"progress-island","mountProgress",props,h("div",{class:"execution-current"},title,current?" · "+current:""));
+  if(!parts.length&&!before.childElementCount)return null;
+  if(!parts.some(part=>part.kind==="tools")&&before.childElementCount)parts.push({kind:"tools",id:"plan",calls:[]});
+  let attachedPlan=false;
+  return h("div",{class:"conversation-flow"},parts.map(part=>{
+    const id=task.id+":"+part.id;
+    if(part.kind==="progress")return proPresentation("note-"+id,"progress-note-island","mountProgressMessage",
+      {id,text:part.message,source:part.source},h("p",{class:"progress-note"},part.message));
+    const active=running&&part.calls.some(call=>call.event.value.state==="running");
+    const counts=toolGroupCounts(part.calls);
+    const title=Object.entries(counts).filter(([,n])=>n).map(([kind,n])=>t("flow."+kind,{n})).join(" · ")||t("plan.title");
+    const latest=[...part.calls].reverse().find(call=>call.event.value.state==="running");
+    const current=active&&latest?toolText(latest.event.value,false):"";
+    const plan=!attachedPlan?before:null;attachedPlan=true;
+    const props={title,current,running:active,expanded:state.open.has(id),before:plan,
+      onExpandedChange:(open)=>{if(open){state.open.add(id);state.closed.delete(id);}else{state.open.delete(id);state.closed.add(id);}renderTurn(task.id);},
+      steps:part.calls.map(call=>{const ev=call.event,info=stepInfo(ev);return {id:call.id,title:info.title,detail:info.detail || String(ev.value?.target || ""),tool:String(ev.value?.tool||""),state:ev.value?.state==="failed"?"output-error":ev.value?.state==="running"?"input-available":"output-available",time:fmtClock(ev.time)};})};
+    return proPresentation("progress-"+id,"progress-island","mountProgress",props,h("div",{class:"execution-current"},title,current?" · "+current:""));
+  }));
 }
 
 // Diagnostic data stays available in one deliberate advanced entry, not in
@@ -3114,6 +3128,7 @@ function loadRun(t, force = false, seed = null) {
       if (id) seen.add(id);
       const type = ev.type;
       run.events.push(ev);
+      if(type==="tool_status"&&ev.value.state==="running")run.drafts?.delete(draftNodeKey(run,ev.value));
       const replaying = TERMINAL.has(t.status) && !run.live;
       if (type === "task_finished") {
         t.status = ev.value.status || t.status;

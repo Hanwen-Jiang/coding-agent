@@ -5,7 +5,7 @@ package web
 //   - Runtime 的 SSE 推 token_delta、thinking_delta（payload：node_id、offset、text），没有 id 行：浏览器的 lastEventId 停在
 //     上一条持久事件上，不能拿它去重，否则增量全被当成重复丢掉。
 //   - 同一个节点按 offset 拼成草稿 .answer.draft：接着末尾就追加；offset 落回已有范围（activity 重试从 0 重来）就从那里重写；
-//     只有思考、还没有正文时显示 .draft-thinking。
+//     thinking_delta 不属于公开进展，不显示在对话里。
 //   - task_finished 之后草稿让位给最终的回答。
 //
 // 真正执行 JS 的检查用浏览器（找不到时跳过）。
@@ -27,7 +27,9 @@ const delta = (name, offset, piece) => push(name, { node_id: "answer", offset, t
 try {
   await wait(() => document.querySelector("#turn-t1"), 8000);
   await delta("thinking_delta", 0, "先看看测试");
-  out.steps.thinking = await wait(() => text(".draft-thinking"));
+  await sleep(250);
+  out.steps.thinking = text(".draft-thinking");
+  out.steps.thinkingExposed = text(".thread").includes("先看看测试");
   await delta("token_delta", 0, "原因是");
   await delta("token_delta", 3, "断言写反了😀");
   await delta("token_delta", 9, "，已修好。");
@@ -35,6 +37,9 @@ try {
   out.steps.thinkingAfterAnswer = text(".draft-thinking");
   await delta("token_delta", 0, "重来一遍");
   out.steps.restart = await wait(() => text(".answer.draft") === "重来一遍" && text(".answer.draft"));
+  await push("tool_status", {round_seq: 0, node_id: "answer", step: 1, tool: "repo_read", state: "running", target: "README.md"});
+  await sleep(150);
+  out.steps.latePreviousRound = text(".answer.draft");
   await push("task_finished", { status: "TASK_STATUS_DONE", deliverable: { value: { answer: "最终的回答" } } });
   out.steps.final = await wait(() => (text("#turn-t1 .answer") || "").includes("最终的回答") && text("#turn-t1 .answer"));
   out.steps.draftAfter = text(".answer.draft");
@@ -54,8 +59,8 @@ func TestDeltasDrawADraftAnswerInBrowser(t *testing.T) {
 		t.Fatalf("页面报错：%v", res.Errors)
 	}
 	str := func(k string) string { s, _ := res.Steps[k].(string); return s }
-	if !strings.Contains(str("thinking"), "先看看测试") {
-		t.Errorf("只有思考时显示思考：%v", res.Steps["thinking"])
+	if res.Steps["thinking"] != nil || res.Steps["thinkingExposed"] != false {
+		t.Errorf("私有推理不能当作公开进展：%v", res.Steps)
 	}
 	if got := str("draft"); got != "原因是断言写反了😀，已修好。" {
 		t.Errorf("按 offset 拼成草稿（offset 按字符数，表情也算一个）：%q", got)
@@ -65,6 +70,9 @@ func TestDeltasDrawADraftAnswerInBrowser(t *testing.T) {
 	}
 	if str("restart") != "重来一遍" {
 		t.Errorf("offset 落回 0 就从头重写：%v", res.Steps["restart"])
+	}
+	if str("latePreviousRound") != "重来一遍" {
+		t.Errorf("上一轮的工具状态不能清掉当前轮草稿：%v", res.Steps["latePreviousRound"])
 	}
 	if !strings.Contains(str("final"), "最终的回答") || res.Steps["draftAfter"] != nil {
 		t.Errorf("结束后草稿让位给最终的回答：%v %v", res.Steps["final"], res.Steps["draftAfter"])

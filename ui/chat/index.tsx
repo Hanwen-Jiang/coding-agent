@@ -75,6 +75,14 @@ function NativeSlot({node,className}: {node:HTMLElement|null;className?:string})
  return <div ref={ref} className={className}/>;
 }
 type ProgressProps={title:string;current:string;running:boolean;expanded:boolean;onExpandedChange:(value:boolean)=>void;before:HTMLElement|null;steps:Array<{id:string;title:string;detail:string;tool:string;state:string;time:string}>};
+function ProgressMessage({id,text,source}:{id:string;text:string;source:string}) {
+ return <ChatMessage.Assistant className="progress-message" data-public-progress={source}>
+  <ChatMessage.Body><ChatMessage.Content><Markdown id={'progress-'+id} components={{
+   a:({href,children})=><a href={safeHref(href)} target="_blank" rel="noopener noreferrer">{children}</a>,
+   img:({alt})=><span>{alt}</span>,
+  }}>{text}</Markdown></ChatMessage.Content></ChatMessage.Body>
+ </ChatMessage.Assistant>;
+}
 function Progress({title,current,running,expanded,onExpandedChange,before,steps}:ProgressProps) {
  return <div className={'worklog pro-worklog'+(expanded?' open':'')} data-pro-component="ChainOfThought">
   <ChainOfThought isExpanded={expanded} onExpandedChange={onExpandedChange} isStreaming={running}>
@@ -115,6 +123,7 @@ function mountComponent<P>(container:HTMLElement,Component:React.ComponentType<P
  update(initial);return {update,unmount:()=>{if(!disposed){disposed=true;root.unmount();delete container.dataset.proMounted;}}};
 }
 export const mountProgress=(container:HTMLElement,props:ProgressProps)=>mountComponent(container,Progress,props);
+export const mountProgressMessage=(container:HTMLElement,props:React.ComponentProps<typeof ProgressMessage>)=>mountComponent(container,ProgressMessage,props);
 export const mountAttachments=(container:HTMLElement,props:React.ComponentProps<typeof Attachments>)=>mountComponent(container,Attachments,props);
 export function mountComposer(container:HTMLElement,props:React.ComponentProps<typeof Composer>) {
  const focused=document.activeElement instanceof HTMLTextAreaElement&&container.contains(document.activeElement)?document.activeElement:null;

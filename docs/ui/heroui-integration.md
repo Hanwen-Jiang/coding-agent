@@ -39,7 +39,7 @@ The build verifies the package versions, bundles all runtime dependencies into s
 
 ## Main conversation surface
 
-The main conversation now uses real Pro `ChainOfThought` and `ChatTool` components for the public execution event timeline, `ChatAttachment` for delivered files, and `PromptInput.Shell`/`Content` around the existing native composer controls. It does not manufacture reasoning, tool output or upload capability. Completed execution details start collapsed; the current running action remains visible. Plans, sub-agent status and raw public events stay available inside the disclosure. Stable island handles preserve expansion state across SSE updates and unmount on navigation.
+The main conversation uses real Pro `ChainOfThought` and `ChatTool` components for grouped tool actions, `ChatAttachment` for delivered files, and `PromptInput.Shell`/`Content` around the existing native composer controls. Completed tool groups start collapsed; the current running action remains visible. Plans and sub-agent status stay available inside the first group. Raw events have one advanced disclosure after the answer. Stable island handles preserve expansion state across SSE updates and unmount on navigation.
 
 The composer bridge deliberately uses the stacked shell: Pro's compact mode reserves named grid areas for its own textarea and toolbar, which would shrink a native control adapter into an automatic grid column. Existing send/steer/interrupt/approval callbacks, textarea identity, draft value and keyboard handling remain application-owned; only their presentation is adopted. Conversation and composer share an 800px outer content axis, with responsive padding and the existing 44px topbar/terracotta tokens preserved.
 
@@ -50,7 +50,20 @@ places it beside the opening title and compact suggestions, then the same input
 node moves to the bottom dock when a task is submitted. Enter/steer/approval,
 selection, and saved session settings keep their original handlers.
 
-Normal progress lists actual tool calls and the user-facing plan. Internal
+Public progress paragraphs interleave with their following tool group, rather
+than putting the whole task behind one disclosure. `conversation-flow.js`
+projects `tool_status.progress_message` into a `ChatMessage`/`Markdown` paragraph
+and coalesces tool statuses by round, node, step and call index. Legacy events
+without a call index match the pending calls by tool and target in call order;
+multiple identical calls are preserved. Late tool results update
+their original group. The optional message is ordinary assistant text returned
+with tool calls; `thinking_delta` and rationale are never displayed as progress.
+An explicit custom stage goal can open the flow; generic coded or fast goals
+stay in diagnostics. Final answers remain separate. Existing histories without
+public progress fields still show their actual tool calls. The same projection
+is rebuilt from SSE and snapshots, so reload cannot duplicate progress notes.
+
+Internal
 accepted/round/triage/node/reviewer events remain in one collapsed **Run details**
 entry after each answer, with one raw-event disclosure. A simple answer without
 tool calls does not display an artificial execution timeline. Diff/commit
