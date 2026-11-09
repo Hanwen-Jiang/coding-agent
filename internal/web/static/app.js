@@ -71,6 +71,7 @@ const state = {
   runs: new Map(), // taskId → { events, done, es, promise }
   detail: new Map(), // taskId → { state, usage, cost, roundSeq }
   sourceLists: new Map(),
+  collectionDrafts:new Map(),
   sourcePolicies: new Map(),
   uploadDrafts: new Map(),
   artifacts: new Map(), // taskId → { list, failed }：任务交付的文件（N-18），结束后取一次
@@ -722,6 +723,8 @@ function installDraftSettings() {
   installTaskSettings(draftSettingsForEnvironment(state.draftEnvironment));
 }
 let taskSettingsGeneration=0;
+let taskSettingsSave=null;
+const pendingSettingsSubmissions=new Map();
 
 function personalSelection() {
   return state.personalChoices.get(personalChoiceKey()) || state.session?.personal_config || undefined;
@@ -3411,12 +3414,13 @@ function uploadItems(key=personalChoiceKey()) {return state.uploadDrafts.get(key
 function uploadAllowed() {return !!state.project&&!state.sending&&!["running","waiting"].includes(phase().mode);}
 function clearUploadDrafts() {
   sourceGeneration++;state.sending=false;state.pending=null;
+  taskSettingsGeneration++;taskSettingsSave=null;pendingSettingsSubmissions.clear();
   for(const items of state.uploadDrafts.values())for(const item of items){item.controller?.abort();if(item.preview)URL.revokeObjectURL(item.preview);}
-  state.uploadDrafts.clear();state.sourceLists.clear();state.sourcePolicies.clear();
+  state.uploadDrafts.clear();state.collectionDrafts.clear();state.sourceLists.clear();state.sourcePolicies.clear();
 }
 function refreshUploadUI() {
   const items=uploadItems();
-  ui.composerModel?.update({attachments:items.map(item=>({id:item.id,name:item.source?.name||item.file.name,size_bytes:item.source?.size_bytes??item.file.size,mime_type:item.source?.mime_type||item.file?.type,preview_url:item.preview||item.source?.preview_url,status:item.status,error:item.error||""})),canAttach:uploadAllowed(),
+  ui.composerModel?.update({collectionLabel:state.collectionDrafts.get(personalChoiceKey())?.label||"",attachments:items.map(item=>({id:item.id,name:item.source?.name||item.file.name,size_bytes:item.source?.size_bytes??item.file.size,mime_type:item.source?.mime_type||item.file?.type,preview_url:item.preview||item.source?.preview_url,status:item.status,error:item.error||""})),canAttach:uploadAllowed(),
     uploadLabels:{add:t("sources.add",{m:Math.floor(sourcePolicy().max_file_bytes/1024/1024)}),remove:t("sources.remove"),retry:t("common.retry"),uploading:t("sources.uploading"),ready:t("sources.ready"),pending:t("sources.pending"),drop:t("sources.drop"),unavailable:t("sources.afterTask")}});
   refreshSend();renderStatus();
 }
@@ -3442,7 +3446,7 @@ async function openFileWorkbench(sourceID) {
   dialog.showModal();host.textContent=t("sources.panel.loading");
   try {chatComponentsPromise ||= import("./chat-ui.js");const module=await chatComponentsPromise;if(!dialog.isConnected)return;
     handle=module.mountFileWorkbench(host,{base,sources:state.sourceLists.get(base)?.list||[],initialSourceID:sourceID,
-      onClose:close,onUse:source=>{close();useSource(source);},onChanged:()=>{void loadSources(base,true);}});
+      onClose:close,onUse:source=>{close();useSource(source);},onUseCollection:collection=>{if(!uploadAllowed()){toast(t("sources.afterTask"));return;}state.collectionDrafts.set(personalChoiceKey(),{id:collection.id,label:(document.documentElement.lang.startsWith("zh")?"知识集合 · ":"Knowledge collection · ")+(collection.roots?.length||0)+(document.documentElement.lang.startsWith("zh")?" 份资料":" sources")});close();refreshUploadUI();},onChanged:()=>{void loadSources(base,true);}});
   } catch(error){close();report(error);}
 }
 
@@ -3532,7 +3536,7 @@ function dock() {
   ui.composerModel=model;
   const props={model,input:ui.input,slots:{status:ui.cStatus,ask:ui.cAsk,options:ui.cOpts,help:ui.cHelp,tools:ui.tools},
     bind:(input,body,right,send)=>{if(ui.composerModel!==model)return;model.mounted=true;ui.input=input;ui.composer=body;ui.cRight=right;ui.send=send;autosize();updateComposer(true);},
-    onInput:()=>{autosize();refreshSend();},onKeyDown:onComposerKey,onFiles:addSourceFiles,onRemoveUpload:removeUpload,onRetryUpload:retryUpload,
+    onInput:()=>{autosize();refreshSend();},onKeyDown:onComposerKey,onFiles:addSourceFiles,onRemoveUpload:removeUpload,onRetryUpload:retryUpload,onRemoveCollection:()=>{state.collectionDrafts.delete(personalChoiceKey());refreshUploadUI();},
     onSend:()=>{const current=phase();if(current.mode==="running")steer(current.current,"next_step");else submit();},
     onMenu:(anchor)=>{const current=phase();openPop(anchor,(close)=>sendMenu(current,close));}};
   const surface=proPresentation("composer", "composer-island", "mountComposer", props,ui.composer);
@@ -4009,10 +4013,13 @@ function taskSettingsTool() {
         const settings=readFields();
         const session=state.session,base=sbase();
         saving=true;const saveGeneration=++taskSettingsGeneration;
+        let saveRecord;
         panel.querySelectorAll(".task-settings-actions button,.task-settings-tools").forEach(button=>button.disabled=true);
         try {
-          const stored=session ? await api("PUT",`${base}/settings`,settings) : settings;
-          if(owner!==`${state.me?.tenant}/${state.me?.user}`)return false;
+          saveRecord={context,sourceGeneration,promise:session?api("PUT",`${base}/settings`,settings):Promise.resolve(settings)};
+          taskSettingsSave=saveRecord;
+          const stored=await saveRecord.promise;
+          if(owner!==`${state.me?.tenant}/${state.me?.user}`||saveRecord.sourceGeneration!==sourceGeneration)return false;
           if(session && saveGeneration===taskSettingsGeneration){
             const saved={...session,task_settings:stored};
             state.sessions=state.sessions.map(item=>item.project_id===saved.project_id&&item.id===saved.id?saved:item);
@@ -4030,6 +4037,7 @@ function taskSettingsTool() {
           if(context===personalChoiceKey())error.textContent=ex.message;
           return false;
         } finally {
+          if(taskSettingsSave===saveRecord)taskSettingsSave=null;
           saving=false;
           panel.querySelectorAll(".task-settings-actions button,.task-settings-tools").forEach(button=>button.disabled=false);
         }
@@ -4152,11 +4160,35 @@ function meterTool(m) {
 
 // submit 发出一条任务。草稿时先开会话（复制工作副本，标题取这条消息的第一行），再提交。
 async function submit(text) {
+  // A popup may detach during session rendering while its save is still in
+  // flight. Sending waits for that acknowledged save, never the old defaults.
+  let capturedText,confirmedSettings;
+  const contextBeforeSave=personalChoiceKey(),pendingSave=taskSettingsSave;
+  if(pendingSave?.context===contextBeforeSave){
+    if(pendingSettingsSubmissions.has(contextBeforeSave))return;
+    const pendingToken={},settingsBeforeSave=taskSettingsGeneration,ownerBeforeSave=sourceGeneration;
+    capturedText=ui.input?.value;pendingSettingsSubmissions.set(contextBeforeSave,pendingToken);
+    try{confirmedSettings=await pendingSave.promise;}catch(error){if(ownerBeforeSave===sourceGeneration&&contextBeforeSave===personalChoiceKey())report(error);return;}
+    finally{if(pendingSettingsSubmissions.get(contextBeforeSave)===pendingToken)pendingSettingsSubmissions.delete(contextBeforeSave);}
+    if(contextBeforeSave!==personalChoiceKey()||settingsBeforeSave!==taskSettingsGeneration||ownerBeforeSave!==sourceGeneration)return;
+    // A new send after returning to this session may be waiting on its earlier
+    // save. The same-scope acknowledged settings are authoritative for it too.
+    if(state.session){
+      state.session={...state.session,task_settings:confirmedSettings};
+      state.sessions=state.sessions.map(session=>session.id===state.session.id&&session.project_id===state.session.project_id?{...session,task_settings:confirmedSettings}:session);
+    }
+    installTaskSettings(confirmedSettings);
+    // Editing while the save is pending cancels this send attempt; preserve the
+    // new draft rather than sending the stale captured text and clearing it.
+    if(text===undefined&&ui.input?.value!==capturedText)return;
+  }
+
   const selectedUploads=[...uploadItems()];
   const uploadGeneration=sourceGeneration;
-  const message = (text ?? (ui.input ? ui.input.value : "")).trim() || (selectedUploads.length?t("sources.defaultPrompt"):"");
+  const message = (text ?? capturedText ?? (ui.input ? ui.input.value : "")).trim() || (selectedUploads.length?t("sources.defaultPrompt"):"");
   if (!message || state.sending || !state.project || selectedUploads.some(item=>item.status==="error")) return;
   const submittedContext=personalChoiceKey();
+  const selectedCollection=state.collectionDrafts.get(submittedContext);
   const taskSettings=selectedTaskSettings();
   const selectedModel=state.settings.model;
   const selectedEnvironment=draftEnvironment();
@@ -4199,8 +4231,9 @@ async function submit(text) {
     if(selectedUploads.length){state.uploadDrafts.set(activeKey,selectedUploads);if(activeKey!==submittedContext)state.uploadDrafts.delete(submittedContext);}
     for(const item of selectedUploads){if(!sameOwner())return;const source=await uploadOne(item,activeKey,base,owner,uploadGeneration);if(!sameOwner())return;if(!sourceIDs.includes(source.id))sourceIDs.push(source.id);}
     if(owner!==`${state.me?.tenant}/${state.me?.user}`)return;
-    const t = await api("POST", `${base}/tasks`, { message, sandbox: taskSettings.sandbox, model: selectedModel, personal_config: selection, network_request: taskSettings.network_request,...(sourceIDs.length?{source_ids:sourceIDs}:{}) });
+    const t = await api("POST", `${base}/tasks`, { message, sandbox: taskSettings.sandbox, model: selectedModel, personal_config: selection, network_request: taskSettings.network_request,...(sourceIDs.length?{source_ids:sourceIDs}:{}),...(selectedCollection?{file_collection_ids:[selectedCollection.id]}:{}) });
     if(!sameOwner())return;
+    if(selectedCollection)state.collectionDrafts.delete(submittedContext);
     if(selectedUploads.length){state.uploadDrafts.delete(activeKey);for(const item of selectedUploads)if(item.preview)URL.revokeObjectURL(item.preview);}
     if (sbase() !== base) return;
     if (selection) state.session.personal_config = selection;

@@ -6,6 +6,7 @@ import {ChatAttachment} from '@heroui-pro/react/chat-attachment';
 type Upload = {id:string;name:string;size_bytes:number;mime_type:string;preview_url?:string;status:string;error?:string};
 interface ComposerSnapshot {
  attachments?:Upload[];
+ collectionLabel?:string;
  canAttach?:boolean;
  uploadLabels?:{add:string;remove:string;retry:string;uploading:string;ready:string;pending:string;drop:string;unavailable:string};
  mode: string;
@@ -27,6 +28,7 @@ export interface ComposerProps {
  bind: (input: HTMLTextAreaElement, body: HTMLDivElement, right: HTMLDivElement, send: HTMLButtonElement | null) => void;
  onFiles:(files:File[])=>void;
  onRemoveUpload:(id:string)=>void;
+ onRemoveCollection?:()=>void;
  onRetryUpload:(id:string)=>void;
  onInput: () => void;
  onKeyDown: (event: KeyboardEvent) => void;
@@ -78,6 +80,7 @@ function ComposerView(props: ComposerProps) {
   <PromptInput.Shell>
    <div ref={body} className={'composer'+(state.mode==='waiting'?' waiting':'')}>
     <ControlSlot node={props.slots.status}/><ControlSlot node={props.slots.ask}/>
+    {state.collectionLabel&&<div className="composer-attachments" data-knowledge-collection><span className="composer-attachment"><span>{state.collectionLabel}</span><Button size="sm" variant="ghost" isIconOnly aria-label={state.uploadLabels?.remove} onPress={props.onRemoveCollection}>×</Button></span></div>}
     {!!state.attachments?.length&&<div className="composer-attachments" aria-live="polite">{state.attachments.map(file=><div key={file.id} className="composer-attachment" data-upload-id={file.id} data-upload-state={file.status}>
      <ChatAttachment className="composer-attachment-file" mediaType="document" name={file.name} size={file.size_bytes}>
       {file.preview_url?<ChatAttachment.Preview><img className="composer-attachment-preview" src={file.preview_url} alt=""/></ChatAttachment.Preview>:<ChatAttachment.Preview/>}

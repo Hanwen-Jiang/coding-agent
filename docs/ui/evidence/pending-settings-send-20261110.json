@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-10",
+  "status": "passed",
+  "environment": "cloudnium_cloud isolated Docker fi-20261110-pending-settings-complete; real Chromium",
+  "mode": "real application JavaScript with explicit HTTP API fixture, no production services",
+  "checks": [
+    "send waits for settings save, uses confirmed sandbox/network, submits once",
+    "save failure submits nothing and preserves original draft",
+    "editing while waiting cancels stale send and preserves new draft",
+    "switching session and returning cancels stale send",
+    "same-account logout/relogin cancels stale send and preserves new-account draft",
+    "a new send after returning to the same session uses the confirmed earlier save"
+  ],
+  "duration_seconds": 16.912,
+  "source_sha256": {
+    "internal/web/static/app.js": "4fae5477be766335eeb37e42a654065b75cd7b3405292378b2edfe848fe4e85b"
+  },
+  "probe_sha256": "76bc2ee248e35fe422ea7819bd87eb99c524a432bef76dbd8bac828fd0e395fb",
+  "probe": "/tmp/file-intelligence-pending-settings-manual-probe_test.go",
+  "temporary_probe_removed_from_repository": true
+}

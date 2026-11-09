@@ -1,0 +1,26 @@
+{
+  "status": "passed",
+  "date": "2026-11-10",
+  "environment": "cloudnium_cloud isolated fi-20261110-collection-ui; fi-20261110-browser-ci:1; real /usr/bin/chromium headless",
+  "viewport": "1440x900",
+  "mode": "production React/app bundle with explicit API fixture",
+  "checks": {
+    "collection_action_shows_20_source_chip": true,
+    "chip_removal_does_not_submit": true,
+    "session_drafts_do_not_cross": true,
+    "logout_and_login_u2_clears_prior_account_selection": true,
+    "wire": {
+      "file_collection_ids": [
+        "col_fixture_20"
+      ],
+      "has_source_ids": false,
+      "message": "Find the answer in the 20-source collection."
+    },
+    "selection_cleared_after_successful_send": true,
+    "browser_errors": []
+  },
+  "command": "go test ./internal/web -run TestTemporaryCollectionTaskComposerWire -count=1 -v",
+  "duration_seconds": 4.608,
+  "temporary_probe": "/tmp/file-intelligence-collection-ui-probe_test.go",
+  "probe_removed_from_repository": true
+}

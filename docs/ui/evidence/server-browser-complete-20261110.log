@@ -1,0 +1,17 @@
+Coding Agent full server acceptance, 2026-11-10
+go test -json ./...
+go vet ./...
+
+no_test_files github.com/agentruntime/coding-agent/cmd/coding-web (0 seconds)
+no_test_files github.com/agentruntime/coding-agent/internal/samples (0 seconds)
+pass github.com/agentruntime/coding-agent/internal/github (0.002 seconds)
+pass github.com/agentruntime/coding-agent/internal/server (87.774 seconds)
+pass github.com/agentruntime/coding-agent/internal/web (224.906 seconds)
+passed test events (including subtests): 335
+passed top-level tests: 257
+failed: 0
+skipped test cases: 1
+tests=0 vet=0
+140 compiled inputs match local SHA-256 manifest
+
+The default opt-in live discovery skip was separately executed with CODING_DISCOVERY_LIVE=1: PASS (2.750s). No test cases remain unexecuted in this Coding suite.

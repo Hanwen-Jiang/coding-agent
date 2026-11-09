@@ -139,6 +139,7 @@ try{
  location.hash='#/w/p/s/s';await wait(()=>$('.answer')?.textContent.includes('networking is authorized'),'actual answer');await frame();
  check(!$('.main-landing')&&$('.dock').parentElement.classList.contains('main'),'conversation input not docked');
  check(!$('.progress-island'),'fast answer shows internal pipeline steps');
+ await wait(()=>$('[data-pro-component="RunDetails"]'),'RunDetails mounted');
  check($$('.run-diagnostics').length===1&&!$('.run-diagnostics').open,'diagnostics must be a single collapsed entry');
  check(!$$('.next-step').length,'stale workspace changes produce question CTAs');
  const input=$('#composer');input.value='Keep focused draft';input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();

@@ -1,0 +1,22 @@
+=== RUN   TestTemporaryPendingSettingsSend
+=== RUN   TestTemporaryPendingSettingsSend/saved
+    pending_settings_manual_probe_test.go:92: {"errors":[],"mode":"saved","requests":1,"draft":""}
+=== RUN   TestTemporaryPendingSettingsSend/failed
+    pending_settings_manual_probe_test.go:92: {"errors":[],"mode":"failed","requests":0,"draft":"original draft"}
+=== RUN   TestTemporaryPendingSettingsSend/edited
+    pending_settings_manual_probe_test.go:92: {"errors":[],"mode":"edited","requests":0,"draft":"new edited draft"}
+=== RUN   TestTemporaryPendingSettingsSend/route-return
+    pending_settings_manual_probe_test.go:92: {"errors":[],"mode":"route-return","requests":0,"draft":"new route draft"}
+=== RUN   TestTemporaryPendingSettingsSend/same-account-login
+    pending_settings_manual_probe_test.go:92: {"errors":[],"mode":"same-account-login","requests":0,"draft":"new account draft"}
+=== RUN   TestTemporaryPendingSettingsSend/route-before-send
+    pending_settings_manual_probe_test.go:92: {"errors":[],"mode":"route-before-send","requests":1,"draft":""}
+--- PASS: TestTemporaryPendingSettingsSend (16.90s)
+    --- PASS: TestTemporaryPendingSettingsSend/saved (2.87s)
+    --- PASS: TestTemporaryPendingSettingsSend/failed (2.61s)
+    --- PASS: TestTemporaryPendingSettingsSend/edited (2.67s)
+    --- PASS: TestTemporaryPendingSettingsSend/route-return (2.87s)
+    --- PASS: TestTemporaryPendingSettingsSend/same-account-login (2.82s)
+    --- PASS: TestTemporaryPendingSettingsSend/route-before-send (3.06s)
+PASS
+ok  	github.com/agentruntime/coding-agent/internal/web	16.912s

@@ -93,12 +93,13 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		return
 	}
 	var req struct {
-		SourceIDs      []string           `json:"source_ids"`
-		Message        string             `json:"message"`
-		Sandbox        string             `json:"sandbox"`
-		Model          string             `json:"model"`
-		Network        json.RawMessage    `json:"network_request"`
-		PersonalConfig *personalSelection `json:"personal_config"`
+		SourceIDs         []string           `json:"source_ids"`
+		FileCollectionIDs []string           `json:"file_collection_ids"`
+		Message           string             `json:"message"`
+		Sandbox           string             `json:"sandbox"`
+		Model             string             `json:"model"`
+		Network           json.RawMessage    `json:"network_request"`
+		PersonalConfig    *personalSelection `json:"personal_config"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -138,6 +139,16 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		writeMsg(w, r, http.StatusBadRequest, "模型倾向只能是 economy、balanced 或 best")
 		return
 	}
+	if len(req.FileCollectionIDs) > 1 {
+		writeMsg(w, r, 400, "每次任务最多选择一个知识集合")
+		return
+	}
+	for _, collection := range req.FileCollectionIDs {
+		if len(collection) != 36 || !strings.HasPrefix(collection, "col_") {
+			writeMsg(w, r, 400, "知识集合标识无效")
+			return
+		}
+	}
 	sources, err := s.resolveSources(r.Context(), id, sess.WorkspaceID, req.SourceIDs)
 	if err != nil {
 		writeErr(w, r, 400, err)
@@ -152,6 +163,9 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		// 沙箱等级是这个 Task 的 effect 上限（Runtime 的 SubmitTaskRequest.effect_ceiling，D-08）：只能比租户策略低，
 		// 高了 Task API 直接拒绝，不悄悄截断。不再改写租户策略文件。
 		"effectCeiling": effectEnum(sandbox),
+	}
+	if len(req.FileCollectionIDs) > 0 {
+		submit["inputs"].(map[string]any)["file_collection_ids"] = req.FileCollectionIDs
 	}
 	if len(sources) > 0 {
 		refs := make([]string, 0, len(sources))
@@ -196,7 +210,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		}
 		x.UpdatedAt = now
 	})
-	record := TaskRecord{SourceIDs: append([]string(nil), req.SourceIDs...), ID: resp.TaskID, Message: msg, CreatedAt: now, CreatedBy: id.UserID, Status: "TASK_STATUS_QUEUED", Sandbox: sandbox, Model: model}
+	record := TaskRecord{FileCollectionIDs: append([]string(nil), req.FileCollectionIDs...), SourceIDs: append([]string(nil), req.SourceIDs...), ID: resp.TaskID, Message: msg, CreatedAt: now, CreatedBy: id.UserID, Status: "TASK_STATUS_QUEUED", Sandbox: sandbox, Model: model}
 	if err := s.store.UpdateTasks(id.TenantID, sess.WorkspaceID, func(ts []TaskRecord) []TaskRecord {
 		if slices.ContainsFunc(ts, func(t TaskRecord) bool { return t.ID == record.ID }) {
 			return ts

@@ -1,0 +1,5 @@
+=== RUN   TestPublicDiscoveryLiveSources
+    discovery_test.go:283: live sources: 19/20 skill entries via github; preview academy-guide; 18 registry servers; warnings=[skills/claude-api/SKILL.md: Skill 文档过大或不是普通文件]
+--- PASS: TestPublicDiscoveryLiveSources (2.74s)
+PASS
+ok  	github.com/agentruntime/coding-agent/internal/server	2.750s

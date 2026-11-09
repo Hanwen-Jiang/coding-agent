@@ -4,6 +4,20 @@ React/HeroUI Pro 文件工作台位于 `ui/chat/file-workbench.tsx`，从来源�
 
 `internal/server/file_workbench.go` 将请求限定在已鉴权的会话 workspace，并代理 Runtime 文件/检索 API。权限由 Runtime `details.permissions` 决定；缺权限字段时管理按钮保持禁用。客户端没有独立文件权威或隐式执行引擎。原件引用和已发布版本保持不可变。
 
-依赖 Runtime 的 `codex/file-intelligence-m0` 集成实现（`33465f99` 或之后版本）；只发布前端而未部署后端/引擎时会显示真实不可用错误。对应 Runtime 文档：`docs/plan/file-intelligence-integration.md`。Linux file-engines/UNO、真实 Temporal 恢复验收、完整规模评测尚有发布门，当前提交不代表生产上线。
+## 集合与下一条任务
 
-验收：`internal/server` 与 `internal/web` Go/真实 Chrome 测试通过，UI 手工交互见 `docs/evidence/file-workbench/README.md`。截图明确标为合成 fixture，实际处理结果与权限/版本并发验证位于 Runtime 仓库。
+知识集合可选择最多 500 份已读取资料，实际索引还受 Runtime 的 20 MiB 表示载荷上限限制。索引仅覆盖已读取的页面或选区；文件数量不代表全文已经解析。单 Task 的直接附件仍限制为 10 文件、200 MiB，不随集合容量变化。
+
+“在下一条任务使用此集合”将当前集合加入输入框，显示来源数量，并可在发送前移除。每次任务最多显式选择一个当前会话知识集合。请求携带 `file_collection_ids`；仅使用集合时不携带 `source_ids`，不会把集合展开成原件附件或原生图像授权。Runtime 在提交时固定集合版本，后续重建不改变旧任务的检索范围。选择草稿按账号/会话隔离，发送成功后清除；退出登录后不会保留旧账号选择。
+
+## 异步设置保存
+
+任务发送会等待同一会话正在保存的沙箱/网络设置。保存失败时不发送并保留草稿；等待期间编辑草稿、切换会话或重新登录会取消旧发送。返回同一会话后新发起的发送会使用已确认设置，旧请求不能清掉新草稿。实现用账号与路由代次校验，避免仅比较相同的会话字符串而复活旧等待。
+
+## 验收与部署边界
+
+本次在项目服务器的独立容器中运行真实 Chromium；集合按钮、参数、移除、跨会话和跨账号隔离的证据见 `docs/ui/evidence/collection-task-ui-20261110.json`。设置保存/发送的六种交错情形使用实际应用 JavaScript 与明确的 HTTP fixture，证据见 `docs/ui/evidence/pending-settings-send-20261110.json`。这些浏览器 fixture 不冒充真实文档处理结果。
+
+服务器完整 `go test ./...` 和 `go vet ./...` 通过：257 项顶层测试（335 条含子测试的通过事件）；默认跳过的只读公开来源集成另外显式开启后通过。140 个实际编译输入逐文件 SHA 与本地一致。完整 Coding Go/浏览器回归与源码校验记录见 `docs/ui/evidence/server-browser-complete-20261110.json`。旧的首响应测试现在观察 DOM 插入顺序，避免把轮询间隔内渲染的旧轮次误判为“先显示”；运行详情测试等待真实 React 组件挂载后仍检查唯一、默认折叠状态，原断言未取消。
+
+后端必须配套部署 Runtime 的文件集成与服务器验收修复。Linux 引擎构建、UNO 重算、Temporal 恢复/取消和文件/检索评测证据保存在 Runtime 仓库。完整状态与限制以 `docs/plan/file-intelligence-integration.md` 和最终服务器验收记录为准。代码合并与服务器隔离测试均不表示生产服务已经升级。

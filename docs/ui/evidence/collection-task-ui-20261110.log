@@ -1,0 +1,5 @@
+=== RUN   TestTemporaryCollectionTaskComposerWire
+    collection_ui_probe_test.go:40: {"errors":[],"steps":{"removal":true,"sessionIsolation":true,"accountIsolation":true,"wire":{"file_collection_ids":["col_fixture_20"],"has_source_ids":false,"message":"Find the answer in the 20-source collection."},"clearedAfterSend":true}}
+--- PASS: TestTemporaryCollectionTaskComposerWire (4.60s)
+PASS
+ok  	github.com/agentruntime/coding-agent/internal/web	4.608s

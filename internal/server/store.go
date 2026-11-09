@@ -153,9 +153,10 @@ type EnvironmentNetwork struct {
 
 // TaskRecord 是在项目里下过的一个任务（状态以 Runtime 为准，这里只缓存最后一次看到的）。
 type TaskRecord struct {
-	SourceIDs []string `json:"source_ids,omitempty"`
-	ID        string   `json:"id"`
-	Message   string   `json:"message"`
+	FileCollectionIDs []string `json:"file_collection_ids,omitempty"`
+	SourceIDs         []string `json:"source_ids,omitempty"`
+	ID                string   `json:"id"`
+	Message           string   `json:"message"`
 	// 修改排队中的消息时先记在这里，Runtime 确认改好了才换掉 Message。
 	PendingMessage string    `json:"pending_message,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`

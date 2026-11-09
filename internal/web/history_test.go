@@ -20,11 +20,24 @@ const out = { errors: [], steps: {} };
 addEventListener("error", (e) => out.errors.push(String(e.message)));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const wait = async (fn, ms = 8000) => { const end = Date.now() + ms; for (;;) { const v = fn(); if (v) return v; if (Date.now() > end) return null; await sleep(30); } };
+// Observe insertion order rather than sampling the first DOM match: a busy
+// browser can render two correctly ordered responses between 30ms polls.
+let firstAnswerTurnID = null;
+const firstAnswerObserver = new MutationObserver(records => {
+  for (const record of records) for (const node of record.addedNodes) {
+    if (!(node instanceof Element)) continue;
+    const answer = node.matches(".answer") ? node : node.querySelector(".answer");
+    const turn = answer?.closest(".turn");
+    if (turn && firstAnswerTurnID === null) firstAnswerTurnID = turn.id;
+  }
+});
+firstAnswerObserver.observe(document.documentElement,{subtree:true,childList:true});
 try {
   // 最新的一轮先出回答。
-  const first = await wait(() => document.querySelector(".answer"));
+  const first = await wait(() => firstAnswerTurnID);
+  firstAnswerObserver.disconnect();
   const turns = [...document.querySelectorAll(".turn")];
-  out.steps.firstAnswerTurn = first ? turns.findIndex((t) => t.contains(first)) : null;
+  out.steps.firstAnswerTurn = first ? turns.findIndex((t) => t.id === first) : null;
   out.steps.turns = turns.length;
   await wait(() => document.querySelectorAll(".answer").length >= 6);
   await sleep(300);

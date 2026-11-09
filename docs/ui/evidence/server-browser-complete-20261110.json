@@ -1,0 +1,87 @@
+{
+  "date": "2026-11-10",
+  "status": "passed",
+  "environment": {
+    "host": "cloudnium_cloud",
+    "scope": "isolated fi-20261110-browser-verified container; no production deployment",
+    "image": "sha256:6eb588940bb7161e1d5f3f579060c193d70f5f74a5465081030addc947c07c68",
+    "cpu_quota": 3,
+    "memory_limit_gib": 4,
+    "browser": "/usr/bin/chromium"
+  },
+  "commands": [
+    "CODING_TEST_BROWSER=/usr/bin/chromium go test -json ./...",
+    "go vet ./..."
+  ],
+  "exit_status": {
+    "tests": 0,
+    "vet": 0
+  },
+  "passed_test_events": 335,
+  "passed_top_level_tests": 257,
+  "failed": [],
+  "skipped": [
+    {
+      "test": "TestPublicDiscoveryLiveSources",
+      "reason": "explicit read-only public source integration requires CODING_DISCOVERY_LIVE=1"
+    }
+  ],
+  "packages": [
+    {
+      "package": "github.com/agentruntime/coding-agent/cmd/coding-web",
+      "status": "no_test_files",
+      "elapsed_seconds": 0
+    },
+    {
+      "package": "github.com/agentruntime/coding-agent/internal/samples",
+      "status": "no_test_files",
+      "elapsed_seconds": 0
+    },
+    {
+      "package": "github.com/agentruntime/coding-agent/internal/github",
+      "status": "pass",
+      "elapsed_seconds": 0.002
+    },
+    {
+      "package": "github.com/agentruntime/coding-agent/internal/server",
+      "status": "pass",
+      "elapsed_seconds": 87.774
+    },
+    {
+      "package": "github.com/agentruntime/coding-agent/internal/web",
+      "status": "pass",
+      "elapsed_seconds": 224.906
+    }
+  ],
+  "source_manifest": "server-browser-source-manifest-20261110.json",
+  "source_manifest_sha256": "f4d72ff098647df2a86f22c8886af903e7ea621b98e293aec193157cd02515fc",
+  "source_files_compared_with_local": 140,
+  "local_server_source_mismatches": [],
+  "raw_log": {
+    "server_path": "/root/proj/agent-projs/.file-intelligence-validation-20261110/evidence/browser-verified.json",
+    "sha256": "d301540a313f9ee4073a59acd17dd5144946f749b75f60ae9fb86a583c0e4f97",
+    "size_bytes": 330025
+  },
+  "vet_log": {
+    "server_path": "/root/proj/agent-projs/.file-intelligence-validation-20261110/evidence/browser-verified-vet.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "size_bytes": 0
+  },
+  "additional_live_check": {
+    "test": "TestPublicDiscoveryLiveSources",
+    "status": "passed",
+    "command": "CODING_DISCOVERY_LIVE=1 go test -v ./internal/server -run TestPublicDiscoveryLiveSources -count=1",
+    "duration_seconds": 2.75,
+    "read_only_public_sources": true,
+    "sources": "GitHub skills catalog/detail and MCP registry",
+    "observed": {
+      "skill_entries": 19,
+      "skill_total": 20,
+      "mcp_registry_servers": 18,
+      "warning": "One upstream skill document exceeded the configured content limit or was not a regular file; reported explicitly by the application."
+    },
+    "log": "server-live-discovery-20261110.log",
+    "log_sha256": "b017bc249a1368574746d0a8b3ca0f99f2cd189633cee0ce9bb74d84e43b32e1"
+  },
+  "remaining_unexecuted_test_cases": []
+}
