@@ -59,3 +59,65 @@ export function mountAnswer(container: HTMLElement, initial: AnswerProps): Answe
  update(initial);
  return {update,unmount};
 }
+
+// These islands consume the application's real events and existing native controls.
+// They own presentation only; task transport, approvals and shortcuts stay in app.js.
+import {useLayoutEffect} from 'react';
+import {ChainOfThought} from '@heroui-pro/react/chain-of-thought';
+import {ChatTool} from '@heroui-pro/react/chat-tool';
+import {ChatAttachment,ChatAttachmentGroup} from '@heroui-pro/react/chat-attachment';
+import {PromptInput} from '@heroui-pro/react/prompt-input';
+import {ChatLoader} from '@heroui-pro/react/chat-loader';
+
+function NativeSlot({node,className}: {node:HTMLElement|null;className?:string}) {
+ const ref=useRef<HTMLDivElement>(null);
+ useLayoutEffect(()=>{if(ref.current){if(node)ref.current.replaceChildren(node);else ref.current.replaceChildren();}},[node]);
+ return <div ref={ref} className={className}/>;
+}
+type ProgressProps={title:string;current:string;running:boolean;expanded:boolean;onExpandedChange:(value:boolean)=>void;before:HTMLElement|null;rawLabel:string;steps:Array<{id:string;title:string;detail:string;tool:string;state:string;time:string;raw:string}>};
+function Progress({title,current,running,expanded,onExpandedChange,before,steps,rawLabel}:ProgressProps) {
+ return <div className={'worklog pro-worklog'+(expanded?' open':'')} data-pro-component="ChainOfThought">
+  <ChainOfThought isExpanded={expanded} onExpandedChange={onExpandedChange} isStreaming={running}>
+   <ChainOfThought.Trigger className="worklog-head"><span className="execution-summary">{title}</span></ChainOfThought.Trigger>
+   <ChainOfThought.Content className="execution-content">
+    <NativeSlot node={before}/>
+    <ChainOfThought.Steps className="worklog-steps">
+     {steps.map(step=>step.tool?<ChatTool key={step.id} className="execution-tool" data-execution-step="" state={step.state as any} toolName={step.tool} defaultExpanded={false}>
+       <ChatTool.Trigger><ChatTool.StatusIcon/><span className="execution-label">{step.title}</span><time>{step.time}</time></ChatTool.Trigger>
+       <ChatTool.Content><p className="execution-detail">{step.detail || step.title}</p><details className="execution-raw"><summary>{rawLabel}</summary><pre>{step.raw}</pre></details></ChatTool.Content>
+      </ChatTool>:<ChainOfThought.Step key={step.id} data-execution-step="" label={<span className="execution-step-title"><span className="execution-label">{step.title}</span><time>{step.time}</time></span>}>
+        {step.detail?<p className="execution-detail">{step.detail}</p>:null}<details className="execution-raw"><summary>{rawLabel}</summary><pre>{step.raw}</pre></details>
+      </ChainOfThought.Step>)}
+    </ChainOfThought.Steps>
+   </ChainOfThought.Content>
+  </ChainOfThought>
+  {running&&current?<div className="execution-current" role="status"><ChatLoader.Dots aria-hidden="true"/><span data-current-label="">{current}</span></div>:null}
+ </div>;
+}
+function Attachments({files,downloadLabel,expiredLabel}:{files:Array<{name:string;size_bytes?:number;url?:string;mime_type?:string}>;downloadLabel:string;expiredLabel:string}) {
+ return <ChatAttachmentGroup className="delivered-attachments" data-pro-component="ChatAttachment">
+  {files.map((file,i)=>{const url=safeHref(file.url);const content=<ChatAttachment mediaType="document" name={file.name} size={file.size_bytes} mimeType={file.mime_type}>
+    <ChatAttachment.Preview/><ChatAttachment.Info/>
+   </ChatAttachment>;
+   return url?<a key={i} href={url} download={file.name} aria-label={`${downloadLabel}: ${file.name}`}>{content}</a>:<div key={i} className="attachment-expired" title={expiredLabel}>{content}<small>{expiredLabel}</small></div>;
+  })}
+ </ChatAttachmentGroup>;
+}
+function Composer({body,status,onReady}:{body:HTMLElement;status:'ready'|'streaming'|'submitted';onReady?:()=>void}) {
+ useLayoutEffect(()=>{onReady?.();},[]);
+ return <PromptInput layout="stacked" lockInputOnRun={false} status={status} maxHeight={260} className="pro-prompt" data-pro-component="PromptInput">
+  <PromptInput.Shell><PromptInput.Content><NativeSlot node={body} className="composer-native-slot"/></PromptInput.Content></PromptInput.Shell>
+ </PromptInput>;
+}
+function mountComponent<P>(container:HTMLElement,Component:React.ComponentType<P>,initial:P) {
+ const root=createRoot(container);let disposed=false;container.dataset.proMounted='true';
+ const update=(props:P)=>{if(!disposed)root.render(<Component {...props as any}/>);};
+ update(initial);return {update,unmount:()=>{if(!disposed){disposed=true;root.unmount();delete container.dataset.proMounted;}}};
+}
+export const mountProgress=(container:HTMLElement,props:ProgressProps)=>mountComponent(container,Progress,props);
+export const mountAttachments=(container:HTMLElement,props:React.ComponentProps<typeof Attachments>)=>mountComponent(container,Attachments,props);
+export function mountComposer(container:HTMLElement,props:React.ComponentProps<typeof Composer>) {
+ const focused=document.activeElement instanceof HTMLTextAreaElement&&container.contains(document.activeElement)?document.activeElement:null;
+ const selection=focused?[focused.selectionStart,focused.selectionEnd]:null;
+ return mountComponent(container,Composer,{...props,onReady:()=>{if(focused?.isConnected&&document.activeElement===document.body){focused.focus();if(selection)focused.setSelectionRange(selection[0],selection[1]);}}});
+}

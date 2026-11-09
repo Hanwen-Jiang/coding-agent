@@ -325,8 +325,10 @@ try {
     sb.style.flex = "";
     sb.style.height = "";
   }
-  const rawEntry = await wait(() => $(".step .raw summary"));
-  out.steps.rawEntryFloats = rawEntry ? getComputedStyle(rawEntry).position === "absolute" : null;
+  const execution = await wait(() => $('.worklog-head[aria-expanded="false"]'));
+  if(execution)execution.click();
+  const rawEntry = await wait(() => $(".execution-raw summary"));
+  out.steps.rawEntryCollapsed = rawEntry ? !rawEntry.parentElement.open : null;
 
   // 第 2 节：Enter 是纠偏。
   press(type("不要改公共接口"));
@@ -578,7 +580,7 @@ func TestInteractionInBrowser(t *testing.T) {
 	}
 	truthy("overlayShown", "滚动时出现叠加的滑块")
 	truthy("overlayOnPanel", "滑块叠在右栏的右边缘上，不超过 12px 宽")
-	truthy("rawEntryFloats", "“原始事件”的入口叠在时间那一格上，悬停不改变步骤的高度")
+	truthy("rawEntryCollapsed", "原始事件收在执行过程内，默认折叠，主动展开才展示")
 
 	// --- 第 2 节 ---
 	posts := site.postsTo("/guidance")

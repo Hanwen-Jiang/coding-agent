@@ -25,12 +25,13 @@ const check=(ok,message)=>{if(!ok)throw Error(message);};
 const push=(name,value,delta=false)=>fetch('/__push',{method:'POST',body:JSON.stringify({name,value,delta})});
 try {
  await wait(()=>$('#turn-t1'),'turn');
+ await import('/assets/chat-ui.js');
  const code='const answer = 42;';
  const text='# Verified answer\n\n**Ready** [source](https://example.com/docs)\n\n\x60\x60\x60js\n'+code+'\n\x60\x60\x60\n\n<script>window.__unsafe=true</script>\n\n[bad](javascript:alert(1))';
  await push('token_delta',{node_id:'answer',offset:0,text},true);
  await wait(()=>$('#turn-t1 [data-pro-component="ChatMessage"] [data-slot="markdown"]'),'real Pro components');
  await wait(()=>$('#turn-t1 [data-slot="code-block-code"] .shiki'),'actual Shiki highlighting');
- const host=$('#turn-t1 .pro-chat');
+ const host=$('#turn-t1 .answer .pro-chat');
  check(host.dataset.proMounted==='true','React mount not confirmed');
  check(!window.__unsafe && !$('#turn-t1 .answer script') && !$$('#turn-t1 .answer a').some(a=>a.href.startsWith('javascript:')),'unsafe Markdown rendered');
  const link=$('#turn-t1 .answer a[href="https://example.com/docs"]');check(link.rel.includes('noopener')&&link.target==='_blank','external link isolation');
@@ -38,7 +39,7 @@ try {
  let copied='';Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{copied=text;}},configurable:true});
  $('#turn-t1 [data-slot="code-block-copy-button"]').click();await wait(()=>copied===code,'code copy');out.steps.codeCopy=true;
  await push('token_delta',{node_id:'answer',offset:0,text:'# Updated stream\n\n'+text},true);
- await wait(()=>host.textContent.includes('Updated stream'),'stream update');check(host===$('#turn-t1 .pro-chat'),'stream updates remounted the island');
+ await wait(()=>host.textContent.includes('Updated stream'),'stream update');check(host===$('#turn-t1 .answer .pro-chat'),'stream updates remounted the island');
  await push('context_usage',{window_tokens:1000000,effective_tokens:128000,total_tokens:13700,mask_at_tokens:51200,summarize_at_tokens:89600,categories:[{name:'system_prompt',tokens:1000},{name:'system_tools',tokens:3700},{name:'mcp_tools',tokens:0},{name:'memory',tokens:0},{name:'task_brief',tokens:0},{name:'messages',tokens:9000}]});
  await wait(()=>$('.ctx-num')&&$('.ctx-line').textContent.includes('1M'),'context usage');
  const bar=$('.ctx-bar'),free=$('.ctx-segment[data-cat="free"]');

@@ -428,3 +428,104 @@ dialog > .discovery-body { padding: 20px 28px; overflow-y: auto; max-height: 64d
 }
 
 .topbar-chat > .btn.icon-only,.topbar-utility > .btn.icon-only { width: 32px; min-width: 32px; height: 32px; min-height: 32px; }
+
+/* Main conversation follows the official Chat template's shared content axis. */
+:root { --thread-w: 800px; }
+.main .thread { width: 100%; max-width: var(--thread-w); padding: 32px 24px 40px; }
+.main .turn { margin-bottom: 42px; scroll-margin-top: 20px; }
+.main .msg-user { margin-bottom: 22px; gap: 0; }
+.main .msg-user .bubble { max-width: min(88%,620px); padding: 12px 16px; border-radius: 18px 18px 5px 18px; background: var(--surface-2); color: var(--text); font: 14px/1.65 var(--font-sans); box-shadow: none; overflow-wrap: anywhere; }
+.main .msg-user .meta { padding-right: 3px; margin-top: 7px; font-size: 10px; color: var(--muted); }
+.main .msg-user .meta .chip { font-size: 10px; padding: 0 5px; border: 0; background: transparent; }
+.main .msg-agent { gap: 12px; }
+.main .agent-mark { width: 24px; height: 24px; margin-top: 3px; opacity: .9; }
+.main .agent-mark svg { width: 19px; height: 19px; }
+.main .agent-body { gap: 14px; padding-top: 0; }
+.main .agent-body > .col { gap: 16px; }
+.main .answer { margin: 0; }
+.main .result-foot { margin-top: 2px; padding-top: 4px; border: 0; gap: 9px; font-size: 11px; color: var(--muted); }
+.main .result-foot > .chip { border: 0; background: transparent; padding: 0; font-size: 11px; color: var(--muted); }
+.main .result-foot > .chip.ok { color: var(--ok); }
+.main .pro-chat .markdown { font-size: 14px; line-height: 1.8; }
+.main .pro-chat .markdown p { margin-bottom: 14px; }
+.main .pro-chat .markdown h1 { font-size: 21px; }
+.main .pro-chat .markdown h2 { font-size: 18px; margin-top: 26px; margin-bottom: 12px; }
+.main .pro-chat .markdown h3 { font-size: 15px; margin-top: 22px; margin-bottom: 10px; }
+.main .pro-chat .markdown :is(h1,h2,h3):first-child { margin-top: 0; }
+.main .pro-chat .markdown :is(ul,ol) { padding-left: 22px; list-style-position: outside; }
+.main .pro-chat .markdown li { padding-left: 3px; }
+.main .pro-chat .markdown table { border-radius: 10px; margin: 16px 0; font-size: 12px; }
+.main .pro-chat .markdown th { font-weight: 550; background: var(--surface-2); }
+.main .pro-chat .markdown td,.main .pro-chat .markdown th { border-color: var(--line); padding: 9px 12px; }
+.main .pro-chat .markdown :not(pre) > code { background: var(--surface-2); padding: 2px 5px; border-radius: 5px; font: .9em var(--font-mono); }
+.main .pro-worklog { border: 0; margin: 0; background: transparent; }
+.main .pro-worklog .worklog-head { width: auto; max-width: 100%; min-height: 30px; padding: 3px 0; gap: 8px; font-size: 12px; color: var(--muted); border: 0; background: transparent; }
+.main .pro-worklog .execution-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.main .pro-worklog .execution-content { margin-top: 8px; }
+.main .pro-worklog .worklog-steps { padding: 0 0 2px 12px; max-height: 360px; overflow: auto; scrollbar-width: thin; gap: 10px; }
+.main .execution-plan { margin: 0 0 14px; }
+.main .execution-plan:empty { display: none; }
+.main .execution-plan .plan { margin: 0; padding: 10px 12px; border: 0; background: var(--surface-2); border-radius: 10px; }
+.main .execution-plan .plan-title { font-size: 11px; }
+.main .execution-plan .plan-step { font-size: 12px; }
+.main .execution-step-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; font-weight: 500; }
+.main .execution-step-title time,.main .execution-tool time { margin-left: auto; color: var(--faint); white-space: nowrap; font: 10px var(--font-mono); }
+.main .execution-detail { font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); margin: 6px 0 0; }
+.main .execution-current { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; min-height: 24px; margin-top: 3px; }
+.main .execution-current > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.main .execution-current .chat-loader__dots,.main .execution-current [data-slot] { flex: none; }
+.main .pro-chat .execution-tool { border: 1px solid var(--line); border-radius: 9px; background: transparent; box-shadow: none; }
+.main .execution-tool .chat-tool__trigger { padding: 8px 10px; font-size: 12px; gap: 8px; width: 100%; }
+.main .execution-tool .chat-tool__trigger > span { min-width: 0; overflow-wrap: anywhere; }
+.main .execution-tool .chat-tool__content { padding: 0 10px 10px; }
+.main .delivered-attachments { gap: 10px; display: flex; flex-wrap: wrap; }
+.main .delivered-attachments > a,.main .attachment-expired { flex: 0 1 280px; min-width: 0; text-decoration: none; color: var(--text); }
+.main .delivered-attachments .chat-attachment { width: 100%; max-width: 280px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: none; }
+.main .delivered-attachments .chat-attachment__name { font-size: 12px; }
+.main .delivered-attachments .chat-attachment__size,.main .attachment-expired > small { font-size: 11px; color: var(--muted); }
+.main .dock { padding: 12px 24px 18px; background: linear-gradient(to bottom,transparent,var(--page) 12px); }
+.main .dock-inner { max-width: calc(var(--thread-w) - 48px); }
+.main .next-steps { gap: 8px; margin-bottom: 12px; }
+.main .next-steps .btn { font-size: 11px; border-color: var(--line); color: var(--muted); min-height: 28px; padding: 4px 10px; }
+.main .pro-prompt .prompt-input__shell { width: 100%; border: 1px solid var(--line-2); background: var(--surface); border-radius: 16px; box-shadow: 0 4px 20px #18181b05; padding: 0; overflow: hidden; }
+.main .pro-prompt .prompt-input__content { display: block; padding: 0; gap: 0; min-width: 0; }
+.main .pro-prompt .composer { border: 0; background: transparent; border-radius: 0; box-shadow: none; }
+.main .pro-prompt .c-row { padding: 8px 10px 8px 0; gap: 10px; min-height: 54px; }
+.main .c-input { padding: 9px 14px 9px 16px; font-size: 14px; line-height: 1.6; }
+.main .c-input:focus { box-shadow: none; }
+.main .send { width: 32px; height: 32px; min-width: 32px; border-radius: 10px; }
+.main .c-status { font-size: 11px; padding: 9px 12px; background: var(--surface-2); }
+.main .c-ask { padding: 14px 16px; }
+.main .hero-empty { max-width: 620px; margin: 0 auto; padding-top: clamp(44px,12vh,120px); }
+.main .hero-empty .mark.big { width: 38px; height: 38px; margin: 0 auto 18px; }
+.main .hero-empty h2 { font-size: 26px; line-height: 1.4; margin-bottom: 24px; }
+.main .suggestions { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+.main .suggestion { padding: 14px; border-radius: 12px; gap: 10px; background: var(--surface); }
+.main .suggestion .d { font-size: 11px; line-height: 1.5; }
+@media(max-width:700px) {
+ .main .thread { padding: 24px 16px 28px; }
+ .main .turn { margin-bottom: 32px; }
+ .main .msg-user .bubble { max-width: 92%; padding: 10px 14px; }
+ .main .msg-agent { gap: 8px; }
+ .main .agent-mark { width: 18px; }
+ .main .agent-mark svg { width: 16px; height: 16px; }
+ .main .dock { padding: 8px 12px 12px; }
+ .main .hero-empty { padding-top: 36px; }
+ .main .hero-empty h2 { font-size: 23px; }
+ .main .suggestions { grid-template-columns: 1fr; }
+ .main .suggestion { padding: 12px 14px; }
+ .main .execution-tool .chat-tool__trigger { padding: 8px; }
+ .main .execution-step-title time { display: none; }
+}
+
+.main .execution-raw { margin-top: 7px; color: var(--faint); font-size: 10px; }
+.main .execution-raw summary { cursor: pointer; width: fit-content; }
+.main .execution-raw pre { max-height: 220px; overflow: auto; margin: 8px 0 0; padding: 10px; border-radius: 6px; background: var(--surface-2); color: var(--muted); font: 11px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The native composer owns behavior; all Pro layout slots must stretch around it. */
+.main .composer-island .pro-prompt,
+.main .composer-island .pro-prompt .prompt-input__shell,
+.main .composer-island .pro-prompt .prompt-input__content,
+.main .composer-island .pro-prompt .composer-native-slot,
+.main .composer-island .pro-prompt .composer { width: 100%; min-width: 0; max-width: none; flex: 1 1 auto; }
+.main .composer-island .pro-prompt .prompt-input__shell,
+.main .composer-island .pro-prompt .prompt-input__content { display: block; }

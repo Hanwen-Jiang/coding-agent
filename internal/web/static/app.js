@@ -2577,7 +2577,7 @@ function turn(task) {
     ),
     h("div", { class: "msg-agent" },
       h("div", { class: "agent-mark" + (running ? " live" : ""), title: running ? t("turn.working") : null }, logo()),
-      h("div", { class: "agent-body" }, planArea(events), subAgentArea(events), worklog(task, events, running, finished), asks(events), guidanceList(task), tail),
+      h("div", { class: "agent-body" }, worklog(task, events, running, finished), asks(events), guidanceList(task), tail),
     ),
   );
 }
@@ -2662,12 +2662,30 @@ function draftDelta(run, type, v) {
 
 // draftView 是还在生成的回答：有正文画正文（前面没收全时带省略号），只有思考时画思考的末尾。
 const answerIslands = new Map();
+const presentationIslands = new Map();
 let chatComponentsPromise;
 let answerObserver;
 function releaseAnswers() {
+  for (const [id,entry] of presentationIslands) {
+    if (!entry.element.isConnected) {entry.handle?.unmount();presentationIslands.delete(id);}
+  }
   for (const [id,entry] of answerIslands) {
     if (!entry.element.isConnected) {entry.handle?.unmount();answerIslands.delete(id);}
   }
+}
+function proPresentation(id, className, mountName, props, fallback) {
+  if (!answerObserver) {answerObserver = new MutationObserver(releaseAnswers);answerObserver.observe(document.getElementById("app"), {childList:true,subtree:true});}
+  let entry=presentationIslands.get(id);
+  if(!entry){entry={element:h("div",{class:"pro-chat "+className}),handle:null,loading:false};presentationIslands.set(id,entry);}
+  entry.props=props;
+  if(entry.handle)entry.handle.update(props);
+  else {
+    if(fallback)entry.element.replaceChildren(fallback);
+    if(!entry.loading){entry.loading=true;chatComponentsPromise ||= import("./chat-ui.js");
+      chatComponentsPromise.then(module=>{if(entry.element.isConnected&&presentationIslands.get(id)===entry)entry.handle=module[mountName](entry.element,entry.props);}).catch(()=>{entry.element.dataset.proError="unavailable";}).finally(()=>{entry.loading=false;});
+    }
+  }
+  return entry.element;
 }
 function richAnswer(text, id, streaming = false) {
   if (!answerObserver) {
@@ -2749,37 +2767,16 @@ function asks(events) {
 }
 
 function worklog(task, events, running, finished) {
-  const steps = workSteps(events);
-  if (!steps.length) return null;
-  const isOpen = state.open.has(task.id) || (running && !state.closed.has(task.id));
-  const first = events[0];
-  const elapsed = first ? (finished ? new Date(finished.time) : Date.now()) - new Date(first.time) : 0;
-  const head = running
-    ? [h("span", { class: "spinner" }), h("span", { class: "grow", id: "wl-" + task.id }, workingText(steps.length, elapsed))]
-    : [icon(finished && finished.value.status === "TASK_STATUS_DONE" ? "check" : "clock", "sm lead"), h("span", { class: "grow" }, t("work.done", { dur: fmtDuration(elapsed), n: steps.length }))];
-  // 只有这次新来的步骤带进场动画：第一次画（打开会话、载入历史）时一个都不动。
-  const shown = state.shownSteps.get(task.id);
-  state.shownSteps.set(task.id, new Set(steps.map((e) => e.event_id)));
-  const live = running ? phaseNow(task, events) : null;
-  // “此刻”那一行换了内容（新的阶段、新的一次调用）才带进场动画。
-  const nowBefore = state.shownNow.get(task.id);
-  state.shownNow.set(task.id, live ? live.lastId : null);
-  const nowEnter = !!shown && !!live && live.lastId !== nowBefore;
-  // 点开、收起的那一次重画带一次性的过渡；之后来事件重画时不重放。
-  const toggled = state.toggledLog && state.toggledLog.id === task.id ? (isOpen ? " opening" : " closing") : "";
-  if (toggled) state.toggledLog = null;
-  return h("div", { class: "worklog" + (isOpen ? " open" : "") + toggled },
-    h("button", { class: "worklog-head", onclick: () => {
-      if (isOpen) { state.open.delete(task.id); state.closed.add(task.id); } else { state.open.add(task.id); state.closed.delete(task.id); }
-      state.toggledLog = { id: task.id };
-      renderTurn(task.id);
-    } }, head, icon("chevron", "sm chev")),
-    h("div", { class: "worklog-steps" }, steps.map((ev) => step(ev, task.id, !!shown && !shown.has(ev.event_id))),
-      live ? h("div", { class: "step now" + (nowEnter ? " enter" : "") },
-        h("div", { class: "step-icon" }, h("span", { class: "spinner" })),
-        h("div", { class: "step-main" }, h("div", { class: "step-title" }, live.text)),
-        h("span", { class: "step-time since", "data-since": live.since }, fmtSince(live.since))) : null),
-  );
+  const steps=workSteps(events);
+  const before=h("div",{class:"execution-plan"},planArea(events),subAgentArea(events));
+  if(!steps.length&&!before.childElementCount)return null;
+  const first=events[0],elapsed=first?(finished?new Date(finished.time):Date.now())-new Date(first.time):0;
+  const title=running?workingText(steps.length,elapsed):t("work.done",{dur:fmtDuration(elapsed),n:steps.length});
+  const current=running?phaseNow(task,events).text:"";
+  const props={title,current,running,expanded:state.open.has(task.id),before,rawLabel:t("step.raw"),
+    onExpandedChange:(open)=>{if(open){state.open.add(task.id);state.closed.delete(task.id);}else{state.open.delete(task.id);state.closed.add(task.id);}renderTurn(task.id);},
+    steps:steps.map(ev=>{const info=stepInfo(ev);return {id:String(ev.event_id),title:info.title,detail:info.detail || String(ev.value?.target || ""),tool:ev.type==="tool_status"?String(ev.value?.tool||""):"",state:ev.value?.state==="failed"?"output-error":"output-available",time:fmtClock(ev.time),raw:JSON.stringify(ev.value || {},null,2)};})};
+  return proPresentation("progress-"+task.id,"progress-island","mountProgress",props,h("div",{class:"execution-current"},title,current?" · "+current:""));
 }
 
 // phaseNow 是进行中的任务此刻在做什么、从什么时候开始：按最后一个事件推（规划、执行、审查、下一轮）。
@@ -2991,15 +2988,8 @@ function artifactItems(task) {
   }
   if (a.failed) return [h("div", { class: "muted" }, t("artifacts.loadFailed"))];
   if (!a.list || !a.list.length) return null;
-  return [
-    h("div", { class: "sp-sub" }, t("artifacts.title")),
-    a.list.map((f) => h("div", { class: "deliverable" },
-      f.url
-        ? h("a", { href: f.url, download: f.name, title: t("artifacts.download") }, f.name)
-        : h("span", { class: "deliverable-expired", title: t("artifacts.expired") }, f.name),
-      h("span", { class: "muted" }, f.url ? fmtSize(f.size_bytes || 0) : t("artifacts.expired")),
-    )),
-  ];
+  return proPresentation("files-"+task.id,"attachment-island","mountAttachments",{files:a.list,downloadLabel:t("artifacts.download"),expiredLabel:t("artifacts.expired")},a.list.map(f=>h("div",{class:"deliverable"},f.name)));
+
 }
 
 function result(task, r) {
@@ -3368,7 +3358,8 @@ function dock() {
   ui.composer = h("div", { class: "composer" }, ui.cStatus, ui.cAsk, h("div", { class: "c-row" }, ui.input, ui.cRight), ui.cOpts, ui.cHelp);
   ui.tools = h("div", { class: "c-tools" });
   ui.barKey = "";
-  return h("div", { class: "dock" }, h("div", { class: "dock-inner" }, ui.next, ui.composer, ui.tools));
+  const surface=proPresentation("composer", "composer-island", "mountComposer", {body:ui.composer,status:"ready"},ui.composer);
+  return h("div", { class: "dock" }, h("div", { class: "dock-inner" }, ui.next, surface, ui.tools));
 }
 
 function autosize() {
@@ -3613,6 +3604,8 @@ function updateComposer(force = false) {
   if (!ui.composer || !state.project) return;
   const ph = phase();
   ui.composer.className = "composer" + (ph.mode === "waiting" ? " waiting" : "");
+  const composerIsland=presentationIslands.get("composer");
+  if(composerIsland){composerIsland.props={body:ui.composer,status:ph.mode==="running"?"streaming":"ready"};composerIsland.handle?.update(composerIsland.props);}
 
   if (ph.mode === "running" || ph.mode === "waiting") {
     const info = liveInfo(ph.current);

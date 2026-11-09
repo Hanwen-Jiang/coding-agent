@@ -36,3 +36,11 @@ node ui/build.mjs /path/to/node_modules
 ```
 
 The build verifies the package versions, bundles all runtime dependencies into same-origin `chat-ui.js`, writes scoped `chat-ui.css`, and records component/version/size metadata in `ui/build-meta.json`. Production still runs the Go service with checked-in embedded assets; it does not need Node. The existing public API interfaces are unchanged.
+
+## Main conversation surface
+
+The main conversation now uses real Pro `ChainOfThought` and `ChatTool` components for the public execution event timeline, `ChatAttachment` for delivered files, and `PromptInput.Shell`/`Content` around the existing native composer controls. It does not manufacture reasoning, tool output or upload capability. Completed execution details start collapsed; the current running action remains visible. Plans, sub-agent status and raw public events stay available inside the disclosure. Stable island handles preserve expansion state across SSE updates and unmount on navigation.
+
+The composer bridge deliberately uses the stacked shell: Pro's compact mode reserves named grid areas for its own textarea and toolbar, which would shrink a native control adapter into an automatic grid column. Existing send/steer/interrupt/approval callbacks, textarea identity, draft value and keyboard handling remain application-owned; only their presentation is adopted. Conversation and composer share an 800px outer content axis, with responsive padding and the existing 44px topbar/terracotta tokens preserved.
+
+React Aria's fixed pressable touch rule is shipped in the same-origin stylesheet with its standard style ID already present on the link, avoiding runtime inline style injection without loosening CSP. The bundled Pro styles require the `tailwind-variants/config` entry under the installed v4 package. Browser checks cover actual component loading under strict CSP, inner textarea width and send alignment (not just outer shell width), progress/plan/raw-event reachability, file download binding, draft retention, three viewport sizes, both themes, streaming and the existing task approval/steering flows.

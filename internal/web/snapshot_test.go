@@ -49,6 +49,9 @@ const answerWith = (s) => $$(".answer").find((a) => a.textContent.includes(s));
 try {
   const want = new URLSearchParams(location.search).get("want") || "快照里的回答";
   out.steps.answer = !!(await wait(() => answerWith(want), 8000));
+  const execution=await wait(() => document.querySelector('.worklog-head[aria-expanded="false"]'));
+  if(execution)execution.click();
+  await wait(() => $$(".plan-step").length > 0);
   out.steps.planSteps = $$(".plan-step").length;
   if (want === "快照里的回答") {
     await sleep(300);
