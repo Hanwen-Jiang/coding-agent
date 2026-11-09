@@ -3420,24 +3420,32 @@ function refreshUploadUI() {
     uploadLabels:{add:t("sources.add",{m:Math.floor(sourcePolicy().max_file_bytes/1024/1024)}),remove:t("sources.remove"),retry:t("common.retry"),uploading:t("sources.uploading"),ready:t("sources.ready"),pending:t("sources.pending"),drop:t("sources.drop"),unavailable:t("sources.afterTask")}});
   refreshSend();renderStatus();
 }
-async function loadSources(base=sbase()) {
+async function loadSources(base=sbase(),force=false) {
   if(!base)return;
   void loadSourcePolicy(base);
   const owner=`${state.me?.tenant}/${state.me?.user}`;
   const cache=state.sourceLists.get(base)||{list:[],loading:false,error:""};
-  if(cache.loading)return;
+  if(cache.loading){if(force)cache.reload=true;return;}
+  const initial=new Map(cache.list.map(source=>[source.id,source]));
   cache.loading=true;cache.error="";state.sourceLists.set(base,cache);
   if(sbase()===base)renderStatus();
-  try {const data=await api("GET",base+"/sources");if(owner!==`${state.me?.tenant}/${state.me?.user}`)return;cache.list=[...new Map([...cache.list,...(Array.isArray(data?.sources)?data.sources:[])].map(source=>[source.id,source])).values()];}
+  try {const data=await api("GET",base+"/sources");if(owner!==`${state.me?.tenant}/${state.me?.user}`)return;const arrived=cache.list.filter(source=>!initial.has(source.id)||initial.get(source.id)!==source);cache.list=[...new Map([...(Array.isArray(data?.sources)?data.sources:[]),...arrived].map(source=>[source.id,source])).values()];}
   catch(error){cache.error=error.message;}
-  finally {cache.loading=false;if(sbase()===base){renderStatus();renderThread();}}
+  finally {cache.loading=false;if(sbase()===base){renderStatus();renderThread();}if(cache.reload){cache.reload=false;void loadSources(base);}}
 }
 function sourceByID(id) {return state.sourceLists.get(sbase())?.list.find(source=>source.id===id||source.alias_ids?.includes(id));}
-function openSource(source) {
-  try {const url=new URL(source.preview_url||source.url,location.href);if(url.origin!==location.origin||!["https:","http:"].includes(url.protocol))return;
-    const link=h("a",{href:url.href,target:"_blank",rel:"noopener noreferrer"});link.click();
-  }catch{/* Invalid source URLs never activate. */}
+function openSource(source) {void openFileWorkbench(source?.id);}
+async function openFileWorkbench(sourceID) {
+  const base=sbase();if(!base)return;
+  const dialog=h("dialog",{class:"file-workbench-dialog"});const host=h("div",{class:"pro-chat file-workbench-host"});dialog.append(host);document.getElementById("app").append(dialog);
+  let handle;const close=()=>{handle?.unmount();dialog.close();dialog.remove();};dialog.addEventListener("cancel",event=>{event.preventDefault();close();});
+  dialog.showModal();host.textContent=t("sources.panel.loading");
+  try {chatComponentsPromise ||= import("./chat-ui.js");const module=await chatComponentsPromise;if(!dialog.isConnected)return;
+    handle=module.mountFileWorkbench(host,{base,sources:state.sourceLists.get(base)?.list||[],initialSourceID:sourceID,
+      onClose:close,onUse:source=>{close();useSource(source);},onChanged:()=>{void loadSources(base,true);}});
+  } catch(error){close();report(error);}
 }
+
 function chooseSourceFiles() {if(uploadAllowed())document.querySelector('.composer-file-input')?.click();else toast(t("sources.afterTask"));}
 async function uploadOne(item,key,base,owner=uploadOwner(),generation=sourceGeneration) {
   const valid=()=>owner===uploadOwner()&&generation===sourceGeneration;
@@ -4273,7 +4281,7 @@ function sessionContextPanel() {
   const cache=state.sourceLists.get(sbase())||{list:[],loading:false,error:""};
   const keys=["agents","sources","running","completed","failed","cancelled","unknown","uploaded","addSource","viewAll","showLess","noAgents","noSources","loading","retry","readOnly","uploading","openSource","useSource","unavailable"];
   const labels=Object.fromEntries(keys.map(key=>[key,t("sources.panel."+key)]));
-  const props={agents,sources:cache.list,sourcesLoading:cache.loading,sourcesError:cache.error,uploading:uploadItems().some(item=>item.status==="uploading"),readOnly:!uploadAllowed(),onAdd:chooseSourceFiles,onOpenSource:openSource,onUseSource:useSource,onRetry:()=>loadSources(),labels};
+  const props={agents,sources:cache.list,sourcesLoading:cache.loading,sourcesError:cache.error,uploading:uploadItems().some(item=>item.status==="uploading"),readOnly:!uploadAllowed(),onAdd:chooseSourceFiles,onOpenSource:openSource,onManage:()=>openFileWorkbench(),onUseSource:useSource,onRetry:()=>loadSources(),labels};
   return proPresentation("context-"+personalChoiceKey(),"context-panel-island","mountContextPanel",props,h("span",{class:"muted small"},t("sources.panel.sources")));
 }
 

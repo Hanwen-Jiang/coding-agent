@@ -48,6 +48,7 @@ func acquireSourceTransfer(ctx context.Context) (func(), error) {
 }
 
 type SourceRecord struct {
+	Versioned bool      `json:"-"`
 	ID        string    `json:"id"`
 	AliasIDs  []string  `json:"alias_ids,omitempty"`
 	FileID    string    `json:"file_id,omitempty"`
@@ -113,7 +114,8 @@ func sourceBase(r *http.Request) string {
 }
 
 type runtimeFileRecord struct {
-	File struct {
+	SourceURI string `json:"source_uri"`
+	File      struct {
 		ID            string    `json:"id"`
 		WorkspaceID   string    `json:"workspace_id"`
 		Name          string    `json:"name"`
@@ -140,7 +142,7 @@ type runtimeFilePage struct {
 func (record runtimeFileRecord) source(id identity, workspace, alias string) (SourceRecord, error) {
 	f, v := record.File, record.Version
 	_, _, err := mime.ParseMediaType(v.MIMEType)
-	if !sourceIDPattern.MatchString(f.ID) || !sourceVersionPattern.MatchString(v.ID) || v.FileID != f.ID || f.HeadVersionID != v.ID || f.WorkspaceID != workspace || f.CreatedBy != id.UserID || v.CreatedBy != id.UserID || f.Lifecycle != "active" || sourceName(f.Name) != f.Name || f.Name == "" || v.SizeBytes < 0 || v.SizeBytes > maxSourceBytes || !sourceDigestPattern.MatchString(v.SHA256) || err != nil {
+	if !sourceIDPattern.MatchString(f.ID) || !sourceVersionPattern.MatchString(v.ID) || v.FileID != f.ID || f.HeadVersionID != v.ID || f.WorkspaceID != workspace || f.Lifecycle != "active" || sourceName(f.Name) != f.Name || f.Name == "" || v.SizeBytes < 0 || v.SizeBytes > maxSourceBytes || !sourceDigestPattern.MatchString(v.SHA256) || err != nil {
 		return SourceRecord{}, msg("附件不存在或不属于当前会话")
 	}
 	sourceID := f.ID
@@ -150,7 +152,14 @@ func (record runtimeFileRecord) source(id identity, workspace, alias string) (So
 		}
 		sourceID = alias
 	}
-	return SourceRecord{ID: sourceID, FileID: f.ID, VersionID: v.ID, Name: f.Name, MIMEType: v.MIMEType, SizeBytes: v.SizeBytes, SHA256: v.SHA256, CreatedAt: v.CreatedAt, CreatedBy: f.CreatedBy, ObjectURI: "obj://" + id.TenantID + "/uploads/" + sourceID + "/" + f.Name}, nil
+	sourceURI := record.SourceURI
+	if sourceURI == "" {
+		sourceURI = "obj://" + id.TenantID + "/uploads/" + sourceID + "/" + f.Name
+	}
+	if !strings.HasPrefix(sourceURI, "obj://"+id.TenantID+"/uploads/") && !strings.HasPrefix(sourceURI, "obj://"+id.TenantID+"/file-derived/") {
+		return SourceRecord{}, msg("附件来源无效")
+	}
+	return SourceRecord{Versioned: record.SourceURI != "", ID: sourceID, FileID: f.ID, VersionID: v.ID, Name: f.Name, MIMEType: v.MIMEType, SizeBytes: v.SizeBytes, SHA256: v.SHA256, CreatedAt: v.CreatedAt, CreatedBy: f.CreatedBy, ObjectURI: sourceURI}, nil
 }
 func (a *TaskAPI) fileRequest(ctx context.Context, token, method, target string, body any, out any) error {
 	var reader io.Reader
@@ -428,7 +437,7 @@ func (s *Server) handleUploadSource(w http.ResponseWriter, r *http.Request, id i
 		return
 	}
 	expectedURI := "obj://" + id.TenantID + "/uploads/" + source.ID + "/" + name
-	if !sourceIDPattern.MatchString(source.ID) || source.FileID != source.ID || !sourceVersionPattern.MatchString(source.VersionID) || source.ObjectURI != expectedURI || source.Name != name || source.SizeBytes != size || source.SHA256 != digest {
+	if !sourceIDPattern.MatchString(source.ID) || source.FileID != source.ID || !sourceVersionPattern.MatchString(source.VersionID) || (source.ObjectURI != expectedURI && !strings.HasPrefix(source.ObjectURI, "obj://"+id.TenantID+"/file-derived/fjob_")) || source.Name != name || source.SizeBytes != size || source.SHA256 != digest {
 		writeMsg(w, r, 502, "暂时上传不了这个文件")
 		return
 	}
@@ -464,6 +473,9 @@ func (a *TaskAPI) uploadSource(ctx context.Context, token, workspace, name, medi
 }
 func (a *TaskAPI) sourceContent(ctx context.Context, token, workspace string, source SourceRecord) (*http.Response, error) {
 	target := a.base + "/v1/uploads/" + source.ID + "/" + url.PathEscape(source.Name) + "?" + filesQuery(workspace).Encode()
+	if source.Versioned && source.FileID != "" && source.VersionID != "" {
+		target = a.base + "/v1/files/" + source.FileID + "/versions/" + source.VersionID + "/content?" + filesQuery(workspace).Encode()
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, err

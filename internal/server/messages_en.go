@@ -4,6 +4,9 @@ package server
 // TestEveryMessageHasEnglish 按源码核对每一句都有、参数个数对得上、这里没有用不到的。
 // 用词与网页一致：“项目”在界面上叫 workspace。
 var english = map[string]string{
+	"文件服务暂时不可用":          "File service is temporarily unavailable",
+	"检索服务暂时不可用":          "Search service is temporarily unavailable",
+	"附件来源无效":             "Invalid file source",
 	"文件来源存储配额已满":         "The file source storage quota has been reached",
 	"暂时无法读取文件来源":         "File sources are temporarily unavailable",
 	"任务附件总计不能超过 200 MiB": "Task attachments must be no larger than 200 MiB in total",

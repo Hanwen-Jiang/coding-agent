@@ -90,3 +90,6 @@ export const mountRunDetails=(container:HTMLElement,props:RunDetailsProps)=>moun
 
 import {ContextPanel,type ContextPanelProps} from "./context-panel";
 export const mountContextPanel=(container:HTMLElement,props:ContextPanelProps)=>mountComponent(container,ContextPanel,props);
+
+import {FileWorkbench,type FileWorkbenchProps} from './file-workbench';
+export const mountFileWorkbench=(container:HTMLElement,props:FileWorkbenchProps)=>mountComponent(container,FileWorkbench,props);

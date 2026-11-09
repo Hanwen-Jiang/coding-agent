@@ -768,3 +768,10 @@ summary.diagnostic-event-title { cursor: pointer; }
 .main .composer-attachment .chat-attachment[data-variant="file"] > .chat-attachment__info { min-width: 0; flex: 1; }
 .context-panel .chat-attachment.context-source-file[data-variant="file"] { height: 48px; padding: 6px 0; }
 .context-panel .chat-attachment[data-variant="file"] > .chat-attachment__preview { width: 28px; height: 28px; flex: 0 0 28px; overflow: hidden; }
+
+.file-workbench-dialog{width:min(1280px,96vw);height:min(880px,94dvh);max-width:96vw;max-height:94dvh;padding:0;border:1px solid var(--border);border-radius:22px;background:var(--bg);color:var(--text);box-shadow:0 24px 90px #0005;overflow:hidden}
+.file-workbench-dialog::backdrop{background:rgb(15 17 22 / .38);backdrop-filter:blur(4px)}
+.file-workbench-host{height:100%}
+.file-workbench-dialog[open]{animation:file-workbench-enter .22s cubic-bezier(.2,.8,.2,1)}
+@keyframes file-workbench-enter{from{opacity:0;transform:translateY(12px) scale(.99)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.file-workbench-dialog[open]{animation:none}}
