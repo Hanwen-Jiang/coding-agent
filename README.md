@@ -74,6 +74,13 @@ CODING_GITLAB_URL = https://git.example.com
 | 示例仓库 | `internal/samples` | 内嵌的“CI 修复”示例 |
 | 本机拉起 | `scripts/dev.py` | 调 Runtime 的 `dev_stack.py`，再拉起 coding-web |
 
+## 应用缓存
+
+coding-web 通过 `CODING_VALKEY_URL` 直接连接 Valkey / Redis，复用 Runtime 的 Cache 适配器，以独立的 `coding-web:` 前缀存放应用缓存。`CODING_PROFILE=production` 时必须配置地址，启动会实际连接验证；失败不会静默回落本机缓存。开发模式不配地址时沿用进程内缓存。部署清单从 `agent-runtime-valkey` Secret 的 `url` 读取地址，URL 含凭据，不能写进日志或公开配置。
+
+共享范围是公开 Skills/MCP 目录、目录上游限流与冷却状态、GitHub 用户仓库权限。浏览器会话、项目与触发记录仍使用原存储；JWT、OAuth 和安装令牌不进入共享缓存。接入缓存不代表 coding-web 已支持多副本，部署仍保持单副本。配置、失效及验证见 [应用缓存接入](docs/plan/coding-cache-2026-11-10.md)。
+
+
 ## 已知限制
 
 GitHub 用的是 OAuth App（用户级令牌、权限按 scope 而不是按仓库），以后换 GitHub App；不支持 fork 后提 PR（要有仓库的写权限）；Gitee、Bitbucket 的一些细节只对着替身测过，还没在真平台上验；每家只能配一个实例；令牌加密的密钥由开发签名密钥派生，生产要换 SecretStore；元数据存 JSON 文件，单实例；进度只到节点级，没有 token 级流式输出。工作区与 Worker 共用一块盘（沙箱等级已改为逐个任务经 `effect_ceiling` 传给 Runtime）；上云的镜像与清单在 `deploy/`，还要去掉的耦合见计划第 10 节。

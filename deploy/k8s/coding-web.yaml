@@ -49,6 +49,13 @@ spec:
             - {name: CODING_TASK_API, value: "http://ar-agent-runtime-task-service:8080"}
             - {name: CODING_WORKSPACES, value: runtime}
             - {name: CODING_DATA_DIR, value: /data}
+            - {name: CODING_PROFILE, value: production}
+            - {name: CODING_CACHE_PREFIX, value: "coding-web:"}
+            # Reuse the deployment's Valkey endpoint, with coding-web's own key
+            # namespace. A missing Secret or failed connection blocks startup.
+            - name: CODING_VALKEY_URL
+              valueFrom:
+                secretKeyRef: {name: agent-runtime-valkey, key: url}
             - {name: CODING_PUBLIC_URL, value: "https://<coding 的域名>"}
             - {name: CODING_SECURE_COOKIE, value: "1"}
             # 还没对外开放时只放行这些平台账号（逗号分隔的 <平台>:<登录名>）；删掉这一行就谁都能登录。

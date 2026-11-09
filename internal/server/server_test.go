@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -18,6 +19,7 @@ import (
 // fakeTaskAPI 记下收到的 SubmitTask（与那一刻租户策略文件的内容），对 QueryTask 回 status（默认 DONE）与两个 Round 的花费。
 // 没带 sessionId 的提交开一个新的 Runtime Session（ses_<序号>），带了就沿用。
 type fakeTaskAPI struct {
+	mu            sync.Mutex
 	networkPolicy map[string]any
 	submits       []map[string]any
 	tokens        []string
@@ -41,6 +43,8 @@ func (f *fakeTaskAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "ok")
 		return
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.tokens = append(f.tokens, r.Header.Get("Authorization"))
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)

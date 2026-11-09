@@ -9,6 +9,10 @@
 //	                            或 local（自己在 CODING_WORKSPACE_ROOT 里跑 git，要与 Worker 共用这块盘）
 //	CODING_WORKSPACE_ROOT       local 时的工作区根，与 Worker 的 AR_TOOL_WORKSPACE_ROOT 相同
 //	CODING_DATA_DIR             项目与任务的元数据目录（必填）
+//	CODING_PROFILE              development（默认）或 production；production 必须配置 Valkey
+//	CODING_VALKEY_URL           Valkey / Redis 连接地址（含凭据，不输出）；配置后启动时核验连接
+//	CODING_CACHE_PREFIX         应用缓存键前缀，默认 coding-web:，与 Runtime 的 ar: 分开
+//	CODING_VALKEY_MAX_CONNS     缓存连接池上限，默认 16
 //	CODING_DEV_LOGIN=1          打开开发登录（租户 + 用户名换令牌，仅供测试）；要同时给 AR_DEV_SIGNING_KEY
 //	AR_DEV_SIGNING_KEY          与 task-service 相同的开发签名密钥
 //	CODING_JWT_KEY_FILE         Ed25519 私钥文件（Runtime 的 task-service keygen 生成，AUTH-01）：给了就签标准 JWT，Runtime 只持公钥；
@@ -128,6 +132,12 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	shared, closeCache, err := newSharedCache(ctx, os.Getenv)
+	if err != nil {
+		log.Fatalf("coding-web: %v", err)
+	}
+	defer closeCache()
+	cfg.SharedCache = shared
 	if strings.TrimSpace(os.Getenv(oteltelemetry.EnvEndpoint)) != "" {
 		tel, err := oteltelemetry.FromEnv("coding-web", os.Getenv, os.Stderr)
 		if err != nil {

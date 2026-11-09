@@ -28,16 +28,19 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/agentruntime/agent-runtime/libs/go-core/providers/cache"
 	"golang.org/x/sync/singleflight"
 )
 
 const (
-	discoveryTTL           = 10 * time.Minute
-	discoveryArchiveLimit  = 12 << 20
-	discoveryUnpackedLimit = 64 << 20
-	discoveryDocumentLimit = 64 << 10
-	discoveryCacheLimit    = 32 << 20
-	discoveryPageSize      = 20
+	discoveryTTL              = 10 * time.Minute
+	discoveryArchiveLimit     = 12 << 20
+	discoveryUnpackedLimit    = 64 << 20
+	discoveryDocumentLimit    = 64 << 10
+	discoveryCacheLimit       = 32 << 20
+	discoverySharedEntryLimit = 8 << 20
+	discoveryCacheTimeout     = 250 * time.Millisecond
+	discoveryPageSize         = 20
 )
 
 var discoveryHosts = map[string]bool{"api.github.com": true, "raw.githubusercontent.com": true, "codeload.github.com": true, "registry.modelcontextprotocol.io": true}
@@ -80,6 +83,7 @@ type discoveryCacheItem struct {
 }
 type discoveryService struct {
 	client     *http.Client
+	shared     cache.Cache
 	mu         sync.Mutex
 	cache      map[string]discoveryCacheItem
 	cacheBytes int
@@ -98,18 +102,12 @@ func (d *discoveryService) get(ctx context.Context, endpoint string, limit int64
 		return nil, discoveryErr(400, "invalid_source", "不支持这个公开来源地址")
 	}
 	key := endpoint + "#limit=" + strconv.FormatInt(limit, 10)
-	d.mu.Lock()
-	cached, ok := d.cache[key]
-	d.mu.Unlock()
-	if ok && time.Since(cached.at) < discoveryTTL {
-		return cached.body, nil
+	if body, ok := d.cached(ctx, key, limit); ok {
+		return body, nil
 	}
 	result := d.flights.DoChan(key, func() (any, error) {
-		d.mu.Lock()
-		cached, ok := d.cache[key]
-		d.mu.Unlock()
-		if ok && time.Since(cached.at) < discoveryTTL {
-			return cached.body, nil
+		if body, ok := d.cached(ctx, key, limit); ok {
+			return body, nil
 		}
 		select {
 		case d.slots <- struct{}{}:
@@ -117,37 +115,9 @@ func (d *discoveryService) get(ctx context.Context, endpoint string, limit int64
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		now := time.Now()
-		d.mu.Lock()
-		until := d.cooldown[u.Host]
-		d.mu.Unlock()
-		if now.Before(until) {
-			return nil, &discoveryError{429, "rate_limited", "公开来源暂时限流，请稍后重试", int(time.Until(until).Seconds()) + 1}
+		if err := d.admit(ctx, u.Host); err != nil {
+			return nil, err
 		}
-		window := time.Minute
-		maximum := 60
-		if u.Host == "api.github.com" {
-			window = time.Hour
-			maximum = 50
-		}
-		if u.Host == "codeload.github.com" {
-			maximum = 6
-		}
-		d.mu.Lock()
-		recent := d.calls[u.Host][:0]
-		for _, at := range d.calls[u.Host] {
-			if now.Sub(at) < window {
-				recent = append(recent, at)
-			}
-		}
-		if len(recent) >= maximum {
-			d.calls[u.Host] = recent
-			retry := int(window.Seconds())
-			d.mu.Unlock()
-			return nil, &discoveryError{429, "rate_limited", "公开来源请求较多，请稍后重试", retry}
-		}
-		d.calls[u.Host] = append(recent, now)
-		d.mu.Unlock()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
 			return nil, err
@@ -173,9 +143,7 @@ func (d *discoveryService) get(ctx context.Context, endpoint string, limit int64
 			if retry < 1 || retry > 3600 {
 				retry = 60
 			}
-			d.mu.Lock()
-			d.cooldown[u.Host] = time.Now().Add(time.Duration(retry) * time.Second)
-			d.mu.Unlock()
+			d.setCooldown(ctx, u.Host, time.Duration(retry)*time.Second)
 			return nil, &discoveryError{429, "rate_limited", "公开来源暂时限流，请稍后重试", retry}
 		case res.StatusCode != 200:
 			return nil, discoveryErr(502, "upstream_error", "公开来源返回异常，请稍后重试")
@@ -190,34 +158,7 @@ func (d *discoveryService) get(ctx context.Context, endpoint string, limit int64
 		if int64(len(body)) > limit {
 			return nil, discoveryErr(422, "archive_too_large", "公开来源内容超过读取上限，请打开原仓库查看")
 		}
-		d.mu.Lock()
-		for k, c := range d.cache {
-			if time.Since(c.at) >= discoveryTTL {
-				delete(d.cache, k)
-				d.cacheBytes -= len(c.body)
-			}
-		}
-		for d.cacheBytes+len(body) > discoveryCacheLimit || len(d.cache) >= 128 {
-			var oldest string
-			var at time.Time
-			for k, c := range d.cache {
-				if oldest == "" || c.at.Before(at) {
-					oldest = k
-					at = c.at
-				}
-			}
-			if oldest == "" {
-				break
-			}
-			d.cacheBytes -= len(d.cache[oldest].body)
-			delete(d.cache, oldest)
-		}
-		if previous, ok := d.cache[key]; ok {
-			d.cacheBytes -= len(previous.body)
-		}
-		d.cache[key] = discoveryCacheItem{body, now}
-		d.cacheBytes += len(body)
-		d.mu.Unlock()
+		d.remember(ctx, key, body)
 		return body, nil
 	})
 	select {
@@ -230,6 +171,136 @@ func (d *discoveryService) get(ctx context.Context, endpoint string, limit int64
 		return nil, ctx.Err()
 	}
 }
+
+// Public metadata can be shared by all users. Hash the full URL and read limit so
+// different source versions and response limits never share a cached response.
+func discoverySharedKey(kind, value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return "discovery:v1:" + kind + ":" + hex.EncodeToString(sum[:])
+}
+
+func (d *discoveryService) cached(ctx context.Context, key string, limit int64) ([]byte, bool) {
+	if d.shared != nil {
+		cctx, cancel := context.WithTimeout(ctx, discoveryCacheTimeout)
+		defer cancel()
+		body, ok, err := d.shared.Get(cctx, discoverySharedKey("body", key))
+		return body, err == nil && ok && int64(len(body)) <= limit && len(body) <= discoverySharedEntryLimit
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	item, ok := d.cache[key]
+	return item.body, ok && time.Since(item.at) < discoveryTTL && int64(len(item.body)) <= limit
+}
+
+func (d *discoveryService) remember(ctx context.Context, key string, body []byte) {
+	if d.shared != nil {
+		if len(body) <= discoverySharedEntryLimit {
+			cctx, cancel := context.WithTimeout(ctx, discoveryCacheTimeout)
+			defer cancel()
+			// A cache outage must not turn a successful public fetch into an error.
+			_ = d.shared.Set(cctx, discoverySharedKey("body", key), body, discoveryTTL)
+		}
+		return
+	}
+	now := time.Now()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for k, c := range d.cache {
+		if time.Since(c.at) >= discoveryTTL {
+			delete(d.cache, k)
+			d.cacheBytes -= len(c.body)
+		}
+	}
+	for d.cacheBytes+len(body) > discoveryCacheLimit || len(d.cache) >= 128 {
+		var oldest string
+		var at time.Time
+		for k, c := range d.cache {
+			if oldest == "" || c.at.Before(at) {
+				oldest = k
+				at = c.at
+			}
+		}
+		if oldest == "" {
+			break
+		}
+		d.cacheBytes -= len(d.cache[oldest].body)
+		delete(d.cache, oldest)
+	}
+	if previous, ok := d.cache[key]; ok {
+		d.cacheBytes -= len(previous.body)
+	}
+	d.cache[key] = discoveryCacheItem{body, now}
+	d.cacheBytes += len(body)
+}
+
+// Shared limits protect a public provider quota across replicas. When the cache
+// is unavailable the existing local limit still bounds this instance's traffic.
+func (d *discoveryService) admit(ctx context.Context, host string) error {
+	now := time.Now()
+	d.mu.Lock()
+	until := d.cooldown[host]
+	d.mu.Unlock()
+	if d.shared != nil {
+		cctx, cancel := context.WithTimeout(ctx, discoveryCacheTimeout)
+		body, ok, err := d.shared.Get(cctx, discoverySharedKey("cooldown", host))
+		cancel()
+		if err == nil && ok {
+			if millis, err := strconv.ParseInt(string(body), 10, 64); err == nil {
+				if sharedUntil := time.UnixMilli(millis); sharedUntil.After(until) {
+					until = sharedUntil
+				}
+			}
+		}
+	}
+	if now.Before(until) {
+		return &discoveryError{429, "rate_limited", "公开来源暂时限流，请稍后重试", int(time.Until(until).Seconds()) + 1}
+	}
+	window, maximum := time.Minute, 60
+	if host == "api.github.com" {
+		window, maximum = time.Hour, 50
+	} else if host == "codeload.github.com" {
+		maximum = 6
+	}
+	if d.shared != nil {
+		cctx, cancel := context.WithTimeout(ctx, discoveryCacheTimeout)
+		decision, err := d.shared.RateLimit(cctx, discoverySharedKey("rate", host), int64(maximum), window, 1)
+		cancel()
+		if err == nil {
+			if !decision.Allowed {
+				retry := max(1, int((decision.RetryAfter+time.Second-1)/time.Second))
+				return &discoveryError{429, "rate_limited", "公开来源请求较多，请稍后重试", retry}
+			}
+			return nil
+		}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	recent := d.calls[host][:0]
+	for _, at := range d.calls[host] {
+		if now.Sub(at) < window {
+			recent = append(recent, at)
+		}
+	}
+	if len(recent) >= maximum {
+		d.calls[host] = recent
+		return &discoveryError{429, "rate_limited", "公开来源请求较多，请稍后重试", int(window.Seconds())}
+	}
+	d.calls[host] = append(recent, now)
+	return nil
+}
+
+func (d *discoveryService) setCooldown(ctx context.Context, host string, ttl time.Duration) {
+	until := time.Now().Add(ttl)
+	d.mu.Lock()
+	d.cooldown[host] = until
+	d.mu.Unlock()
+	if d.shared != nil {
+		cctx, cancel := context.WithTimeout(ctx, discoveryCacheTimeout)
+		defer cancel()
+		_ = d.shared.Set(cctx, discoverySharedKey("cooldown", host), []byte(strconv.FormatInt(until.UnixMilli(), 10)), ttl)
+	}
+}
+
 func discoveryRepo(input string) (string, error) {
 	repo := strings.TrimSpace(input)
 	if repo == "" {

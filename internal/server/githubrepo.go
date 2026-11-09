@@ -8,6 +8,9 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -48,13 +51,134 @@ type permEntry struct {
 
 const permTTL = 60 * time.Second
 
+const (
+	permissionCacheTimeout = 250 * time.Millisecond
+	permissionEpochTTL     = 24 * time.Hour
+)
+
+// Shared permission entries contain authorization results only, never tokens.
+type sharedPermission struct {
+	ID      int64     `json:"id"`
+	Name    string    `json:"name"`
+	Pull    bool      `json:"pull"`
+	Push    bool      `json:"push"`
+	Private bool      `json:"private"`
+	At      time.Time `json:"at"`
+}
+
+func permissionDigest(parts ...string) string {
+	raw, _ := json.Marshal(parts) // Unambiguous boundaries for tenant/user/repository names.
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *Server) permissionEpochKey() string {
+	var appID, clientID, api string
+	if s.cfg.GitHubApp != nil {
+		appID, clientID = s.cfg.GitHubApp.AppID, s.cfg.GitHubApp.ClientID
+	}
+	if p := s.providers["github"]; p != nil {
+		api = p.API
+	}
+	return "github-permission-epoch:v1:" + permissionDigest(appID, clientID, api)
+}
+
+// A missing epoch must get a new random value: eviction or expiration must not
+// revive permission entries from an earlier generation that are still cached.
+func (s *Server) sharedPermissionEpoch(ctx context.Context) (string, error) {
+	c := s.cfg.SharedCache
+	key := s.permissionEpochKey()
+	raw, found, err := c.Get(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		if _, err = c.SetIfAbsent(ctx, key, []byte(randomHex(16)), permissionEpochTTL); err != nil {
+			return "", err
+		}
+		raw, found, err = c.Get(ctx, key)
+		if err != nil {
+			return "", err
+		}
+	}
+	if !found || len(raw) != 32 {
+		return "", errors.New("GitHub permission cache epoch unavailable")
+	}
+	if _, err := hex.DecodeString(string(raw)); err != nil {
+		return "", errors.New("GitHub permission cache epoch unavailable")
+	}
+	return string(raw), nil
+}
+
+// The returned key is tied to the epoch observed before fetching GitHub. A
+// response arriving after invalidation can only populate the obsolete epoch.
+func (s *Server) readSharedPermission(ctx context.Context, key string) (permEntry, bool, string) {
+	ctx, cancel := context.WithTimeout(ctx, permissionCacheTimeout)
+	defer cancel()
+	epoch, err := s.sharedPermissionEpoch(ctx)
+	if err != nil {
+		return permEntry{}, false, ""
+	}
+	key = "github-permission:v1:" + epoch + ":" + key
+	raw, found, err := s.cfg.SharedCache.Get(ctx, key)
+	if err != nil {
+		return permEntry{}, false, ""
+	}
+	if !found {
+		return permEntry{}, false, key
+	}
+	var wire sharedPermission
+	if json.Unmarshal(raw, &wire) != nil || wire.ID <= 0 || wire.Name == "" || wire.At.IsZero() {
+		return permEntry{}, false, key
+	}
+	if age := s.now().Sub(wire.At); age < 0 || age >= permTTL {
+		return permEntry{}, false, key
+	}
+	current, err := s.sharedPermissionEpoch(ctx)
+	if err != nil || current != epoch {
+		return permEntry{}, false, ""
+	}
+	return permEntry{id: wire.ID, name: wire.Name, pull: wire.Pull, push: wire.Push, private: wire.Private, at: wire.At}, true, key
+}
+
+func (s *Server) writeSharedPermission(ctx context.Context, key string, e permEntry) {
+	if key == "" {
+		return
+	}
+	raw, err := json.Marshal(sharedPermission{ID: e.id, Name: e.name, Pull: e.pull, Push: e.push, Private: e.private, At: e.at})
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, permissionCacheTimeout)
+	defer cancel()
+	_ = s.cfg.SharedCache.Set(ctx, key, raw, permTTL) // GitHub already supplied the authoritative result.
+}
+
+// A failed invalidation is returned to the durable webhook inbox for retry.
+func (s *Server) invalidatePermissions(ctx context.Context) error {
+	s.github.mu.Lock()
+	s.github.perms = nil
+	s.github.permRevision++
+	s.github.mu.Unlock()
+	if s.cfg.SharedCache == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, permissionCacheTimeout)
+	defer cancel()
+	if err := s.cfg.SharedCache.Set(ctx, s.permissionEpochKey(), []byte(randomHex(16)), permissionEpochTTL); err != nil {
+		return errors.New("GitHub permission cache invalidation failed")
+	}
+	return nil
+}
+
 // githubState 是 App 一侧的进程内状态：App 的 JWT（复用到快过期）、权限缓存、按用户的续期锁。
 type githubState struct {
-	mu       sync.Mutex
-	jwt      string
-	jwtExp   time.Time
-	perms    map[string]permEntry
-	refreshL sync.Map // 租户/用户/平台 → *sync.Mutex
+	mu           sync.Mutex
+	jwt          string
+	jwtExp       time.Time
+	perms        map[string]permEntry
+	permRevision uint64
+	refreshL     sync.Map // 租户/用户/平台 → *sync.Mutex
 	// triggerMu 护着自动触发的记录文件（G-06，githubtrigger.go）。
 	triggerMu sync.Mutex
 }
@@ -233,14 +357,29 @@ func (s *Server) repoPermission(ctx context.Context, prov *Provider, id identity
 			s.saveRepoRef(id.TenantID, *p)
 		}
 	}
-	key := id.TenantID + "/" + id.UserID + "/" + p.Repo
+	// Bind permission results to this authenticated user's credential as well as
+	// tenant/repository. Reconnecting with a new token never reuses an old grant.
+	key := permissionDigest(s.permissionEpochKey(), prov.API, id.TenantID, id.UserID, p.Repo,
+		strconv.FormatInt(p.RepoID, 10), strconv.FormatInt(p.InstallationID, 10), permissionDigest(token))
 	g := &s.github
-	g.mu.Lock()
-	if e, ok := g.perms[key]; ok && s.now().Sub(e.at) < permTTL {
+	var cacheKey string
+	var revision uint64
+	if s.cfg.SharedCache != nil {
+		var entry permEntry
+		var hit bool
+		entry, hit, cacheKey = s.readSharedPermission(ctx, key)
+		if hit {
+			return entry, nil
+		}
+	} else {
+		g.mu.Lock()
+		revision = g.permRevision
+		if e, ok := g.perms[key]; ok && s.now().Sub(e.at) < permTTL {
+			g.mu.Unlock()
+			return e, nil
+		}
 		g.mu.Unlock()
-		return e, nil
 	}
-	g.mu.Unlock()
 	var repo struct {
 		ID          int64  `json:"id"`
 		FullName    string `json:"full_name"`
@@ -258,11 +397,17 @@ func (s *Server) repoPermission(ctx context.Context, prov *Provider, id identity
 		return permEntry{}, err
 	}
 	e := permEntry{id: repo.ID, name: repo.FullName, pull: repo.Permissions.Pull, push: repo.Permissions.Push, private: repo.Private, at: s.now()}
-	g.mu.Lock()
-	if g.perms == nil {
-		g.perms = map[string]permEntry{}
+	if s.cfg.SharedCache != nil {
+		s.writeSharedPermission(ctx, cacheKey, e)
+		return e, nil
 	}
-	g.perms[key] = e
+	g.mu.Lock()
+	if g.permRevision == revision {
+		if g.perms == nil {
+			g.perms = map[string]permEntry{}
+		}
+		g.perms[key] = e
+	}
 	g.mu.Unlock()
 	return e, nil
 }
