@@ -70,10 +70,14 @@ CODING_GITLAB_URL = https://git.example.com
 | 部分 | 位置 | 说明 |
 | --- | --- | --- |
 | coding-web | `cmd/coding-web`、`internal/server` | Go，只用标准库与 Runtime 的 `libs/go-core`：登录与账号（开发登录、各家 OAuth）、工作区与会话、经 Task API 下任务、代理 SSE、diff、提交与推送 |
-| 网页 | `internal/web/static` | 原生 JS 单页应用，无构建步骤，CSP 只允许同源脚本与样式 |
+| 网页 | `ui/chat`、`internal/web/static` | React 19 + HeroUI Pro 主对话与输入框；原生 JS 应用控制器，同源构建产物由 Go 嵌入 |
 | 示例仓库 | `internal/samples` | 内嵌的“CI 修复”示例 |
 | 本机拉起 | `scripts/dev.py` | 调 Runtime 的 `dev_stack.py`，再拉起 coding-web |
 
+## 用户附件与来源
+
+输入框支持选择文件、拖放文件和粘贴图片；每文件最多 50 MiB，每任务最多 10 个且合计 200 MiB。右栏显示真实子智能体状态和会话来源，可查看文件、展开全部来源或复用于下一条任务。需要同步更新 coding-web、Runtime task-service 和 Worker，并配置 ObjectStore。文本可直接读取；配置视觉模型并更新 Gateway 后，PNG/JPEG/WebP 可作为原生图片输入，PDF 等其它二进制仍通过沙箱工具解析。详见 [上传与来源说明](docs/ui/sources-and-subagents.md)。
+
 ## 已知限制
 
-GitHub 用的是 OAuth App（用户级令牌、权限按 scope 而不是按仓库），以后换 GitHub App；不支持 fork 后提 PR（要有仓库的写权限）；Gitee、Bitbucket 的一些细节只对着替身测过，还没在真平台上验；每家只能配一个实例；令牌加密的密钥由开发签名密钥派生，生产要换 SecretStore；元数据存 JSON 文件，单实例；进度只到节点级，没有 token 级流式输出。工作区与 Worker 共用一块盘（沙箱等级已改为逐个任务经 `effect_ceiling` 传给 Runtime）；上云的镜像与清单在 `deploy/`，还要去掉的耦合见计划第 10 节。
+GitHub 用的是 OAuth App（用户级令牌、权限按 scope 而不是按仓库），以后换 GitHub App；不支持 fork 后提 PR（要有仓库的写权限）；Gitee、Bitbucket 的一些细节只对着替身测过，还没在真平台上验；每家只能配一个实例；令牌加密的密钥由开发签名密钥派生，生产要换 SecretStore；元数据存 JSON 文件，单实例；对话支持 token 增量和工具间公开进度；完整工具 stdout 暂未包含在事件契约中。工作区与 Worker 共用一块盘（沙箱等级已改为逐个任务经 `effect_ceiling` 传给 Runtime）；上云的镜像与清单在 `deploy/`，还要去掉的耦合见计划第 10 节。

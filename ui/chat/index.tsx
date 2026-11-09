@@ -60,48 +60,10 @@ export function mountAnswer(container: HTMLElement, initial: AnswerProps): Answe
  return {update,unmount};
 }
 
-// These islands consume the application's real events and existing native controls.
-// They own presentation only; task transport, approvals and shortcuts stay in app.js.
-import {useLayoutEffect} from 'react';
-import {ChainOfThought} from '@heroui-pro/react/chain-of-thought';
-import {ChatTool} from '@heroui-pro/react/chat-tool';
 import {ChatAttachment,ChatAttachmentGroup} from '@heroui-pro/react/chat-attachment';
-import {PromptInput} from '@heroui-pro/react/prompt-input';
-import {ChatLoader} from '@heroui-pro/react/chat-loader';
+import {Composer, type ComposerProps} from './composer';
+import {Conversation, type ConversationProps} from './conversation';
 
-function NativeSlot({node,className}: {node:HTMLElement|null;className?:string}) {
- const ref=useRef<HTMLDivElement>(null);
- useLayoutEffect(()=>{if(ref.current){if(node)ref.current.replaceChildren(node);else ref.current.replaceChildren();}},[node]);
- return <div ref={ref} className={className}/>;
-}
-type ProgressProps={title:string;current:string;running:boolean;expanded:boolean;onExpandedChange:(value:boolean)=>void;before:HTMLElement|null;steps:Array<{id:string;title:string;detail:string;tool:string;state:string;time:string}>};
-function ProgressMessage({id,text,source}:{id:string;text:string;source:string}) {
- return <ChatMessage.Assistant className="progress-message" data-public-progress={source}>
-  <ChatMessage.Body><ChatMessage.Content><Markdown id={'progress-'+id} components={{
-   a:({href,children})=><a href={safeHref(href)} target="_blank" rel="noopener noreferrer">{children}</a>,
-   img:({alt})=><span>{alt}</span>,
-  }}>{text}</Markdown></ChatMessage.Content></ChatMessage.Body>
- </ChatMessage.Assistant>;
-}
-function Progress({title,current,running,expanded,onExpandedChange,before,steps}:ProgressProps) {
- return <div className={'worklog pro-worklog'+(expanded?' open':'')} data-pro-component="ChainOfThought">
-  <ChainOfThought isExpanded={expanded} onExpandedChange={onExpandedChange} isStreaming={running}>
-   <ChainOfThought.Trigger className="worklog-head"><span className="execution-summary">{title}</span></ChainOfThought.Trigger>
-   <ChainOfThought.Content className="execution-content">
-    <NativeSlot node={before}/>
-    <ChainOfThought.Steps className="worklog-steps">
-     {steps.map(step=>step.tool?<ChatTool key={step.id} className="execution-tool" data-execution-step="" state={step.state as any} toolName={step.tool} defaultExpanded={false}>
-       <ChatTool.Trigger><ChatTool.StatusIcon/><span className="execution-label">{step.title}</span><time>{step.time}</time></ChatTool.Trigger>
-       <ChatTool.Content><p className="execution-detail">{step.detail || step.title}</p></ChatTool.Content>
-      </ChatTool>:<ChainOfThought.Step key={step.id} data-execution-step="" label={<span className="execution-step-title"><span className="execution-label">{step.title}</span><time>{step.time}</time></span>}>
-        {step.detail?<p className="execution-detail">{step.detail}</p>:null}
-      </ChainOfThought.Step>)}
-    </ChainOfThought.Steps>
-   </ChainOfThought.Content>
-  </ChainOfThought>
-  {running&&current?<div className="execution-current" role="status"><ChatLoader.Dots aria-hidden="true"/><span data-current-label="">{current}</span></div>:null}
- </div>;
-}
 function Attachments({files,downloadLabel,expiredLabel}:{files:Array<{name:string;size_bytes?:number;url?:string;mime_type?:string}>;downloadLabel:string;expiredLabel:string}) {
  return <ChatAttachmentGroup className="delivered-attachments" data-pro-component="ChatAttachment">
   {files.map((file,i)=>{const url=safeHref(file.url);const content=<ChatAttachment mediaType="document" name={file.name} size={file.size_bytes} mimeType={file.mime_type}>
@@ -111,22 +73,20 @@ function Attachments({files,downloadLabel,expiredLabel}:{files:Array<{name:strin
   })}
  </ChatAttachmentGroup>;
 }
-function Composer({body,status,onReady}:{body:HTMLElement;status:'ready'|'streaming'|'submitted';onReady?:()=>void}) {
- useLayoutEffect(()=>{onReady?.();},[]);
- return <PromptInput layout="stacked" lockInputOnRun={false} status={status} maxHeight={260} className="pro-prompt" data-pro-component="PromptInput">
-  <PromptInput.Shell><PromptInput.Content><NativeSlot node={body} className="composer-native-slot"/></PromptInput.Content></PromptInput.Shell>
- </PromptInput>;
-}
 function mountComponent<P>(container:HTMLElement,Component:React.ComponentType<P>,initial:P) {
  const root=createRoot(container);let disposed=false;container.dataset.proMounted='true';
  const update=(props:P)=>{if(!disposed)root.render(<Component {...props as any}/>);};
  update(initial);return {update,unmount:()=>{if(!disposed){disposed=true;root.unmount();delete container.dataset.proMounted;}}};
 }
-export const mountProgress=(container:HTMLElement,props:ProgressProps)=>mountComponent(container,Progress,props);
-export const mountProgressMessage=(container:HTMLElement,props:React.ComponentProps<typeof ProgressMessage>)=>mountComponent(container,ProgressMessage,props);
 export const mountAttachments=(container:HTMLElement,props:React.ComponentProps<typeof Attachments>)=>mountComponent(container,Attachments,props);
-export function mountComposer(container:HTMLElement,props:React.ComponentProps<typeof Composer>) {
- const focused=document.activeElement instanceof HTMLTextAreaElement&&container.contains(document.activeElement)?document.activeElement:null;
- const selection=focused?[focused.selectionStart,focused.selectionEnd]:null;
- return mountComponent(container,Composer,{...props,onReady:()=>{if(focused?.isConnected&&document.activeElement===document.body){focused.focus();if(selection)focused.setSelectionRange(selection[0],selection[1]);}}});
+export function mountComposer(container:HTMLElement,props:ComposerProps) {
+ return mountComponent(container,Composer,props);
 }
+
+export const mountConversation=(container:HTMLElement,props:ConversationProps)=>mountComponent(container,Conversation,props);
+
+import {RunDetails, type RunDetailsProps} from "./run-details";
+export const mountRunDetails=(container:HTMLElement,props:RunDetailsProps)=>mountComponent(container,RunDetails,props);
+
+import {ContextPanel,type ContextPanelProps} from "./context-panel";
+export const mountContextPanel=(container:HTMLElement,props:ContextPanelProps)=>mountComponent(container,ContextPanel,props);

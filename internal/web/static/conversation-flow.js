@@ -7,7 +7,9 @@ export function conversationFlow(events) {
   const note = (id, message, source) => {
     if (typeof message !== "string" || !message.trim() || notes.has(id)) return;
     notes.add(id);
-    parts.push({ kind: "progress", id, message: message.trim().slice(0, 2000), source });
+    // Runtime limits public text by Unicode code points (Python str), not UTF-16
+    // units. Preserve the same boundary so a streamed note survives replay intact.
+    parts.push({ kind: "progress", id, message: [...message.trim()].slice(0, 2000).join(""), source });
     group = null;
   };
   for (const event of ordered) {

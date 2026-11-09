@@ -43,16 +43,20 @@ const inspect=()=>{
  const usage=$('.usage-tool'),u=usage.getBoundingClientRect(),style=getComputedStyle(usage);
  check(u.width>=64&&parseFloat(style.paddingLeft)>=12&&parseFloat(style.paddingRight)>=12,'usage hit area/padding too small');
  check(r.right-u.right>=3&&r.right-u.right<=13,'usage edge padding is not balanced');
+ const footer=$('.composer-toolbar'),shell=$('.prompt-input__shell'),send=$('.send').getBoundingClientRect();
+ check(shell.contains(footer)&&footer.contains(toolbar),'toolbar must share the editor surface');
+ check(footer.contains($('.send'))&&send.left>=u.right&&send.top>=$('#composer').getBoundingClientRect().bottom,'send action must align after the tools below the editor');
  check(getComputedStyle($('.c-tools-start .tool .v')).display!=='none','model name hidden');
  check($('#composer').title.includes('Enter')&&$('#composer').getAttribute('aria-describedby')==='composer-help','shortcuts not discoverable');
 };
 try{
  (await wait(()=>$('dialog.account'),'account')).close();location.hash='#/w/p/s/s';
  await wait(()=>$('.usage-tool')?.title.includes('1234567.89'),'full usage data');
+ await wait(()=>$('[data-react-composer="true"] .prompt-input__shell'),'React composer surface');
  inspect();check($('.usage-tool').textContent==='$1.2M','large fee must be compact');
  $('.usage-tool').click();await wait(()=>$('.meter-grid'),'usage details');check($('.meter-grid').textContent.includes('1234567.89'),'exact fee lost from details');
  $('#composer').click();location.hash='#/w/p/new';
- await wait(()=>$('.usage-tool')?.textContent==='$0','read-only draft');inspect();
+ await wait(()=>$('.usage-tool')?.textContent==='$0','read-only draft');await wait(()=>$('[data-react-composer="true"] .prompt-input__shell'),'React draft surface');inspect();
  check(taskWrites===0,'layout test must not submit a task');
 }catch(error){out.errors.push(String(error.stack||error));}
 await original('/__result',{method:'POST',body:JSON.stringify(out)});

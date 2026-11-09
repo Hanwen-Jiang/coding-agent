@@ -1,4 +1,4 @@
-// Coding Agent 网页（原生 JS，无构建步骤）。版式参照 Claude：纸面底色、衬线体的回答、卡片式输入框（docs/plan/coding-agent-mvp.md 第 7、8 节）。
+// Coding Agent 应用控制器；React/HeroUI Pro 对话组件由 ui/build.mjs 构建。版式参照 Claude：纸面底色、衬线体的回答、卡片式输入框（docs/plan/coding-agent-mvp.md 第 7、8 节）。
 // 工作区（基线仓库）下有很多会话；每个会话一段对话加一份自己的工作副本，可以同时跑。
 // 左栏：上面是新建会话、搜索、工作区、进行中，下面按工作区分组列出会话。中间：会话（每个任务一轮：你的消息、工作过程、回答，
 // 输入框随阶段变化）、工作区一览或进行中的任务。右栏是当前会话的环境、上下文、输出、改动与后台任务；diff、文件与提交历史在宽抽屉里打开。
@@ -70,7 +70,11 @@ const state = {
   tasks: [], // 旧 → 新
   runs: new Map(), // taskId → { events, done, es, promise }
   detail: new Map(), // taskId → { state, usage, cost, roundSeq }
+  sourceLists: new Map(),
+  sourcePolicies: new Map(),
+  uploadDrafts: new Map(),
   artifacts: new Map(), // taskId → { list, failed }：任务交付的文件（N-18），结束后取一次
+  revealWorklog: new Map(), // taskId → explicit reveal request version
   open: new Set(), // 展开的工作过程
   closed: new Set(), // 用户手动收起的
   replied: new Set(),
@@ -173,6 +177,7 @@ function append(el, children) {
 
 const ICONS = {
   plus: "M12 5v14M5 12h14",
+  settings: "M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M10 15v6",
   send: "M12 19V5M5 12l7-7 7 7",
   folder: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
   branch: "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9",
@@ -467,11 +472,12 @@ function inline(el, text) {
 
 // ---------------------------------------------------------------- API
 
-async function api(method, path, body) {
-  const opts = { method, headers: { "X-Coding-Web": "1" }, credentials: "same-origin" };
+async function api(method, path, body, signal) {
+  const actor=state.me;
+  const opts = { method, headers: { "X-Coding-Web": "1" }, credentials: "same-origin", ...(signal?{signal}:{}) };
   if (body !== undefined) {
-    opts.headers["Content-Type"] = "application/json";
-    opts.body = JSON.stringify(body);
+    if(body instanceof FormData)opts.body=body;
+    else {opts.headers["Content-Type"] = "application/json";opts.body = JSON.stringify(body);}
   }
   const workspace = workspaceMutation(method, path);
   if (workspace) {
@@ -487,8 +493,7 @@ async function api(method, path, body) {
     await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
   }
   if (res.status === 401 && path !== "/api/me") {
-    state.me = null;
-    renderLogin(t("api.expired"));
+    if(state.me===actor){state.me=null;renderLogin(t("api.expired"));}
     throw new Error("unauthorized");
   }
   const text = await res.text();
@@ -1429,6 +1434,7 @@ function popItem(ic, title, desc, selected, onclick, disabled = false) {
 // ---------------------------------------------------------------- 登录
 
 function renderLogin(message = "") {
+  clearUploadDrafts();
   closeStreams();
   closeDrawer();
   closePop();
@@ -1618,6 +1624,7 @@ async function openSession(pid, sid) {
     await loadWorkspaceRepos();
     loadChanges();
     loadEnv();
+    loadSources();
     const focus = focusTask();
     if (focus) loadDetail(focus);
     replayTasks();
@@ -1634,6 +1641,7 @@ function openDraft(pid) {
   state.sideOpen = false;
   setHash(`#/w/${pid}/new`);
   renderApp();
+  void loadSourcePolicy();
   if (ui.input) ui.input.focus();
   loadWorkspaceRepos();
 }
@@ -2480,7 +2488,7 @@ function liveInfo(task) {
 
 function renderThread(stick = false) {
   const thread = ui.scroll;
-  if (!thread) return;
+  if (!thread || state.view !== "session") return;
   const nearBottom = stick || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
   const landing = !!state.project && !state.tasks.length && !pendingTurnShown();
   ui.main?.classList.toggle("main-landing", landing);
@@ -2577,6 +2585,7 @@ function turn(task) {
   return h("section", { class: "turn", id: "turn-" + task.id },
     h("div", { class: "msg-user" + (queued ? " queued-item" : ""), "data-task-id": queued ? task.id : null },
       editing ? queuedEditor(task) : h("div", { class: "bubble" }, task.pending_message || task.message),
+      taskSourceAttachments(task),
       h("div", { class: "meta" }, fmtTime(task.created_at),
         task.sandbox === "read" ? h("span", { class: "chip info" }, icon("eye", "xs"), t("sandbox.read")) : null,
         task.model && task.model !== "balanced" ? h("span", { class: "chip" }, modelLabel(task.model)) : null,
@@ -2592,49 +2601,6 @@ function turn(task) {
 // 计划区（N-04）：Runtime 在规划后、每轮结束与收尾时推 plan_updated。只看最新的一份，整份替换（不按步骤合并）；
 // 没有计划的任务（fast）不画。current_step 那一步另加 current。
 const PLAN_STATUSES = new Set(["pending", "active", "done", "blocked"]);
-
-function planArea(events) {
-  let plan = null;
-  for (const e of events) if (e.type === "plan_updated" && Array.isArray(e.value.steps)) plan = e.value;
-  if (!plan || !plan.steps.length) return null;
-  return h("div", { class: "plan" },
-    h("div", { class: "plan-title" }, t("plan.title")),
-    h("ol", { class: "plan-steps" }, plan.steps.map((s) => {
-      const status = PLAN_STATUSES.has(s.status) ? s.status : "pending";
-      const current = s.id && s.id === plan.current_step;
-      return h("li", { class: "plan-step" + (current ? " current" : ""), "data-status": status, title: t("plan.status." + status) },
-        h("span", { class: "plan-mark" }), h("span", { class: "plan-text" }, s.title || s.id));
-    })));
-}
-
-// 并行的子 Agent（N-16）：node_started 的 mode 为 sub_agent 的 Goal Node 各一行，按开始的先后；之后 node_id 是它的 tool_status
-// 是它的进度（几个子 Agent 的事件交错到达）。调用次数按 step 算；node_finished 之后按 status 定成功或失败。同一个 id 在不同轮里各算各的。
-function subAgentArea(events) {
-  const agents = new Map();
-  for (const e of events) {
-    const v = e.value || {};
-    const key = v.round_seq + ":" + v.node_id;
-    if (e.type === "node_started" && v.mode === "sub_agent" && !agents.has(key)) {
-      agents.set(key, { node: v.node_id, steps: new Set(), last: null, state: "running" });
-    } else if (agents.has(key)) {
-      const a = agents.get(key);
-      if (e.type === "tool_status") {
-        a.steps.add(v.step);
-        a.last = v.tool + (v.target ? " · " + v.target : "");
-      } else if (e.type === "node_finished") {
-        a.state = v.status === "succeeded" ? "succeeded" : "failed";
-      }
-    }
-  }
-  if (!agents.size) return null;
-  return h("div", { class: "subagents" },
-    h("div", { class: "subagents-title" }, t("subagent.title")),
-    [...agents.values()].map((a) => h("div", { class: "subagent", "data-node": a.node, "data-state": a.state, title: t("subagent.state." + a.state) },
-      h("span", { class: "subagent-mark" }),
-      h("span", { class: "subagent-name" }, a.node),
-      h("span", { class: "subagent-steps muted" }, t("subagent.steps", { n: a.steps.size })),
-      a.last ? h("span", { class: "subagent-last" }, a.last) : null)));
-}
 
 function waitingLine(task) {
   const live = liveTasks();
@@ -2777,27 +2743,41 @@ function asks(events) {
   });
 }
 
+function conversationPlan(events) {
+  const plan = [...events].reverse().find(e=>e.type === "plan_updated" && Array.isArray(e.value.steps))?.value;
+  const agents = new Map();
+  for (const event of events) {
+    const v=event.value||{}, id=`${v.round_seq}:${v.node_id}`;
+    if(event.type==="node_started"&&v.mode==="sub_agent"&&!agents.has(id))agents.set(id,{id,name:v.node_id,state:"running",steps:new Set(),last:""});
+    const agent=agents.get(id);
+    if(!agent)continue;
+    if(event.type==="tool_status"){agent.steps.add(v.step);agent.last=v.tool+(v.target?" · "+v.target:"");}
+    if(event.type==="node_finished")agent.state=v.status==="succeeded"?"succeeded":"failed";
+  }
+  return {title:t("plan.title"),agentsTitle:t("subagent.title"),steps:(plan?.steps||[]).map((step,index)=>({id:step.id||String(index),title:step.title||step.id,status:PLAN_STATUSES.has(step.status)?step.status:"pending",current:step.id===plan.current_step,statusLabel:t("plan.status."+(PLAN_STATUSES.has(step.status)?step.status:"pending"))})),
+    agents:[...agents.values()].map(agent=>({...agent,statusLabel:t("subagent.state."+agent.state),label:t("subagent.steps",{n:agent.steps.size})}))};
+}
 function worklog(task, events, running, finished) {
-  const parts=conversationFlow(events);
-  const before=h("div",{class:"execution-plan"},planArea(events),subAgentArea(events));
-  if(!parts.length&&!before.childElementCount)return null;
-  if(!parts.some(part=>part.kind==="tools")&&before.childElementCount)parts.push({kind:"tools",id:"plan",calls:[]});
+  const parts=conversationFlow(events),plan=conversationPlan(events);
+  if(!parts.length&&!plan.steps.length&&!plan.agents.length)return null;
+  if(!parts.some(part=>part.kind==="tools")&&(plan.steps.length||plan.agents.length))parts.push({kind:"tools",id:"plan",calls:[]});
   let attachedPlan=false;
-  return h("div",{class:"conversation-flow"},parts.map(part=>{
+  const projected=parts.map(part=>{
     const id=task.id+":"+part.id;
-    if(part.kind==="progress")return proPresentation("note-"+id,"progress-note-island","mountProgressMessage",
-      {id,text:part.message,source:part.source},h("p",{class:"progress-note"},part.message));
+    if(part.kind==="progress")return {...part,id};
     const active=running&&part.calls.some(call=>call.event.value.state==="running");
     const counts=toolGroupCounts(part.calls);
     const title=Object.entries(counts).filter(([,n])=>n).map(([kind,n])=>t("flow."+kind,{n})).join(" · ")||t("plan.title");
     const latest=[...part.calls].reverse().find(call=>call.event.value.state==="running");
-    const current=active&&latest?toolText(latest.event.value,false):"";
-    const plan=!attachedPlan?before:null;attachedPlan=true;
-    const props={title,current,running:active,expanded:state.open.has(id),before:plan,
-      onExpandedChange:(open)=>{if(open){state.open.add(id);state.closed.delete(id);}else{state.open.delete(id);state.closed.add(id);}renderTurn(task.id);},
-      steps:part.calls.map(call=>{const ev=call.event,info=stepInfo(ev);return {id:call.id,title:info.title,detail:info.detail || String(ev.value?.target || ""),tool:String(ev.value?.tool||""),state:ev.value?.state==="failed"?"output-error":ev.value?.state==="running"?"input-available":"output-available",time:fmtClock(ev.time)};})};
-    return proPresentation("progress-"+id,"progress-island","mountProgress",props,h("div",{class:"execution-current"},title,current?" · "+current:""));
-  }));
+    const groupPlan=!attachedPlan?plan:undefined;attachedPlan=true;
+    return {kind:"tools",id,title,reveal:state.revealWorklog.get(task.id)||0,current:active&&latest?toolText(latest.event.value,false):"",running:active,plan:groupPlan,
+      steps:part.calls.map(call=>{
+        const ev=call.event,v=ev.value||{},info=stepInfo(ev);
+        return {id:call.id,label:toolText({...v,target:""},v.state!=="running"),target:String(v.target||""),detail:v.state==="failed"?info.detail.replace(errorText(v),"").trim():info.detail,error:v.state==="failed"?errorText(v):"",tool:String(v.tool||""),state:v.state==="failed"?"output-error":v.state==="running"?"input-available":"output-available",time:fmtClock(ev.time),duration:v.duration_ms!=null?fmtMs(num(v.duration_ms)):""};
+      })};
+  });
+  const labels={more:t("flow.more",{n:"{n}"}),less:t("flow.less"),command:t("flow.commandDetail"),target:t("flow.target"),failed:t("flow.failed"),plan:t("plan.title")};
+  return proPresentation("conversation-"+task.id,"conversation-island","mountConversation",{parts:projected,labels},h("div",{class:"conversation-flow"},projected.map(part=>h("p",{class:"progress-note"},part.message||part.title))));
 }
 
 // Diagnostic data stays available in one deliberate advanced entry, not in
@@ -2805,17 +2785,16 @@ function worklog(task, events, running, finished) {
 function runDiagnostics(task, events) {
   const rows=events.filter(ev=>!QUIET.has(ev.type)&&!["token_delta","thinking_delta","context_usage"].includes(ev.type));
   if(!rows.length)return null;
-  const key="diagnostics-"+task.id;
-  const details=h("details",{class:"run-diagnostics",open:state.rawOpen.has(key)},
-    h("summary",{},t("run.details")),
-    h("div",{class:"run-diagnostics-body"},
-      !TERMINAL.has(statusOf(task))?h("div",{class:"diagnostic-current"},phaseNow(task,events).text):null,
-      h("div",{class:"diagnostic-events"},workSteps(events).map(ev=>{const info=stepInfo(ev);return h("div",{class:"diagnostic-event"},
-        h("div",{class:"diagnostic-event-title"},h("strong",{},info.title),h("time",{},fmtClock(ev.time))),
-        info.detail?h("p",{},info.detail):null);})),
-      h("details",{class:"execution-raw"},h("summary",{},t("run.rawEvents")),h("pre",{},JSON.stringify(rows.map(ev=>({event_id:ev.event_id,type:ev.type,time:ev.time,value:ev.value})),null,2)))));
-  details.addEventListener("toggle",()=>{if(details.open)state.rawOpen.add(key);else state.rawOpen.delete(key);});
-  return details;
+  const rounds=events.reduce((latest,ev)=>Math.max(latest,num(ev.value?.round_seq),ev.type==="task_finished"?num(ev.value?.rounds):0),0);
+  const calls=conversationFlow(events).filter(part=>part.kind==="tools").reduce((total,part)=>total+part.calls.length,0);
+  const props={title:t("run.details"),summary:t("run.summary",{calls,events:rows.length}),
+    current:!TERMINAL.has(statusOf(task))?phaseNow(task,events).text:"",
+    metrics:[{id:"rounds",label:t("run.rounds"),value:rounds},{id:"calls",label:t("run.calls"),value:calls},{id:"events",label:t("run.events"),value:rows.length}],
+    entries:workSteps(events).map(ev=>{const info=stepInfo(ev);return {id:String(ev.event_id),title:info.title,detail:info.detail,time:fmtClock(ev.time),kind:info.kind};}),
+    raw:JSON.stringify(rows.map(ev=>({event_id:ev.event_id,type:ev.type,time:ev.time,value:ev.value})),null,2),
+    labels:{events:t("run.eventLog"),raw:t("run.rawEvents"),more:t("run.more",{n:"{n}"}),less:t("run.less"),copy:t("common.copy"),copied:t("common.copied"),copyFailed:t("common.copyFailed")}};
+  return proPresentation("diagnostics-"+task.id,"diagnostics-island","mountRunDetails",props,h("span",{class:"muted small"},t("run.details")));
+
 }
 
 // phaseNow 是进行中的任务此刻在做什么、从什么时候开始：按最后一个事件推（规划、执行、审查、下一轮）。
@@ -3411,9 +3390,119 @@ async function refreshTasks() {
   } catch { /* 下次再取 */ }
 }
 
+// User sources are staged per account + conversation. File bytes never enter
+// localStorage; a task only receives server-issued IDs from this session.
+const MAX_UPLOAD_FILES=10;
+const DEFAULT_SOURCE_POLICY={max_file_bytes:10*1024*1024,max_task_files:10,max_task_bytes:100*1024*1024};
+function sourcePolicy(){return state.sourcePolicies.get(sbase()||projectSourcePolicyBase())||DEFAULT_SOURCE_POLICY;}
+function projectSourcePolicyBase(){return state.project?`/api/projects/${state.project.id}`:"";}
+function sourceBytes(item){return item.source?.size_bytes??item.file?.size??0;}
+function selectedSourceBytes(items){const seen=new Set();return items.reduce((n,item)=>{const key=item.source?.id;if(key&&seen.has(key))return n;if(key)seen.add(key);return n+sourceBytes(item);},0);}
+async function loadSourcePolicy(base=sbase()||projectSourcePolicyBase()){
+ if(!base)return;const owner=uploadOwner(),generation=sourceGeneration;
+ try{const policy=await api("GET",base+"/sources/capabilities");
+ if(owner!==uploadOwner()||generation!==sourceGeneration)return;
+ if(policy&&Number.isSafeInteger(policy.max_file_bytes)&&policy.max_file_bytes>0&&policy.max_file_bytes<=50*1024*1024&&policy.max_task_files===10&&Number.isSafeInteger(policy.max_task_bytes)&&policy.max_task_bytes>0&&policy.max_task_bytes<=200*1024*1024){state.sourcePolicies.set(base,policy);if((sbase()||projectSourcePolicyBase())===base)refreshUploadUI();}
+ }catch{/* Old servers retain the conservative upload limit. */}
+}
+let sourceGeneration=0;
+const uploadOwner=()=>`${state.me?.tenant}/${state.me?.user}`;
+function uploadItems(key=personalChoiceKey()) {return state.uploadDrafts.get(key)||[];}
+function uploadAllowed() {return !!state.project&&!state.sending&&!["running","waiting"].includes(phase().mode);}
+function clearUploadDrafts() {
+  sourceGeneration++;state.sending=false;state.pending=null;
+  for(const items of state.uploadDrafts.values())for(const item of items){item.controller?.abort();if(item.preview)URL.revokeObjectURL(item.preview);}
+  state.uploadDrafts.clear();state.sourceLists.clear();state.sourcePolicies.clear();
+}
+function refreshUploadUI() {
+  const items=uploadItems();
+  ui.composerModel?.update({attachments:items.map(item=>({id:item.id,name:item.source?.name||item.file.name,size_bytes:item.source?.size_bytes??item.file.size,mime_type:item.source?.mime_type||item.file?.type,preview_url:item.preview||item.source?.preview_url,status:item.status,error:item.error||""})),canAttach:uploadAllowed(),
+    uploadLabels:{add:t("sources.add",{m:Math.floor(sourcePolicy().max_file_bytes/1024/1024)}),remove:t("sources.remove"),retry:t("common.retry"),uploading:t("sources.uploading"),ready:t("sources.ready"),pending:t("sources.pending"),drop:t("sources.drop"),unavailable:t("sources.afterTask")}});
+  refreshSend();renderStatus();
+}
+async function loadSources(base=sbase()) {
+  if(!base)return;
+  void loadSourcePolicy(base);
+  const owner=`${state.me?.tenant}/${state.me?.user}`;
+  const cache=state.sourceLists.get(base)||{list:[],loading:false,error:""};
+  if(cache.loading)return;
+  cache.loading=true;cache.error="";state.sourceLists.set(base,cache);
+  if(sbase()===base)renderStatus();
+  try {const data=await api("GET",base+"/sources");if(owner!==`${state.me?.tenant}/${state.me?.user}`)return;cache.list=[...new Map([...cache.list,...(Array.isArray(data?.sources)?data.sources:[])].map(source=>[source.id,source])).values()];}
+  catch(error){cache.error=error.message;}
+  finally {cache.loading=false;if(sbase()===base){renderStatus();renderThread();}}
+}
+function sourceByID(id) {return state.sourceLists.get(sbase())?.list.find(source=>source.id===id||source.alias_ids?.includes(id));}
+function openSource(source) {
+  try {const url=new URL(source.preview_url||source.url,location.href);if(url.origin!==location.origin||!["https:","http:"].includes(url.protocol))return;
+    const link=h("a",{href:url.href,target:"_blank",rel:"noopener noreferrer"});link.click();
+  }catch{/* Invalid source URLs never activate. */}
+}
+function chooseSourceFiles() {if(uploadAllowed())document.querySelector('.composer-file-input')?.click();else toast(t("sources.afterTask"));}
+async function uploadOne(item,key,base,owner=uploadOwner(),generation=sourceGeneration) {
+  const valid=()=>owner===uploadOwner()&&generation===sourceGeneration;
+  if(!valid())throw new DOMException('Upload cancelled','AbortError');
+  if(item.source)return item.source;
+  if(item.promise)return item.promise;
+  item.controller=new AbortController();
+  item.status="uploading";item.error="";refreshUploadUI();
+  item.promise=(async()=>{
+    const form=new FormData();form.append("file",item.file);
+    try {
+      const data=await api("POST",base+"/sources",form,item.controller.signal);
+      if(!valid())throw new DOMException("Upload cancelled","AbortError");
+      if(!data?.source?.id)throw Error(t("sources.invalidResponse"));
+      item.source=data.source;item.status="ready";
+      if(!state.me||!key.startsWith(`${state.me.tenant}/${state.me.user}/`))return data.source;
+      const cache=state.sourceLists.get(base)||{list:[],loading:false,error:""};
+      if(!cache.list.some(source=>source.id===data.source.id))cache.list.push(data.source);
+      state.sourceLists.set(base,cache);
+      return data.source;
+    }catch(error){item.status="error";item.error=error.message;throw error;}
+    finally {item.promise=null;item.controller=null;if(valid()&&personalChoiceKey()===key)refreshUploadUI();}
+  })();
+  return item.promise;
+}
+function addSourceFiles(files) {
+  if(!uploadAllowed()){toast(t("sources.afterTask"));return;}
+  const key=personalChoiceKey(),items=uploadItems(key),base=sbase();
+  for(const file of files){
+    if(items.length>=MAX_UPLOAD_FILES){toast(t("sources.limitCount"),true);break;}
+    if(file.size>sourcePolicy().max_file_bytes){toast(t("sources.limitSize",{name:file.name,m:Math.floor(sourcePolicy().max_file_bytes/1024/1024)}),true);continue;}
+    if(selectedSourceBytes(items)+file.size>sourcePolicy().max_task_bytes){toast(t("sources.limitTotal",{m:Math.floor(sourcePolicy().max_task_bytes/1024/1024)}),true);continue;}
+    const item={id:crypto.randomUUID(),file,status:"pending",source:null,error:"",preview:/^image\/(png|jpeg|gif|webp)$/.test(file.type)?URL.createObjectURL(file):""};
+    items.push(item);
+  }
+  state.uploadDrafts.set(key,items);refreshUploadUI();
+  if(base)for(const item of items)if(item.status==="pending")void uploadOne(item,key,base).catch(()=>{});
+}
+function useSource(source) {
+  if(!uploadAllowed()){toast(t("sources.afterTask"));return;}
+  if(!sourceByID(source.id))return;
+  const key=personalChoiceKey(),items=uploadItems(key);
+  if(items.some(item=>item.source?.id===source.id))return;
+  if(items.length>=MAX_UPLOAD_FILES){toast(t("sources.limitCount"),true);return;}
+  if(selectedSourceBytes(items)+source.size_bytes>sourcePolicy().max_task_bytes){toast(t("sources.limitTotal",{m:Math.floor(sourcePolicy().max_task_bytes/1024/1024)}),true);return;}
+  items.push({id:crypto.randomUUID(),file:null,source,status:"ready",preview:"",error:""});
+  state.uploadDrafts.set(key,items);refreshUploadUI();ui.input?.focus();
+}
+function removeUpload(id) {
+  if(state.sending)return;
+  const key=personalChoiceKey(),items=uploadItems(key),item=items.find(item=>item.id===id);
+  if(item?.status==="uploading")return;
+  if(item?.preview)URL.revokeObjectURL(item.preview);
+  state.uploadDrafts.set(key,items.filter(item=>item.id!==id));refreshUploadUI();
+}
+function retryUpload(id) {const key=personalChoiceKey(),item=uploadItems(key).find(item=>item.id===id);if(item&&sbase()&&!state.sending)void uploadOne(item,key,sbase()).catch(()=>{});}
+function taskSourceAttachments(task) {
+  const sources=(task.source_ids||[]).map(sourceByID).filter(Boolean);
+  return sources.length?h("div",{class:"task-source-attachments"},sources.map(source=>h("button",{class:"task-source-link",title:source.name,onclick:()=>openSource(source)},icon("file","xs"),h("span",{},source.name)))):null;
+}
+
 // ---------------------------------------------------------------- 输入框
 
-// 输入框是一张卡片：上沿是运行状态或待确认的问题，中间是输入与发送；沙箱、模型倾向与用量放在卡片外的下方。
+// 单一输入面板：上层文字，底部内置模型、任务设置、用量与发送；审批沿用独立控件。
+let composerInstance=0;
 function dock() {
   ui.next = h("div", { class: "next-steps" });
   ui.cStatus = h("div", { class: "hidden" });
@@ -3424,11 +3513,22 @@ function dock() {
   ui.input.addEventListener("input", () => { autosize(); refreshSend(); });
   ui.input.addEventListener("keydown", onComposerKey);
   ui.cHelp = h("span", {class:"composer-help",id:"composer-help"});
-  ui.composer = h("div", { class: "composer" }, ui.cStatus, ui.cAsk, h("div", { class: "c-row" }, ui.input, ui.cRight), ui.cOpts, ui.cHelp);
   ui.tools = h("div", { class: "c-tools" });
+  ui.composer = h("div", { class: "composer" }, ui.cStatus, ui.cAsk, h("div", { class: "c-row" }, ui.input), ui.cOpts,
+    h("div",{class:"composer-toolbar"},h("div",{class:"composer-toolbar-controls"},ui.tools),ui.cRight), ui.cHelp);
   ui.barKey = "";
-  const surface=proPresentation("composer", "composer-island", "mountComposer", {body:ui.composer,status:"ready"},ui.composer);
-  return h("div", { class: "dock" }, h("div", { class: "dock-inner" }, ui.next, surface, ui.tools));
+  let snapshot={mode:"empty",placeholder:"",shortcuts:"",disabled:true,label:t("composer.aria"),sendLabel:t("composer.sendTitle"),menuLabel:t("composer.queueTitle")};
+  const listeners=new Set();
+  const model={id:++composerInstance,mounted:false,getSnapshot:()=>snapshot,subscribe:(listener)=>{listeners.add(listener);return()=>listeners.delete(listener);},
+    update:(patch)=>{const next={...snapshot,...patch};if(Object.keys(next).every(key=>next[key]===snapshot[key]))return;snapshot=next;for(const listener of listeners)listener();}};
+  ui.composerModel=model;
+  const props={model,input:ui.input,slots:{status:ui.cStatus,ask:ui.cAsk,options:ui.cOpts,help:ui.cHelp,tools:ui.tools},
+    bind:(input,body,right,send)=>{if(ui.composerModel!==model)return;model.mounted=true;ui.input=input;ui.composer=body;ui.cRight=right;ui.send=send;autosize();updateComposer(true);},
+    onInput:()=>{autosize();refreshSend();},onKeyDown:onComposerKey,onFiles:addSourceFiles,onRemoveUpload:removeUpload,onRetryUpload:retryUpload,
+    onSend:()=>{const current=phase();if(current.mode==="running")steer(current.current,"next_step");else submit();},
+    onMenu:(anchor)=>{const current=phase();openPop(anchor,(close)=>sendMenu(current,close));}};
+  const surface=proPresentation("composer", "composer-island", "mountComposer", props,ui.composer);
+  return h("div", { class: "dock" }, h("div", { class: "dock-inner" }, ui.next, surface));
 }
 
 function autosize() {
@@ -3438,7 +3538,10 @@ function autosize() {
 }
 
 function refreshSend() {
-  if (ui.send) ui.send.disabled = !ui.input.value.trim() || state.sending;
+  const items=uploadItems();
+  const disabled=(!ui.input?.value.trim()&&!items.length)||state.sending||items.some(item=>["uploading","error"].includes(item.status));
+  ui.composerModel?.update({disabled});
+  if (!ui.composerModel?.mounted && ui.send) ui.send.disabled=disabled;
 }
 
 function onComposerKey(e) {
@@ -3673,8 +3776,6 @@ function updateComposer(force = false) {
   if (!ui.composer || !state.project) return;
   const ph = phase();
   ui.composer.className = "composer" + (ph.mode === "waiting" ? " waiting" : "");
-  const composerIsland=presentationIslands.get("composer");
-  if(composerIsland){composerIsland.props={body:ui.composer,status:ph.mode==="running"?"streaming":"ready"};composerIsland.handle?.update(composerIsland.props);}
 
   if (ph.mode === "running" || ph.mode === "waiting") {
     const info = liveInfo(ph.current);
@@ -3714,7 +3815,7 @@ function updateComposer(force = false) {
     ui.barDirty = false;
     if (ph.mode === "waiting") {
       // 等确认时，发送按钮换成问题给的选项。
-      ui.cRight.replaceChildren();
+      if(!ui.composerModel?.mounted)ui.cRight.replaceChildren();
       ui.cOpts.className = "c-opts";
       ui.cOpts.replaceChildren(...ph.ask.options.map((o) => h("button", {
         class: "btn sm" + (/approve|yes|continue/i.test(o.id) ? " primary" : ""),
@@ -3722,7 +3823,7 @@ function updateComposer(force = false) {
         "data-network-approval": ph.ask.permission ? o.id : null,
       }, ph.ask.permission && ["approve","reject"].includes(o.id) ? t(`networkApproval.${o.id}`) : optionLabel(o.label))));
     } else {
-      ui.cRight.replaceChildren(sendButton(ph));
+      if(!ui.composerModel?.mounted)ui.cRight.replaceChildren(sendButton(ph));
       ui.cOpts.className = "hidden";
       ui.cOpts.replaceChildren();
     }
@@ -3730,10 +3831,12 @@ function updateComposer(force = false) {
     const shortcuts = hint(ph).map((item) => item.textContent).join(" · ");
     ui.cHelp.textContent = shortcuts;
     ui.input.title = shortcuts;
-    if (ui.send?.isConnected && shortcuts) ui.send.title = shortcuts;
+    if (!ui.composerModel?.mounted && ui.send?.isConnected && shortcuts) ui.send.title = shortcuts;
     ui.next.replaceChildren(...nextSteps(ph));
   }
-  refreshSend();
+  ui.composerModel?.update({mode:ph.mode,placeholder:ui.input.placeholder,shortcuts:ui.cHelp.textContent,
+    label:t("composer.aria"),sendLabel:t(ph.mode==="running"?"hint.steer":"composer.sendTitle"),menuLabel:t("composer.queueTitle")});
+  refreshUploadUI();
 }
 
 function sendButton(ph) {
@@ -3803,7 +3906,7 @@ function nextSteps(ph) {
     return [
       chip("refresh", t("next.retry"), () => submit(last.message), true),
       chip("edit", t("next.edit"), () => setComposer(last.message)),
-      chip("list", t("next.where"), () => { state.open.add(last.id); state.closed.delete(last.id); renderTurn(last.id); scrollToTurn(last.id); }),
+      chip("list", t("next.where"), () => { state.revealWorklog.set(last.id,(state.revealWorklog.get(last.id)||0)+1); renderTurn(last.id); scrollToTurn(last.id); }),
     ];
   }
   return [];
@@ -3935,7 +4038,7 @@ function taskSettingsTool() {
         h("div", { class: "task-settings-actions" }, h("button", { class: "btn ghost sm", onclick: close }, t("common.cancel")), h("button", { class: "btn primary sm", "data-task-settings-apply": "", onclick: apply }, t("taskSettings.apply"))));
       draw();return panel;
     }, {className:"task-settings-pop",role:"dialog",label:t("taskSettings.title"),internalScroll:true});
-  } }, icon("box","sm"), t("taskSettings.title"));
+  } }, icon("settings","sm"), h("span",{class:"task-settings-label"},t("taskSettings.title")));
 }
 
 function sandboxTool() {
@@ -4041,8 +4144,10 @@ function meterTool(m) {
 
 // submit 发出一条任务。草稿时先开会话（复制工作副本，标题取这条消息的第一行），再提交。
 async function submit(text) {
-  const message = (text ?? (ui.input ? ui.input.value : "")).trim();
-  if (!message || state.sending || !state.project) return;
+  const selectedUploads=[...uploadItems()];
+  const uploadGeneration=sourceGeneration;
+  const message = (text ?? (ui.input ? ui.input.value : "")).trim() || (selectedUploads.length?t("sources.defaultPrompt"):"");
+  if (!message || state.sending || !state.project || selectedUploads.some(item=>item.status==="error")) return;
   const submittedContext=personalChoiceKey();
   const taskSettings=selectedTaskSettings();
   const selectedModel=state.settings.model;
@@ -4050,7 +4155,9 @@ async function submit(text) {
   const selectedPersonal=personalSelection();
   const targetProject=state.project;
   let targetSession=state.session;
-  const owner=`${state.me?.tenant}/${state.me?.user}`;
+  const owner=uploadOwner();
+  const sameOwner=()=>owner===uploadOwner()&&uploadGeneration===sourceGeneration;
+  const sameContext=()=>sameOwner()&&state.project?.id===targetProject.id&&(state.session?.id||"new")===(targetSession?.id||"new");
   state.sending = true;
   refreshSend();
   // 消息先出现在对话里，下面说明在做什么：草稿要先开会话（复制工作副本，借沙箱），再提交。界面不等请求回来。
@@ -4074,8 +4181,19 @@ async function submit(text) {
     }
     if(owner!==`${state.me?.tenant}/${state.me?.user}`)return;
     const base = sessionURL(targetProject.id,targetSession.id);
+    const projectPolicy=state.sourcePolicies.get(`/api/projects/${targetProject.id}`);
+    if(projectPolicy&&!state.sourcePolicies.has(base))state.sourcePolicies.set(base,projectPolicy);
     const selection = selectedPersonal;
-    const t = await api("POST", `${base}/tasks`, { message, sandbox: taskSettings.sandbox, model: selectedModel, personal_config: selection, network_request: taskSettings.network_request });
+    // A new-session draft stays local until the session exists. Successfully
+    // uploaded entries are retained on task submission failure for safe retry.
+    const sourceIDs=[];
+    const activeKey=`${owner}/${targetProject.id}/${targetSession.id}`;
+    if(selectedUploads.length){state.uploadDrafts.set(activeKey,selectedUploads);if(activeKey!==submittedContext)state.uploadDrafts.delete(submittedContext);}
+    for(const item of selectedUploads){if(!sameOwner())return;const source=await uploadOne(item,activeKey,base,owner,uploadGeneration);if(!sameOwner())return;if(!sourceIDs.includes(source.id))sourceIDs.push(source.id);}
+    if(owner!==`${state.me?.tenant}/${state.me?.user}`)return;
+    const t = await api("POST", `${base}/tasks`, { message, sandbox: taskSettings.sandbox, model: selectedModel, personal_config: selection, network_request: taskSettings.network_request,...(sourceIDs.length?{source_ids:sourceIDs}:{}) });
+    if(!sameOwner())return;
+    if(selectedUploads.length){state.uploadDrafts.delete(activeKey);for(const item of selectedUploads)if(item.preview)URL.revokeObjectURL(item.preview);}
     if (sbase() !== base) return;
     if (selection) state.session.personal_config = selection;
     state.pending = null;
@@ -4090,15 +4208,17 @@ async function submit(text) {
     loadActive();
     scheduleChrome();
   } catch (ex) {
+    if(!sameOwner())return;
     state.pending = null;
-    renderThread();
-    report(ex);
-    if (text === undefined && ui.input && !ui.input.value) setComposer(message);
+    if(sameContext()){
+      renderThread();report(ex);
+      if (text === undefined && ui.input && !ui.input.value) setComposer(message);
+    }else toast(ex.message,true);
   } finally {
-    state.pending = null;
-    state.sending = false;
-    refreshSend();
-    if (ui.input) ui.input.focus();
+    if(sameOwner()){
+      state.pending = null;state.sending = false;refreshUploadUI();
+      if (sameContext()&&ui.input) ui.input.focus();
+    }
   }
 }
 
@@ -4129,12 +4249,32 @@ function renderStatus() {
   if (!ui.statusBody || !inSession() || !state.statusOpen) return;
   // 右栏随事件整块重画：保住滚动位置，不再每来一个事件就跳回顶上。
   keepScroll(ui.statusBody, () => ui.statusBody.replaceChildren(
+    sessionContextPanel(),
     section("env", "server", t("sp.env"), envSummary(), envBody),
     section("context", "layers", t("sp.context"), contextSummary(), contextBody),
     section("output", "fileText", t("sp.output"), outputSummary(), outputBody),
     section("changes", "diff", t("sp.changes"), changesSummary(), changesBody),
     section("background", "activity", t("sp.background"), backgroundSummary(), backgroundBody),
   ));
+}
+
+function sessionContextPanel() {
+  const agents=[];
+  for(const task of state.tasks){
+    const map=new Map();
+    for(const ev of state.runs.get(task.id)?.events||[]){const value=ev.value||{},id=`${task.id}:${value.round_seq}:${value.node_id}`;
+      if(ev.type==="node_started"&&value.mode==="sub_agent")map.set(id,{id,name:value.node_id,state:"running",detail:""});
+      const agent=map.get(id);if(!agent)continue;
+      if(ev.type==="tool_status")agent.detail=toolText(value,value.state!=="running");
+      if(ev.type==="node_finished")agent.state=value.status==="succeeded"?"completed":["cancelled","skipped"].includes(value.status)?"cancelled":"failed";
+    }
+    for(const agent of map.values()){if(agent.state==="running"&&TERMINAL.has(statusOf(task)))agent.state=statusOf(task)==="TASK_STATUS_CANCELLED"?"cancelled":"unknown";agents.push(agent);}
+  }
+  const cache=state.sourceLists.get(sbase())||{list:[],loading:false,error:""};
+  const keys=["agents","sources","running","completed","failed","cancelled","unknown","uploaded","addSource","viewAll","showLess","noAgents","noSources","loading","retry","readOnly","uploading","openSource","useSource","unavailable"];
+  const labels=Object.fromEntries(keys.map(key=>[key,t("sources.panel."+key)]));
+  const props={agents,sources:cache.list,sourcesLoading:cache.loading,sourcesError:cache.error,uploading:uploadItems().some(item=>item.status==="uploading"),readOnly:!uploadAllowed(),onAdd:chooseSourceFiles,onOpenSource:openSource,onUseSource:useSource,onRetry:()=>loadSources(),labels};
+  return proPresentation("context-"+personalChoiceKey(),"context-panel-island","mountContextPanel",props,h("span",{class:"muted small"},t("sources.panel.sources")));
 }
 
 function section(key, ic, title, summary, body) {

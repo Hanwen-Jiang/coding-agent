@@ -4,6 +4,17 @@ package server
 // TestEveryMessageHasEnglish 按源码核对每一句都有、参数个数对得上、这里没有用不到的。
 // 用词与网页一致：“项目”在界面上叫 workspace。
 var english = map[string]string{
+	"文件来源存储配额已满":         "The file source storage quota has been reached",
+	"暂时无法读取文件来源":         "File sources are temporarily unavailable",
+	"任务附件总计不能超过 200 MiB": "Task attachments must be no larger than 200 MiB in total",
+	"请选择一个有效文件":          "Select a valid file",
+	"文件名不合法":             "Invalid filename",
+	"单个文件不能超过 50 MiB":    "Each file must be no larger than 50 MiB",
+	"每次只能上传一个文件":         "Upload one file per request",
+	"暂时上传不了这个文件":         "Could not upload this file",
+	"每个任务最多使用 10 个附件":    "A task can use up to 10 attachments",
+	"附件不存在或不属于当前会话":      "The attachment does not exist or belongs to another session",
+
 	"个人配置格式不合法":                     "Invalid personal configuration",
 	"个人配置已更新，请重新读取后保存":              "Personal configuration changed. Reload it before saving.",
 	"个人配置引用的工具当前不可用，请重新选择":          "A referenced tool is unavailable. Update your selection.",
@@ -19,11 +30,14 @@ var english = map[string]string{
 	"仓库权限只能是只读或可写":                  "Repository access must be read-only or writable",
 	"仓库有未提交或未推送的改动，需要明确确认丢弃后才能卸下":   "The repository has uncommitted or unpushed changes. Confirm discarding them before detaching.",
 
-	"联网范围只能是 hosts 或 public": "scope must be hosts or public",
-	"所有公网授权不能同时指定主机":         "public scope requires empty hosts",
-	"按主机联网需要填写主机名单":          "hosts scope requires hosts",
-	"联网授权时长只能是 15、30、60 分钟":  "network duration must be 15, 30 or 60 minutes",
-	"暂时无法读取联网策略":             "network policy unavailable",
+	"联网范围只能是 hosts 或 public":            "scope must be hosts or public",
+	"所有公网授权不能同时指定主机":                    "public scope requires empty hosts",
+	"按主机联网需要填写主机名单":                     "hosts scope requires hosts",
+	"不限时授权需要显式 unlimited=true":          "Unlimited network access requires an explicit unlimited=true",
+	"unlimited=true 只能与 minutes=0 一起使用": "unlimited=true can only be used with minutes=0",
+	"联网授权时长只能是 0（本任务不限时）、15、30、60 分钟":   "Network duration must be 0 (unlimited for this task), 15, 30 or 60 minutes",
+	"联网设置不合法":                           "Invalid network settings",
+	"暂时无法读取联网策略":                        "network policy unavailable",
 
 	// 登录与请求
 	"请先登录":                         "Please sign in first",
@@ -216,14 +230,14 @@ var english = map[string]string{
 	"请求太频繁，稍后再试":            "Too many requests. Try again shortly.",
 
 	// 我的 Skill（WEB-SKILLS）。
-	"这个部署还没有 Skill":                    "Skills aren't available on this deployment yet",
-	"平台或团队已经有这个名字的 Skill，换一个名字":        "The platform or your team already has a Skill with this name. Choose another name.",
-	"每个人最多 100 个 Skill，先收回不用的":         "You can have at most 100 Skills. Retire one you don't use first.",
-	"Skill 太大：整份最多 256 KiB":            "The Skill is too large. The limit is 256 KiB in total.",
-	"Skill 的文件路径重复了（不分大小写），或一个是另一个的目录": "Two of the Skill's file paths are the same (ignoring case), or one is a folder of the other",
-	"没有这个 Skill": "Skill not found",
+	"这个部署还没有 Skill":                              "Skills aren't available on this deployment yet",
+	"平台或团队已经有这个名字的 Skill，换一个名字":                  "The platform or your team already has a Skill with this name. Choose another name.",
+	"每个人最多 100 个 Skill，先收回不用的":                   "You can have at most 100 Skills. Retire one you don't use first.",
+	"Skill 太大：整份最多 256 KiB":                      "The Skill is too large. The limit is 256 KiB in total.",
+	"Skill 的文件路径重复了（不分大小写），或一个是另一个的目录":           "Two of the Skill's file paths are the same (ignoring case), or one is a folder of the other",
+	"没有这个 Skill":                                 "Skill not found",
 	"Skill 的名字要小写字母开头，只用小写字母、数字、_ 与 -，最多 64 个字符": "A Skill name starts with a lowercase letter and uses only lowercase letters, digits, _ and -, up to 64 characters",
-	"Skill 要写说明与做法": "A Skill needs a description and instructions",
+	"Skill 要写说明与做法":                              "A Skill needs a description and instructions",
 	// 我的 MCP（Runtime 的 N-15）。
 	"账号的策略不允许登记 MCP Server": "Your account's policy doesn't allow MCP servers",
 	"MCP 连接不存在":             "MCP connection not found",

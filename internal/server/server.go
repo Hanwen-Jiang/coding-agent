@@ -276,6 +276,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/environments/{environment}", s.authed(s.handleDeleteEnvironment))
 	// 工作区（项目）：基线仓库。
 	mux.HandleFunc("GET /api/projects", s.authed(s.handleListProjects))
+	mux.HandleFunc("GET /api/projects/{project}/sources/capabilities", s.authed(s.handleSourceCapabilities))
 	mux.HandleFunc("POST /api/projects", s.authed(s.workspaceHTTP("create_project")))
 	mux.HandleFunc("DELETE /api/projects/{project}", s.authed(s.workspaceHTTP("delete_project")))
 	// 会话：一段对话加一份工作副本；文件、改动、提交、推送与任务都按会话。
@@ -285,6 +286,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE "+sess, s.authed(s.workspaceHTTP("delete_session")))
 	mux.HandleFunc("POST "+sess+"/rename", s.authed(s.handleRenameSession))
 	mux.HandleFunc("POST "+sess+"/duplicate", s.authed(s.workspaceHTTP("duplicate_session")))
+	mux.HandleFunc("POST "+sess+"/sources", s.authed(s.handleUploadSource))
+	mux.HandleFunc("GET "+sess+"/sources", s.authed(s.handleListSources))
+	mux.HandleFunc("GET "+sess+"/sources/capabilities", s.authed(s.handleSourceCapabilities))
+	mux.HandleFunc("GET "+sess+"/sources/{source}/content", s.authed(s.handleSourceContent))
+	mux.HandleFunc("GET "+sess+"/sources/{source}/preview", s.authed(s.handleSourceContent))
 	mux.HandleFunc("GET "+sess+"/settings", s.authed(s.handleSessionTaskSettings))
 	mux.HandleFunc("PUT "+sess+"/settings", s.authed(s.handleSessionTaskSettings))
 	mux.HandleFunc("GET "+sess+"/env", s.authed(s.handleEnv))
@@ -328,7 +334,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
 		// 头像来自各家平台（GitHub、Gitee、GitLab、Gravatar、Google…），图片放开 https；脚本、样式、连接仍只许同源。
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https:; style-src 'self'; script-src 'self'; connect-src 'self'")
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self'; script-src 'self'; connect-src 'self'")
 		next.ServeHTTP(w, r)
 	})
 }

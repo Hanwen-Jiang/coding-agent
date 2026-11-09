@@ -172,14 +172,14 @@ func workspaceHTTPBody(kind string, body []byte) (json.RawMessage, error) {
 		return nil, err
 	}
 	allowed := map[string]string{
-		"create_project": "name git_url branch sample layout", "create_session": "title environment_id personal_config",
+		"create_project": "name git_url branch sample layout", "create_session": "title environment_id personal_config task_settings",
 		"duplicate_session": "title", "attach": "repo", "detach": "discard_changes", "commit": "message", "publish": "title body",
 	}[kind]
 	for key := range fields {
 		if !strings.Contains(" "+allowed+" ", " "+key+" ") {
 			return nil, fmt.Errorf("unsupported workspace field %q", key)
 		}
-		if key == "repo" || key == "personal_config" {
+		if key == "repo" || key == "personal_config" || key == "task_settings" {
 			continue
 		}
 		if key == "discard_changes" {
@@ -237,6 +237,24 @@ func workspaceHTTPBody(kind string, body []byte) (json.RawMessage, error) {
 				return nil, fmt.Errorf("invalid personal config %s", key)
 			}
 		}
+	}
+	// Keep the async admission contract aligned with handleCreateSession. Decode
+	// strictly before journaling so unknown nested fields cannot persist secrets.
+	if raw := fields["task_settings"]; raw != nil {
+		var settings *sessionTaskSettings
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&settings); err != nil {
+			return nil, fmt.Errorf("invalid task_settings: %w", err)
+		}
+		if err := settings.validate(); err != nil {
+			return nil, err
+		}
+		canonical, err := json.Marshal(settings)
+		if err != nil {
+			return nil, err
+		}
+		fields["task_settings"] = canonical
 	}
 	return json.Marshal(fields)
 }

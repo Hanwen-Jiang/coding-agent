@@ -153,8 +153,9 @@ type EnvironmentNetwork struct {
 
 // TaskRecord 是在项目里下过的一个任务（状态以 Runtime 为准，这里只缓存最后一次看到的）。
 type TaskRecord struct {
-	ID      string `json:"id"`
-	Message string `json:"message"`
+	SourceIDs []string `json:"source_ids,omitempty"`
+	ID        string   `json:"id"`
+	Message   string   `json:"message"`
 	// 修改排队中的消息时先记在这里，Runtime 确认改好了才换掉 Message。
 	PendingMessage string    `json:"pending_message,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -211,7 +212,7 @@ func (s *Store) snapshotFile(tenant, workspaceID string) string {
 
 // sessionFiles 是一个工作副本自己的文件（任务记录、环境配置的快照）：删会话、删工作区时一起删。
 func (s *Store) sessionFiles(tenant, workspaceID string) []string {
-	return []string{s.tasksFile(tenant, workspaceID), s.snapshotFile(tenant, workspaceID)}
+	return []string{s.tasksFile(tenant, workspaceID), s.snapshotFile(tenant, workspaceID), s.sourcesFile(tenant, workspaceID)}
 }
 
 // Snapshot 是会话（按工作副本）的环境配置快照；没有时 ok 为 false。

@@ -147,7 +147,9 @@ try {
  check(!$('.personal-skills input[data-reference="test"]').checked,'default subset expanded');
  $$('.personal-skills input,.personal-mcp input').forEach(x=>x.checked=false);$('.personal-save').click();
  await wait(()=>!$('dialog.personal-config'),'session choices closed');
- const input=$('#composer');input.value='Run the test';input.dispatchEvent(new Event('input',{bubbles:true}));$('.send').click();
+ const input=$('#composer');input.value='Run the test';input.dispatchEvent(new Event('input',{bubbles:true}));
+ // Match separate user input/click events by waiting for React to enable Send.
+ await wait(()=>$('.send')&&!$('.send').disabled,'send enabled after input');$('.send').click();
  await wait(()=>location.hash.includes('/s/'),'async session created');
  const sid=location.hash.split('/s/')[1].split('?')[0];
  let list=await request('GET','/api/sessions');const session=list.find(x=>x.id===sid);

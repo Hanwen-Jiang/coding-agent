@@ -60,8 +60,10 @@ try{
   check($('.thread').getBoundingClientRect().width<=800,'conversation column too wide');
   check($('.dock').getBoundingClientRect().bottom<=innerHeight+1,'composer bottom clipped');
   const shell=$('.pro-prompt .prompt-input__shell').getBoundingClientRect(),editor=$('#composer').getBoundingClientRect(),send=$('.c-right .send').getBoundingClientRect();
-  check(editor.width>=shell.width-110,'textarea shrunk inside PromptInput: '+editor.width+'/'+shell.width+' '+JSON.stringify([...function*(x){for(;x&&x!==document.body;x=x.parentElement)yield x;}($('#composer'))].map(x=>({class:x.className,width:x.getBoundingClientRect().width,display:getComputedStyle(x).display,flex:getComputedStyle(x).flex,min:getComputedStyle(x).minWidth,cssWidth:getComputedStyle(x).width}))));
+  check(editor.width>=shell.width-44,'textarea shrunk inside PromptInput: '+editor.width+'/'+shell.width+' '+JSON.stringify([...function*(x){for(;x&&x!==document.body;x=x.parentElement)yield x;}($('#composer'))].map(x=>({class:x.className,width:x.getBoundingClientRect().width,display:getComputedStyle(x).display,flex:getComputedStyle(x).flex,min:getComputedStyle(x).minWidth,cssWidth:getComputedStyle(x).width}))));
+  check($('.c-row').getBoundingClientRect().height<=80,'Pro textarea reserved unused toolbar space');
   check(shell.right-send.right>=4&&shell.right-send.right<=20,'send not aligned to shell edge');
+  check($('.prompt-input__shell').contains($('.composer-toolbar'))&&send.top>=editor.bottom,'footer actions must share the input surface below the editor');
   check($('.c-tools').getBoundingClientRect().height===32,'composer toolbar wraps');
   check($$('.c-tools .tool').length===3,'task/model/usage controls missing');
  }
@@ -126,11 +128,11 @@ try{
   document.documentElement.dataset.theme=theme;await frame();
   const title=$('.conversation-start h2').getBoundingClientRect(),shell=$('.prompt-input__shell').getBoundingClientRect(),suggestions=$('.start-suggestions').getBoundingClientRect(),tools=$('.c-tools').getBoundingClientRect();
   check(shell.top>=title.bottom&&shell.top-title.bottom<=32,'input detached from start heading');
-  check(suggestions.top>=tools.bottom&&suggestions.top-tools.bottom<=24,'suggestions detached from input');
+  check(suggestions.top>=shell.bottom&&suggestions.top-shell.bottom<=24,'suggestions detached from input');
   check(shell.bottom<=innerHeight-60,'draft input pushed to viewport footer');
   check(!$('.hero-empty .suggestions')&&$$('.start-suggestion').length===3,'old large cards remain');
   check($('.main').scrollWidth<=$('.main').clientWidth,'draft horizontal overflow');
-  check($('#composer').getBoundingClientRect().width>=shell.width-110,'draft editor narrow');
+  check($('#composer').getBoundingClientRect().width>=shell.width-44,'draft editor narrow');
   check(shell.right-$('.send').getBoundingClientRect().right>=4&&shell.right-$('.send').getBoundingClientRect().right<=20,'draft send edge');
  }
  $('.start-suggestion').click();check($('#composer').value.includes('Read through'),'suggestion no longer fills actual composer');check(document.activeElement===$('#composer'),'suggestion lost input focus');

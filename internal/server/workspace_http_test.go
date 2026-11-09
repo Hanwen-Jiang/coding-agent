@@ -86,6 +86,53 @@ func newWorkspaceHTTPServer(t *testing.T, dir string, remote *workspaceRemote) *
 func workspaceOwner() identity {
 	return identity{Identity: ingress.Identity{TenantID: "acme", UserID: "alice"}, token: "token-never-on-disk"}
 }
+
+func TestWorkspaceHTTPCreateSessionValidatesTaskSettingsBeforeJournaling(t *testing.T) {
+	for _, raw := range []string{
+		`{"sandbox":"read","network_request":{"scope":"hosts","hosts":["docs.example.com"],"ports":[443],"minutes":30,"reason":"Read docs"}}`,
+		`{}`,
+		`null`,
+	} {
+		body, err := workspaceHTTPBody("create_session", []byte(`{"title":"Review","task_settings":`+raw+`}`))
+		if err != nil {
+			t.Fatalf("valid task settings rejected: %s: %v", raw, err)
+		}
+		var request struct {
+			Title    string               `json:"title"`
+			Settings *sessionTaskSettings `json:"task_settings"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil || request.Title != "Review" {
+			t.Fatalf("journal request: %s: %v", body, err)
+		}
+		var expected *sessionTaskSettings
+		if err := json.Unmarshal([]byte(raw), &expected); err != nil {
+			t.Fatal(err)
+		}
+		if err := expected.validate(); err != nil {
+			t.Fatal(err)
+		}
+		want, _ := json.Marshal(expected)
+		got, _ := json.Marshal(request.Settings)
+		if !bytes.Equal(got, want) {
+			t.Fatalf("saved choices changed: got %s, want %s", got, want)
+		}
+	}
+	for _, raw := range []string{
+		`"read"`, `[]`, `{"sandbox":"full"}`, `{"sandbox":true}`,
+		`{"network_request":{"scope":"public","minutes":0}}`,
+		`{"network_request":{"scope":"hosts","hosts":[],"minutes":30}}`,
+		`{"credential":"must-not-be-journaled"}`,
+		`{"network_request":{"scope":"public","minutes":30,"token":"must-not-be-journaled"}}`,
+	} {
+		if body, err := workspaceHTTPBody("create_session", []byte(`{"task_settings":`+raw+`}`)); err == nil || body != nil {
+			t.Fatalf("invalid settings admitted to journal: %s -> %s (%v)", raw, body, err)
+		}
+	}
+	if _, err := workspaceHTTPBody("create_project", []byte(`{"task_settings":{"sandbox":"read"}}`)); err == nil {
+		t.Fatal("session settings accepted for project creation")
+	}
+}
+
 func submitWorkspaceHTTP(t *testing.T, s *Server, id identity, key, body string, ctx context.Context) (int, map[string]any) {
 	t.Helper()
 	req := httptest.NewRequest("POST", "/api/projects", strings.NewReader(body)).WithContext(ctx)

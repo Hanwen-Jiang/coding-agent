@@ -14,7 +14,7 @@ The updater verifies package name and version and prints the resulting SHA-256. 
 
 Settings are reached from the account menu. Personal configuration, Skills and MCP connections are tabs within Settings; the session composer retains its tool selection control. Legacy `#/skills` and `#/mcp` links resolve to their settings sections.
 
-Preserve the established terracotta palette from `style.css`. The composer follows PromptInput's ToolbarStart/ToolbarEnd layout: one 32px row with model and task settings on the left and compact usage on the right. Keyboard hints are tooltips and screen-reader descriptions, never a second visible footer. Exact cost and token details remain in the usage popover.
+Preserve the established terracotta palette from `style.css`. The composer uses a full-width writing area above PromptInput's Toolbar/ToolbarStart/ToolbarEnd inside one 22px-radius shell. A 32px controls row contains the model, task settings and compact usage, with a separate 36px circular send button at the trailing edge. Keyboard hints are tooltips and screen-reader descriptions, never a second visible footer. Exact cost and token details remain in the usage popover.
 
 Repository creation uses a single picker with multi-select, independent branches and mount directories. A submitted selection is frozen during creation. Each attachment uses the existing async workspace operation and idempotency mechanism. If an attachment fails, the dialog retains the created workspace, reads its current repository list and retries only unfinished attachments. Existing root-layout workspaces remain supported.
 
@@ -22,7 +22,7 @@ Validation includes the existing Go/browser suite and `TestRepositoryMultiSelect
 
 ## React conversation islands
 
-Assistant answers and streaming drafts now use real `ChatMessage.Assistant`, `Markdown` and `CodeBlock` components from `@heroui-pro/react` 1.0.0-beta.11, rendered by React 19.3.1. The TypeScript/TSX source is under `ui/chat`. Existing task transport, SSE replay, approvals, steering, file delivery and the composer remain application-owned JavaScript. This is a gradual React migration, not a full rewrite.
+Assistant answers and streaming drafts now use real `ChatMessage.Assistant`, `Markdown` and `CodeBlock` components from `@heroui-pro/react` 1.0.0-beta.11, rendered by React 19.3.1. The TypeScript/TSX source is under `ui/chat`. Existing task transport, SSE replay, approval/status control creation, steering and file delivery remain application-owned JavaScript. The activity stream and editor are React-owned as described below. This is a gradual React migration, not a full rewrite.
 
 `mountAnswer(container, props)` returns stable `update(props)` and `unmount()` methods. An answer retains its DOM host while its stream changes; disconnected hosts are unmounted after DOM mutations. Markdown disallows executable HTML and dangerous link protocols, and external links use `noopener noreferrer`. Code copying uses a native action because the library's animated copy button injects inline styles that the application's existing CSP rejects. The real Pro code block and Shiki rendering remain intact. No CSP exception was added.
 
@@ -39,37 +39,10 @@ The build verifies the package versions, bundles all runtime dependencies into s
 
 ## Main conversation surface
 
-The main conversation uses real Pro `ChainOfThought` and `ChatTool` components for grouped tool actions, `ChatAttachment` for delivered files, and `PromptInput.Shell`/`Content` around the existing native composer controls. Completed tool groups start collapsed; the current running action remains visible. Plans and sub-agent status stay available inside the first group. Raw events have one advanced disclosure after the answer. Stable island handles preserve expansion state across SSE updates and unmount on navigation.
+See [Conversation design and migration](conversation-design.md) and the root `DESIGN.md` for the current architecture and visual rules. The task activity stream uses one React root with keyed public messages and compact tool groups. Plans and sub-agent summaries are React-rendered data, not native DOM slots. Groups keep expansion state across event updates, share one border, and progressively disclose large histories without an inner scroll viewport.
 
-The composer bridge deliberately uses the stacked shell: Pro's compact mode reserves named grid areas for its own textarea and toolbar, which would shrink a native control adapter into an automatic grid column. Existing send/steer/interrupt/approval callbacks, textarea identity, draft value and keyboard handling remain application-owned; only their presentation is adopted. Conversation and composer share an 800px outer content axis, with responsive padding and the existing 44px topbar/terracotta tokens preserved.
+The editor uses real `PromptInput.TextArea`, `PromptInput.Send` and `PromptInput.Action` components. Its subscription model bridges task phase, input callbacks and the established send/steer/interrupt actions. Approval, status and existing model/settings/usage controls remain in explicit native slots inside the React surface. The controller preserves the textarea and user draft while streaming. The main conversation and composer share an 800px outer content axis, with responsive padding and the existing 44px topbar/terracotta tokens.
 
-React Aria's fixed pressable touch rule is shipped in the same-origin stylesheet with its standard style ID already present on the link, avoiding runtime inline style injection without loosening CSP. The bundled Pro styles require the `tailwind-variants/config` entry under the installed v4 package. Browser checks cover actual component loading under strict CSP, inner textarea width and send alignment (not just outer shell width), progress/plan/raw-event reachability, file download binding, draft retention, three viewport sizes, both themes, streaming and the existing task approval/steering flows.
+React Aria's fixed pressable touch rule is shipped in the same-origin stylesheet with its standard style ID already present on the link, avoiding runtime inline style injection without loosening CSP. The bundled Pro styles require the `tailwind-variants/config` entry under the installed v4 package. The real Chrome suite checks CSP, component ownership, geometry, live updates, IME, keyboard commands, approval flows and file downloads.
 
-The conversation entry point uses one shared native composer: an empty session
-places it beside the opening title and compact suggestions, then the same input
-node moves to the bottom dock when a task is submitted. Enter/steer/approval,
-selection, and saved session settings keep their original handlers.
-
-Public progress paragraphs interleave with their following tool group, rather
-than putting the whole task behind one disclosure. `conversation-flow.js`
-projects `tool_status.progress_message` into a `ChatMessage`/`Markdown` paragraph
-and coalesces tool statuses by round, node, step and call index. Legacy events
-without a call index match the pending calls by tool and target in call order;
-multiple identical calls are preserved. Late tool results update
-their original group. The optional message is ordinary assistant text returned
-with tool calls; `thinking_delta` and rationale are never displayed as progress.
-Planner stage goals stay in the collapsed plan; they are execution instructions,
-not assistant messages. Final answers remain separate. Existing histories without
-public progress fields still show their actual tool calls. The same projection
-is rebuilt from SSE and snapshots, so reload cannot duplicate progress notes.
-Truncated snapshots paint immediately, then backfill from the existing paged
-session-event API. Backfill merges by event ID into the active run, preserving
-its SSE connection, newer events and streaming draft. It stops at the captured
-snapshot cursor instead of chasing a task that is still producing events.
-
-Internal
-accepted/round/triage/node/reviewer events remain in one collapsed **Run details**
-entry after each answer, with one raw-event disclosure. A simple answer without
-tool calls does not display an artificial execution timeline. Diff/commit
-suggestions require a successful editing event in the current task; a workspace
-diff left by an earlier task is insufficient evidence.
+Public progress comes only from persisted `tool_status.progress_message`. Tool statuses coalesce by round, node, step and call index; legacy calls without an index match pending calls by tool and target in order. Late results update their original group. Reasoning deltas and planner goals never become public messages. Snapshot backfill merges by event ID without discarding newer live events or drafts. Internal pipeline details remain in one collapsed **Run details** disclosure after the answer.

@@ -93,6 +93,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		return
 	}
 	var req struct {
+		SourceIDs      []string           `json:"source_ids"`
 		Message        string             `json:"message"`
 		Sandbox        string             `json:"sandbox"`
 		Model          string             `json:"model"`
@@ -137,6 +138,11 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		writeMsg(w, r, http.StatusBadRequest, "模型倾向只能是 economy、balanced 或 best")
 		return
 	}
+	sources, err := s.resolveSources(r.Context(), id, sess.WorkspaceID, req.SourceIDs)
+	if err != nil {
+		writeErr(w, r, 400, err)
+		return
+	}
 	submit := map[string]any{
 		"workspaceId":     sess.WorkspaceID,
 		"clientRequestId": randomHex(16),
@@ -146,6 +152,13 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		// 沙箱等级是这个 Task 的 effect 上限（Runtime 的 SubmitTaskRequest.effect_ceiling，D-08）：只能比租户策略低，
 		// 高了 Task API 直接拒绝，不悄悄截断。不再改写租户策略文件。
 		"effectCeiling": effectEnum(sandbox),
+	}
+	if len(sources) > 0 {
+		refs := make([]string, 0, len(sources))
+		for _, source := range sources {
+			refs = append(refs, source.ObjectURI)
+		}
+		submit["attachments"] = refs
 	}
 	if selection != nil {
 		submit["inputs"].(map[string]any)["personal_config"] = selection
@@ -183,7 +196,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		}
 		x.UpdatedAt = now
 	})
-	record := TaskRecord{ID: resp.TaskID, Message: msg, CreatedAt: now, CreatedBy: id.UserID, Status: "TASK_STATUS_QUEUED", Sandbox: sandbox, Model: model}
+	record := TaskRecord{SourceIDs: append([]string(nil), req.SourceIDs...), ID: resp.TaskID, Message: msg, CreatedAt: now, CreatedBy: id.UserID, Status: "TASK_STATUS_QUEUED", Sandbox: sandbox, Model: model}
 	if err := s.store.UpdateTasks(id.TenantID, sess.WorkspaceID, func(ts []TaskRecord) []TaskRecord {
 		if slices.ContainsFunc(ts, func(t TaskRecord) bool { return t.ID == record.ID }) {
 			return ts

@@ -101,7 +101,10 @@ try{
  check($('.task-settings-pop').getBoundingClientRect().right<=innerWidth,'popover exceeds viewport');
  $('[data-task-settings-apply]').click();await wait(()=>!$('.task-settings-pop'),'applied settings');
  if(C.unlimited){$('.task-settings-trigger').click();await wait(()=>$('.network-duration-field select'),'reopened unlimited settings');check($('.network-duration-field select').value==='0','unlimited choice lost before submit');$('[data-task-settings-apply]').click();await wait(()=>!$('.task-settings-pop'),'reapplied settings');}
- $('#composer').value='Check documentation';$('#composer').dispatchEvent(new Event('input',{bubbles:true}));$('.send').click();
+ $('#composer').value='Check documentation';$('#composer').dispatchEvent(new Event('input',{bubbles:true}));
+ // React commits the input event before a user's next browser event. Synthetic
+ // dispatchEvent + click in one JS stack must wait for that same enabled state.
+ await wait(()=>$('.send')&&!$('.send').disabled,'send enabled after input');$('.send').click();
  await wait(()=>$('#turn-network-task'),'task submission');
 }catch(e){out.errors.push(String(e.stack||e));}await fetch('/__result',{method:'POST',body:JSON.stringify(out)});
 `

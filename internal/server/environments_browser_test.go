@@ -202,11 +202,14 @@ try {
     (await wait(()=>$('.task-settings-trigger'),'task settings')).click();
     const select = await wait(() => $('[data-environment-select]:not(:disabled)'), 'draft selector');
     select.value = i===2 ? '' : id;
+    select.dispatchEvent(new Event('change', {bubbles:true}));
     $('[data-task-settings-apply]').click();
     const input = $('.composer textarea');
     check(input, 'composer input');
     input.value = ['configured one','configured two','deployment default'][i];
     input.dispatchEvent(new Event('input', {bubbles:true}));
+    // Let React commit the input before the synthetic click, as between real browser events.
+    await wait(() => $('.send') && !$('.send').disabled, 'send enabled after input');
     $('.send').click();
     await wait(() => /\/s\//.test(location.hash), 'session binding');
     $('.task-settings-trigger').click();await wait(()=>$('[data-environment-select]')?.disabled,'bound environment');$('[data-task-settings-apply]').click();

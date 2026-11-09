@@ -58,3 +58,45 @@ test('a batch preserves repeated tools and matches their results without swallow
  ]);
  assert.deepEqual(indexed[0].calls.map(c=>c.event.value.state),['succeeded','failed']);
 });
+
+test('runtime batches omit the first call index and keep identities after out-of-order completion',()=>{
+ const starts=[
+  tool(1,1,'running',{target:'a.go',progress_message:'Inspect the entry points.'}),
+  tool(2,1,'running',{call_index:1,target:'a.go'}),
+  tool(3,2,'running',{target:'b.go',progress_message:'Verify the shared configuration.'}),
+ ];
+ const before=conversationFlow(starts);
+ const events=[...starts,
+  tool(4,1,'failed',{call_index:1,target:'a.go'}),
+  tool(5,2,'succeeded',{target:'b.go'}),
+  tool(6,1,'succeeded',{target:'a.go'}),
+ ];
+ const after=conversationFlow(events);
+ assert.deepEqual(after.map(p=>[p.kind,p.id]),before.map(p=>[p.kind,p.id]));
+ assert.deepEqual(after[1].calls.map(c=>c.id),before[1].calls.map(c=>c.id));
+ assert.deepEqual(after[1].calls.map(c=>c.event.value.state),['succeeded','failed']);
+ assert.equal(after[3].calls[0].event.value.state,'succeeded');
+ // A snapshot plus overlapping SSE delivery must reconstruct the same groups.
+ assert.deepEqual(conversationFlow([...events.slice(3),...events,...starts]),after);
+});
+
+test('identical public text in separate rounds remains separate chronological updates',()=>{
+ const message='Run the regression tests.';
+ const parts=conversationFlow([
+  tool(1,1,'running',{progress_message:message}),tool(2,1,'succeeded'),
+  event(3,'round_started',{round_seq:2}),
+  tool(4,1,'running',{round_seq:2,progress_message:message}),tool(5,1,'succeeded',{round_seq:2}),
+  event(6,'task_finished',{deliverable:{answer:'Final answer'}}),
+ ]);
+ assert.deepEqual(parts.map(p=>p.kind),['progress','tools','progress','tools']);
+ assert.deepEqual(parts.filter(p=>p.kind==='progress').map(p=>p.message),[message,message]);
+ assert.notEqual(parts[0].id,parts[2].id);
+ assert.notEqual(parts[1].calls[0].id,parts[3].calls[0].id);
+});
+
+test('public note limits match the runtime Unicode code-point boundary',()=>{
+ const message='a'.repeat(1999)+'😀';
+ const parts=conversationFlow([tool(1,1,'running',{progress_message:message+'discarded'})]);
+ assert.equal(parts[0].message,message);
+ assert.equal([...parts[0].message].length,2000);
+});
