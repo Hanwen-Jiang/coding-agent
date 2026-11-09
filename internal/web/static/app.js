@@ -1699,7 +1699,7 @@ function renderApp() {
   ui.statusBody = h("div", { class: "status-body" });
   ui.root = h("div", { class: appClass() },
     ui.side,
-    h("main", { class: "main" }, ui.topbar, ui.scroll, ui.dock),
+    ui.main = h("main", { class: "main" }, ui.topbar, ui.scroll, ui.dock),
     h("aside", { class: "status" },
       h("div", { class: "status-head" }, h("span", { class: "h grow" }, t("status.panel")),
         h("button", { class: "btn ghost sm icon-only", title: t("status.hide"), onclick: toggleStatus }, icon("x", "sm"))),
@@ -2481,12 +2481,17 @@ function renderThread(stick = false) {
   const thread = ui.scroll;
   if (!thread) return;
   const nearBottom = stick || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
+  const landing = !!state.project && !state.tasks.length && !pendingTurnShown();
+  ui.main?.classList.toggle("main-landing", landing);
+  // Move the existing composer, never recreate it: drafts, focus and approvals
+  // belong to this native node even when its visual location changes.
+  if (ui.dock && ui.dock.parentElement !== ui.main) ui.main.append(ui.dock);
   let content;
   if (!state.project) content = welcome();
-  else if (!state.tasks.length && !pendingTurnShown()) content = projectEmpty();
+  else if (landing) content = projectEmpty();
   else content = [state.tasks.map(turn), pendingTurn()];
-  // 在底部附近就跟到底；往上翻着看的时候保住位置，不被新事件拽走。
   keepScroll(thread, () => thread.replaceChildren(h("div", { class: "thread" }, content)));
+  if (landing && ui.dock) thread.querySelector(".start-composer-slot").append(ui.dock);
   if (nearBottom) thread.scrollTop = thread.scrollHeight;
 }
 
@@ -2543,10 +2548,11 @@ function projectEmpty() {
     ["check", t("idea.fix"), t("idea.fixPrompt")],
     ["terminal", t("idea.tests"), t("idea.testsPrompt")],
   ].filter(Boolean);
-  return h("div", { class: "hero-empty" },
-    h("div", { class: "mark big" }, logo("lg")),
+  return h("section", { class: "conversation-start", "aria-label": t("session.new") },
     h("h2", {}, t("empty.title", { name: state.project.name })),
-    h("div", { class: "suggestions" }, ideas.map(([ic, title, prompt]) => suggestion(ic, title, prompt.length > 60 ? prompt.slice(0, 58) + "…" : prompt, () => setComposer(prompt)))),
+    h("div", { class: "start-composer-slot" }),
+    h("div", { class: "start-suggestions", "aria-label": t("start.suggestions") }, ideas.map(([ic, title, prompt]) =>
+      h("button", { class: "start-suggestion", title: prompt, onclick: () => setComposer(prompt) }, icon(ic,"sm"), title))),
   );
 }
 
@@ -2577,7 +2583,7 @@ function turn(task) {
     ),
     h("div", { class: "msg-agent" },
       h("div", { class: "agent-mark" + (running ? " live" : ""), title: running ? t("turn.working") : null }, logo()),
-      h("div", { class: "agent-body" }, worklog(task, events, running, finished), asks(events), guidanceList(task), tail),
+      h("div", { class: "agent-body" }, worklog(task, events, running, finished), asks(events), guidanceList(task), tail, runDiagnostics(task, events)),
     ),
   );
 }
@@ -2767,16 +2773,35 @@ function asks(events) {
 }
 
 function worklog(task, events, running, finished) {
-  const steps=workSteps(events);
+  const steps=workSteps(events).filter(ev=>ev.type==="tool_status");
   const before=h("div",{class:"execution-plan"},planArea(events),subAgentArea(events));
   if(!steps.length&&!before.childElementCount)return null;
   const first=events[0],elapsed=first?(finished?new Date(finished.time):Date.now())-new Date(first.time):0;
-  const title=running?workingText(steps.length,elapsed):t("work.done",{dur:fmtDuration(elapsed),n:steps.length});
-  const current=running?phaseNow(task,events).text:"";
-  const props={title,current,running,expanded:state.open.has(task.id),before,rawLabel:t("step.raw"),
+  const title=running?t("work.actionsRunning",{n:steps.length}):t("work.actionsDone",{n:steps.length,dur:fmtDuration(elapsed)});
+  const latest=[...events].reverse().find(ev=>ev.type==="tool_status");
+  const current=running&&latest?.value?.state==="running"?toolText(latest.value,false):"";
+  const props={title,current,running,expanded:state.open.has(task.id),before,
     onExpandedChange:(open)=>{if(open){state.open.add(task.id);state.closed.delete(task.id);}else{state.open.delete(task.id);state.closed.add(task.id);}renderTurn(task.id);},
-    steps:steps.map(ev=>{const info=stepInfo(ev);return {id:String(ev.event_id),title:info.title,detail:info.detail || String(ev.value?.target || ""),tool:ev.type==="tool_status"?String(ev.value?.tool||""):"",state:ev.value?.state==="failed"?"output-error":"output-available",time:fmtClock(ev.time),raw:JSON.stringify(ev.value || {},null,2)};})};
+    steps:steps.map(ev=>{const info=stepInfo(ev);return {id:String(ev.event_id),title:info.title,detail:info.detail || String(ev.value?.target || ""),tool:String(ev.value?.tool||""),state:ev.value?.state==="failed"?"output-error":"output-available",time:fmtClock(ev.time)};})};
   return proPresentation("progress-"+task.id,"progress-island","mountProgress",props,h("div",{class:"execution-current"},title,current?" · "+current:""));
+}
+
+// Diagnostic data stays available in one deliberate advanced entry, not in
+// the reading flow or inside every visible tool action.
+function runDiagnostics(task, events) {
+  const rows=events.filter(ev=>!QUIET.has(ev.type)&&!["token_delta","thinking_delta","context_usage"].includes(ev.type));
+  if(!rows.length)return null;
+  const key="diagnostics-"+task.id;
+  const details=h("details",{class:"run-diagnostics",open:state.rawOpen.has(key)},
+    h("summary",{},t("run.details")),
+    h("div",{class:"run-diagnostics-body"},
+      !TERMINAL.has(statusOf(task))?h("div",{class:"diagnostic-current"},phaseNow(task,events).text):null,
+      h("div",{class:"diagnostic-events"},workSteps(events).map(ev=>{const info=stepInfo(ev);return h("div",{class:"diagnostic-event"},
+        h("div",{class:"diagnostic-event-title"},h("strong",{},info.title),h("time",{},fmtClock(ev.time))),
+        info.detail?h("p",{},info.detail):null);})),
+      h("details",{class:"execution-raw"},h("summary",{},t("run.rawEvents")),h("pre",{},JSON.stringify(rows.map(ev=>({event_id:ev.event_id,type:ev.type,time:ev.time,value:ev.value})),null,2)))));
+  details.addEventListener("toggle",()=>{if(details.open)state.rawOpen.add(key);else state.rawOpen.delete(key);});
+  return details;
 }
 
 // phaseNow 是进行中的任务此刻在做什么、从什么时候开始：按最后一个事件推（规划、执行、审查、下一轮）。
@@ -3636,7 +3661,7 @@ function updateComposer(force = false) {
   // 工具条与下一步只在内容变了时重画，免得打断打开着的菜单。
   const m = meter();
   const key = [ph.mode, ph.ask && ph.ask.qid, state.settings.sandbox, state.settings.model, JSON.stringify(state.networkRequest), meterText(m),
-    state.changes ? state.changes.files.length : -1, ph.mode === "failed" || ph.mode === "done" ? ph.last.id : "",
+    state.changes ? state.changes.files.length : -1, ph.mode === "failed" || ph.mode === "done" ? ph.last.id : "", ph.last ? taskEditedFiles(ph.last.id) : false,
     state.env && state.env.sandbox ? state.env.sandbox.mode : "", environmentKey()].join("|");
   if (!force && key !== ui.barKey && pop && ui.tools.contains(pop.anchor)) {
     ui.barDirty = true; // 菜单开着：等它关上再重画
@@ -3706,9 +3731,16 @@ function optionLabel(label) {
   return OPTION_LABELS[label] ? t(OPTION_LABELS[label]) : label;
 }
 
+function taskEditedFiles(taskId) {
+  return (state.runs.get(taskId)?.events || []).some(ev=>ev.type==="tool_status"&&ev.value?.state==="succeeded"&&["repo_edit","apply_patch","write_file"].includes(ev.value.tool));
+}
+
 function nextSteps(ph) {
   const chip = (ic, label, onclick, primary) => h("button", { class: "next-step" + (primary ? " primary" : ""), onclick }, icon(ic, "xs"), label);
   if (ph.mode === "done") {
+    // A workspace diff may predate this answer. Never advertise it as this
+    // task's work unless the task has an actual successful editing event.
+    if(!taskEditedFiles(ph.last.id))return [];
     const n = state.changes ? state.changes.files.length : 0;
     const p = state.project;
     const s = state.session || {};
@@ -3720,8 +3752,6 @@ function nextSteps(ph) {
         s.pr_number ? t("publish.pushTo", { rn, n: s.pr_number }) : t("publish.pushDraft", { rn })));
     }
     else if (n) out.push(chip("commit", t("next.commit"), () => openDrawer("changes", { focus: "commit" })));
-    out.push(chip("edit", t("next.refine"), () => setComposer(t("next.refinePrompt"))));
-    out.push(chip("fileText", t("next.explain"), () => setComposer(t("next.explainPrompt"))));
     return out;
   }
   if (ph.mode === "failed") {

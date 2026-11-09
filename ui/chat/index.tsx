@@ -74,8 +74,8 @@ function NativeSlot({node,className}: {node:HTMLElement|null;className?:string})
  useLayoutEffect(()=>{if(ref.current){if(node)ref.current.replaceChildren(node);else ref.current.replaceChildren();}},[node]);
  return <div ref={ref} className={className}/>;
 }
-type ProgressProps={title:string;current:string;running:boolean;expanded:boolean;onExpandedChange:(value:boolean)=>void;before:HTMLElement|null;rawLabel:string;steps:Array<{id:string;title:string;detail:string;tool:string;state:string;time:string;raw:string}>};
-function Progress({title,current,running,expanded,onExpandedChange,before,steps,rawLabel}:ProgressProps) {
+type ProgressProps={title:string;current:string;running:boolean;expanded:boolean;onExpandedChange:(value:boolean)=>void;before:HTMLElement|null;steps:Array<{id:string;title:string;detail:string;tool:string;state:string;time:string}>};
+function Progress({title,current,running,expanded,onExpandedChange,before,steps}:ProgressProps) {
  return <div className={'worklog pro-worklog'+(expanded?' open':'')} data-pro-component="ChainOfThought">
   <ChainOfThought isExpanded={expanded} onExpandedChange={onExpandedChange} isStreaming={running}>
    <ChainOfThought.Trigger className="worklog-head"><span className="execution-summary">{title}</span></ChainOfThought.Trigger>
@@ -84,9 +84,9 @@ function Progress({title,current,running,expanded,onExpandedChange,before,steps,
     <ChainOfThought.Steps className="worklog-steps">
      {steps.map(step=>step.tool?<ChatTool key={step.id} className="execution-tool" data-execution-step="" state={step.state as any} toolName={step.tool} defaultExpanded={false}>
        <ChatTool.Trigger><ChatTool.StatusIcon/><span className="execution-label">{step.title}</span><time>{step.time}</time></ChatTool.Trigger>
-       <ChatTool.Content><p className="execution-detail">{step.detail || step.title}</p><details className="execution-raw"><summary>{rawLabel}</summary><pre>{step.raw}</pre></details></ChatTool.Content>
+       <ChatTool.Content><p className="execution-detail">{step.detail || step.title}</p></ChatTool.Content>
       </ChatTool>:<ChainOfThought.Step key={step.id} data-execution-step="" label={<span className="execution-step-title"><span className="execution-label">{step.title}</span><time>{step.time}</time></span>}>
-        {step.detail?<p className="execution-detail">{step.detail}</p>:null}<details className="execution-raw"><summary>{rawLabel}</summary><pre>{step.raw}</pre></details>
+        {step.detail?<p className="execution-detail">{step.detail}</p>:null}
       </ChainOfThought.Step>)}
     </ChainOfThought.Steps>
    </ChainOfThought.Content>

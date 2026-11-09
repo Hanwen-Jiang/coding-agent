@@ -325,7 +325,7 @@ try {
     sb.style.flex = "";
     sb.style.height = "";
   }
-  const execution = await wait(() => $('.worklog-head[aria-expanded="false"]'));
+  const execution = await wait(() => $('.run-diagnostics:not([open]) > summary'));
   if(execution)execution.click();
   const rawEntry = await wait(() => $(".execution-raw summary"));
   out.steps.rawEntryCollapsed = rawEntry ? !rawEntry.parentElement.open : null;

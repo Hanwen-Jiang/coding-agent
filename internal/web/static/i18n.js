@@ -6,6 +6,11 @@
 const plural = (n, one, many) => (Number(n) === 1 ? one : many);
 
 const ZH = {
+  "start.suggestions": "试试这些任务",
+  "run.details": "运行详情",
+  "run.rawEvents": "原始事件数据",
+  "work.actionsRunning": "正在处理 · {n} 次工具调用",
+  "work.actionsDone": "{n} 次工具调用 · {dur}",
   "taskSettings.scope": "对本会话后续任务生效",
   "taskSettings.boundScope": "本会话设置覆盖环境默认值，对后续任务生效",
   "topbar.actions": "更多操作",
@@ -935,6 +940,11 @@ const ZH = {
 };
 
 const EN = {
+  "start.suggestions": "Suggested tasks",
+  "run.details": "Run details",
+  "run.rawEvents": "Raw event data",
+  "work.actionsRunning": "Working · {n} tool calls",
+  "work.actionsDone": "{n} tool calls · {dur}",
   "taskSettings.scope": "Applies to subsequent tasks in this session",
   "taskSettings.boundScope": "Session settings override environment defaults for subsequent tasks",
   "topbar.actions": "More actions",

@@ -8,7 +8,13 @@ import (
 func TestTaskSettingsPopoverTracksDynamicContent(t *testing.T) {
 	extra := map[string]any{
 		"/api/projects": []params{{"id": "p", "name": "Workspace", "source": "empty"}}, "/api/environments": []any{}, "/api/personal-config": params{"config": params{}},
-		"/api/network-policy": params{"allowed": true, "modes": []string{"deny", "allowlist", "open"}, "hosts": []string{"api.example.com", "docs.example.com"}, "max_grant_minutes": 60, "supports_unlimited": true},
+		"/api/sessions":                       []params{{"id": "s", "project_id": "p", "title": "Conversation"}},
+		"/api/projects/p/sessions/s/settings": params{"sandbox": "write_reversible", "network_request": nil},
+		"/api/projects/p/sessions/s/tasks":    []params{{"id": "done", "status": "TASK_STATUS_DONE", "message": "Question", "created_at": "2026-11-09T00:00:00Z"}},
+		"/api/projects/p/sessions/s/changes":  params{"files": []any{}},
+		"/api/projects/p/sessions/s/env":      params{},
+		"/api/projects/p/sessions/s/snapshot": params{"tasks": []any{}},
+		"/api/network-policy":                 params{"allowed": true, "modes": []string{"deny", "allowlist", "open"}, "hosts": []string{"api.example.com", "docs.example.com"}, "max_grant_minutes": 60, "supports_unlimited": true},
 	}
 	for _, viewport := range []string{"900,600", "390,644"} {
 		t.Run(viewport, func(t *testing.T) {
@@ -34,7 +40,7 @@ const footerVisible=()=>{
  return $$('.task-settings-actions button').every(button=>{const box=button.getBoundingClientRect(),hit=document.elementFromPoint(box.x+box.width/2,box.y+box.height/2);return box.top>=r.top&&box.bottom<=r.bottom&&!!hit&&(hit===button||button.contains(hit));});
 };
 try{
- (await wait(()=>$('dialog.account'),'account')).close();location.hash='#/w/p/new';await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+ (await wait(()=>$('dialog.account'),'account')).close();location.hash='#/w/p/s/s';await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
  for(const theme of ['light','dark']){
   document.documentElement.dataset.theme=theme;
   const anchor=await wait(()=>$('.task-settings-trigger'),'anchor');check(anchor.getBoundingClientRect().top>innerHeight*.65,'test anchor must be close to viewport bottom');anchor.click();

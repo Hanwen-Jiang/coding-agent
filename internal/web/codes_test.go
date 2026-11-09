@@ -525,20 +525,20 @@ try {
   const plan = await (await fetch("/__plan")).json();
   const codes = await import("/assets/codes.js");
   out.results = plan.cases.map((c) => codes[c.fn](c.event));
-  const steps = () => [...document.querySelectorAll(".worklog-steps > [data-execution-step]")];
+  const steps = () => [...document.querySelectorAll(".run-diagnostics .diagnostic-event")];
   const rounds = () => [...document.querySelectorAll(".round-row .g")].map(text);
   // 第一轮换掉了 Task State 的文字，才算 Rounds 与事件都到了。
   const roundsReady = () => rounds().length > 0 && rounds()[0] !== "回复用户这条消息";
   const aborted = () => document.querySelector("#turn-t0 .answer");
   for (let i = 0; i < 600 && (steps().length < plan.steps || !document.querySelector(".c-ask .q") || !roundsReady() || !aborted()); i++) {
-    for (const trigger of document.querySelectorAll('.worklog-head[aria-expanded="false"]')) trigger.click();
+    for (const detail of document.querySelectorAll('.run-diagnostics:not([open])')) detail.querySelector('summary').click();
     await new Promise((r) => setTimeout(r, 50));
   }
   out.rounds = rounds();
   out.doneWhen = text(document.querySelector(".done-when"));
   out.abort = text(aborted());
-  out.steps = steps().map((el) => ({ title: text(el.querySelector(".execution-label")), detail: text(el.querySelector(".execution-detail")) }));
-  out.now = text(document.querySelector(".execution-current [data-current-label]"));
+  out.steps = steps().map((el) => ({ title: text(el.querySelector(".diagnostic-event-title strong")), detail: text(el.querySelector("p")) }));
+  out.now = text(document.querySelector(".diagnostic-current"));
   out.ask = text(document.querySelector(".c-ask .q"));
   out.inline = [...document.querySelectorAll(".ask-inline")].map(text);
 } catch (ex) {

@@ -44,3 +44,15 @@ The main conversation now uses real Pro `ChainOfThought` and `ChatTool` componen
 The composer bridge deliberately uses the stacked shell: Pro's compact mode reserves named grid areas for its own textarea and toolbar, which would shrink a native control adapter into an automatic grid column. Existing send/steer/interrupt/approval callbacks, textarea identity, draft value and keyboard handling remain application-owned; only their presentation is adopted. Conversation and composer share an 800px outer content axis, with responsive padding and the existing 44px topbar/terracotta tokens preserved.
 
 React Aria's fixed pressable touch rule is shipped in the same-origin stylesheet with its standard style ID already present on the link, avoiding runtime inline style injection without loosening CSP. The bundled Pro styles require the `tailwind-variants/config` entry under the installed v4 package. Browser checks cover actual component loading under strict CSP, inner textarea width and send alignment (not just outer shell width), progress/plan/raw-event reachability, file download binding, draft retention, three viewport sizes, both themes, streaming and the existing task approval/steering flows.
+
+The conversation entry point uses one shared native composer: an empty session
+places it beside the opening title and compact suggestions, then the same input
+node moves to the bottom dock when a task is submitted. Enter/steer/approval,
+selection, and saved session settings keep their original handlers.
+
+Normal progress lists actual tool calls and the user-facing plan. Internal
+accepted/round/triage/node/reviewer events remain in one collapsed **Run details**
+entry after each answer, with one raw-event disclosure. A simple answer without
+tool calls does not display an artificial execution timeline. Diff/commit
+suggestions require a successful editing event in the current task; a workspace
+diff left by an earlier task is insufficient evidence.

@@ -529,3 +529,41 @@ dialog > .discovery-body { padding: 20px 28px; overflow-y: auto; max-height: 64d
 .main .composer-island .pro-prompt .composer { width: 100%; min-width: 0; max-width: none; flex: 1 1 auto; }
 .main .composer-island .pro-prompt .prompt-input__shell,
 .main .composer-island .pro-prompt .prompt-input__content { display: block; }
+
+/* A new conversation starts around its input, not above a detached footer. */
+.main-landing .scroll { display: flex; flex-direction: column; }
+.main-landing .thread { flex: 1; display: flex; align-items: center; justify-content: center; padding-block: 48px 100px; }
+.conversation-start { width: 100%; min-width: 0; max-width: 752px; }
+.conversation-start h2 { margin: 0 0 26px; text-align: center; font-size: 25px; font-weight: 550; line-height: 1.4; overflow-wrap: anywhere; }
+.main-landing .dock { padding: 0; background: none; width: 100%; }
+.main-landing .dock-inner { max-width: none; }
+.main-landing .c-row { min-height: 94px; align-items: flex-end; }
+.main-landing .c-input { min-height: 82px; }
+.main-landing .next-steps { display: none; }
+.start-suggestions { margin-top: 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.start-suggestion { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--muted); font: 12px/1.4 var(--font-sans); }
+.start-suggestion:hover { background: var(--surface-2); color: var(--text); }
+.start-suggestion svg { width: 15px; height: 15px; flex: none; }
+.main .next-steps:empty { display: none; }
+.main .run-diagnostics { align-self: flex-start; color: var(--faint); font-size: 11px; max-width: 100%; }
+.run-diagnostics > summary { cursor: pointer; padding: 3px 0; width: fit-content; list-style: none; }
+.run-diagnostics > summary::after { content: "⌄"; margin-left: 7px; }
+.run-diagnostics[open] > summary::after { content: "⌃"; }
+.run-diagnostics-body { margin: 10px 0 0; padding: 14px; background: var(--surface-2); border-radius: 10px; min-width: 0; max-width: 100%; }
+.diagnostic-events { max-height: 320px; overflow-y: auto; }
+.diagnostic-event { padding: 8px 0; }
+.diagnostic-event + .diagnostic-event { border-top: 1px solid var(--line); }
+.diagnostic-event-title { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; }
+.diagnostic-event-title strong { font-size: 11px; color: var(--muted); font-weight: 500; }
+.diagnostic-event-title time { font: 10px var(--font-mono); white-space: nowrap; }
+.diagnostic-event p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 5px 0 0; color: var(--muted); line-height: 1.6; }
+.main .run-diagnostics .execution-raw { margin-top: 10px; }
+@media(max-width:700px) {
+ .main-landing .thread { padding: 30px 16px 70px; }
+ .conversation-start h2 { font-size: 22px; margin-bottom: 22px; }
+ .start-suggestions { justify-content: flex-start; gap: 7px; margin-top: 16px; }
+ .start-suggestion { font-size: 11px; padding: 7px 9px; }
+}
+@media(max-height:550px) {
+ .main-landing .thread { align-items: flex-start; padding-block: 24px; }
+}
