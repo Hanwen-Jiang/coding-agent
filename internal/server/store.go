@@ -47,6 +47,7 @@ type Project struct {
 
 // Session 是工作区里的一个会话：一段对话（Runtime 的一个 Session）加一份独立的工作副本。
 type Session struct {
+	TaskSettings   *sessionTaskSettings        `json:"task_settings,omitempty"`
 	PersonalConfig *personalSelection          `json:"personal_config,omitempty"`
 	RepoStates     map[string]RepoSessionState `json:"repo_states,omitempty"`
 	repo           string                      // transient selected repository; never persisted
@@ -251,6 +252,7 @@ func (s *Store) UpdateSessions(tenant string, fn func([]Session) ([]Session, err
 	}
 	for i := range sessions {
 		sessions[i].PersonalConfig = nil
+		sessions[i].TaskSettings = nil
 	}
 	return writeFileAtomic(s.sessionsFile(tenant), sessions)
 }

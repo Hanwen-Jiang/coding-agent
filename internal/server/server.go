@@ -285,6 +285,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE "+sess, s.authed(s.workspaceHTTP("delete_session")))
 	mux.HandleFunc("POST "+sess+"/rename", s.authed(s.handleRenameSession))
 	mux.HandleFunc("POST "+sess+"/duplicate", s.authed(s.workspaceHTTP("duplicate_session")))
+	mux.HandleFunc("GET "+sess+"/settings", s.authed(s.handleSessionTaskSettings))
+	mux.HandleFunc("PUT "+sess+"/settings", s.authed(s.handleSessionTaskSettings))
 	mux.HandleFunc("GET "+sess+"/env", s.authed(s.handleEnv))
 	mux.HandleFunc("GET "+sess+"/tree", s.authed(s.handleTree))
 	mux.HandleFunc("GET "+sess+"/file", s.authed(s.handleFile))

@@ -91,7 +91,7 @@ const state = {
   sending: false,
   drawer: null,
   settings: {
-    sandbox: setting("sandbox", ["read", "write_reversible"], "write_reversible"),
+    sandbox: "write_reversible",
     model: setting("model", ["economy", "balanced", "best"], "balanced"),
   },
   statusOpen: ls.get("cw_status") ? ls.get("cw_status") === "1" : window.innerWidth > 1180,
@@ -690,6 +690,32 @@ async function openAccount() {
 function personalChoiceKey() {
   return `${state.me?.tenant}/${state.me?.user}/${state.project?.id}/${state.session?.id || "new"}`;
 }
+
+function draftTaskSettingsKey(environmentID=draftEnvironment()) { return `cw_task_settings:${personalChoiceKey()}/${encodeURIComponent(environmentID || "default")}`; }
+function environmentTaskDefaults(environmentID) {
+  const network=networkOf(findEnvironment(environmentID) || {});
+  return {sandbox:"write_reversible",network_request:network.mode==="open" ? {scope:"public",hosts:[],minutes:15,reason:t("network.reason")} : network.mode==="allowlist" && network.hosts.length ? {scope:"hosts",hosts:[...network.hosts],minutes:15,reason:t("network.reason")} : null};
+}
+function draftSettingsForEnvironment(environmentID) {
+  try {const saved=JSON.parse(ls.get(draftTaskSettingsKey(environmentID)) || "null");if(saved)return saved;} catch {}
+  return environmentTaskDefaults(environmentID);
+}
+function selectedTaskSettings() {
+  return {sandbox:state.settings.sandbox,network_request:state.networkRequest || null};
+}
+function installTaskSettings(value) {
+  const saved=value || {};
+  state.settings.sandbox=["read","write_reversible"].includes(saved.sandbox)?saved.sandbox:"write_reversible";
+  state.networkRequest=saved.network_request?JSON.parse(JSON.stringify(saved.network_request)):null;
+  state.networkRequestTenant=state.me?.tenant;
+  state.taskSettingsContext=personalChoiceKey();
+}
+function installDraftSettings() {
+  state.draftEnvironment=ls.get(draftEnvironmentKey()) ?? state.personalConfig?.document?.defaults?.environmentId ?? "";
+  state.draftEnvironment=draftEnvironment();
+  installTaskSettings(draftSettingsForEnvironment(state.draftEnvironment));
+}
+let taskSettingsGeneration=0;
 
 function personalSelection() {
   return state.personalChoices.get(personalChoiceKey()) || state.session?.personal_config || undefined;
@@ -1500,8 +1526,7 @@ async function enterApp() {
   state.environments = null;
   try { state.personalConfig = (await api("GET", "/api/personal-config")).config || null; } catch { /* Older deployments have no personal packages. */ }
   const personalEnv = state.personalConfig?.document?.defaults?.environmentId;
-  const rememberedEnvironment = ls.get(draftEnvironmentKey());
-  state.draftEnvironment = rememberedEnvironment ?? personalEnv ?? "";
+  state.draftEnvironment = personalEnv ?? "";
   [state.projects, state.samples, state.sessions] = await Promise.all([api("GET", "/api/projects"), api("GET", "/api/samples"), api("GET", "/api/sessions")]);
   loadActive();
   await loadEnvironments();
@@ -1552,6 +1577,8 @@ function setHash(hash) {
 }
 
 function resetSessionState() {
+  taskSettingsGeneration++;
+  closePop();
   closeStreams();
   closeDrawer();
   state.tasks = [];
@@ -1572,13 +1599,16 @@ async function openSession(pid, sid) {
   state.view = "session";
   state.project = findProject(pid);
   state.session = findSession(pid, sid);
+  installTaskSettings(state.session?.task_settings);
+  const settingsGeneration=taskSettingsGeneration;
   state.sideOpen = false;
   setHash(`#/w/${pid}/s/${sid}`);
   if (state.session) {
     const base = sbase();
     try {
-      const tasks = await api("GET", `${base}/tasks`);
+      const [tasks,settings] = await Promise.all([api("GET", `${base}/tasks`),api("GET", `${base}/settings`).catch(()=>null)]);
       if (sbase() !== base) return;
+      if(settings && settingsGeneration===taskSettingsGeneration){state.session.task_settings=settings;installTaskSettings(settings);}
       state.tasks = tasks.slice().reverse();
     } catch (ex) { report(ex); }
   }
@@ -1599,6 +1629,7 @@ function openDraft(pid) {
   state.view = "session";
   state.project = findProject(pid);
   state.session = null;
+  installDraftSettings();
   state.sideOpen = false;
   setHash(`#/w/${pid}/new`);
   renderApp();
@@ -2066,12 +2097,13 @@ function draftEnvironment() {
 }
 
 function draftEnvironmentKey() {
-  return `cw_environment:${state.me?.tenant || ""}/${state.me?.user || ""}`;
+  return `cw_environment:${state.me?.tenant || ""}/${state.me?.user || ""}/${state.project?.id || ""}`;
 }
 
 function setDraftEnvironment(id) {
   state.draftEnvironment = id;
   ls.set(draftEnvironmentKey(), id);
+  if(!state.session)installTaskSettings(draftSettingsForEnvironment(id));
   updateComposer(true);
 }
 
@@ -3728,6 +3760,7 @@ function taskSettingsTool() {
   return h("button", { class: "tool task-settings-trigger", title: summary, "aria-label": t("taskSettings.title"), onclick: async (event) => {
     const anchor = event.currentTarget;
     const context = personalChoiceKey();
+    const owner = `${state.me?.tenant}/${state.me?.user}`;
     let policy;
     try { policy = await api("GET", "/api/network-policy"); }
     catch (error) { policy = { allowed: false, modes: [], error: error.message }; }
@@ -3768,25 +3801,69 @@ function taskSettingsTool() {
         note.textContent = policy.error || (!policy.allowed ? t("network.disabled") : !modes.includes("open") ? t("network.publicLimited") : "");
         note.hidden = !note.textContent;
       };
-      const apply = () => {
+      let selectedEnvironment=environment.value;
+      const environmentDrafts=new Map();
+      const readFields=()=>({sandbox:sandbox.value,network_request:mode === "deny" ? null : {scope:mode === "open" ? "public" : "hosts",hosts:mode === "open" ? [] : [...new Set(hosts.value.split(/[,，\s]+/).map(value=>value.trim()).filter(Boolean))],minutes:Number(duration.value),...(duration.value === "0" ? {unlimited:true} : {}),reason:t("network.reason")}});
+      const showFields=(saved)=>{
+        sandbox.value=["read","write_reversible"].includes(saved.sandbox)?saved.sandbox:"write_reversible";
+        const request=saved.network_request;
+        mode=request?.scope==="public"?"open":request?.scope==="hosts"?"allowlist":"deny";
+        if(!modes.includes(mode))mode="deny";
+        hosts.value=(request?.hosts || []).join("\n");
+        duration.value=String(lengths.includes(request?.minutes)?request.minutes:lengths.includes(15)?15:lengths[0]);
+        durationHint.hidden=duration.value!=="0";
+        draw();
+      };
+      environment.addEventListener("change",()=>{
+        if(state.session)return;
+        environmentDrafts.set(selectedEnvironment,readFields());
+        selectedEnvironment=environment.value;
+        showFields(environmentDrafts.get(selectedEnvironment) || draftSettingsForEnvironment(selectedEnvironment));
+      });
+      let saving=false;
+      const apply = async () => {
+        if(saving || context!==personalChoiceKey())return false;
         error.textContent = "";
         const selectedHosts = [...new Set(hosts.value.split(/[,，\s]+/).map((value)=>value.trim()).filter(Boolean))];
         if (mode === "allowlist" && !selectedHosts.length) {error.textContent=t("network.hostRequired");hosts.focus();return false;}
         if (mode !== "deny" && (!policy.allowed || !modes.includes(mode))) {error.textContent=t("network.policyLimited");return false;}
         if (mode !== "deny" && (!duration.value || (duration.value === "0" && policy.supports_unlimited !== true))) {error.textContent=t("network.durationUnavailable");return false;}
-        state.settings.sandbox = sandbox.value; ls.set("cw_sandbox",sandbox.value);
-        if (!state.session) {state.draftEnvironment=environment.value;ls.set(draftEnvironmentKey(),environment.value);}
-        state.networkRequest = mode === "deny" ? null : {scope:mode === "open" ? "public" : "hosts",hosts:mode === "open" ? [] : selectedHosts,minutes:Number(duration.value),...(duration.value === "0" ? {unlimited:true} : {}),reason:t("network.reason")};
-        state.networkRequestTenant = state.me?.tenant;
-        close();updateComposer(true);renderStatus();return true;
+        const settings=readFields();
+        const session=state.session,base=sbase();
+        saving=true;const saveGeneration=++taskSettingsGeneration;
+        panel.querySelectorAll(".task-settings-actions button,.task-settings-tools").forEach(button=>button.disabled=true);
+        try {
+          const stored=session ? await api("PUT",`${base}/settings`,settings) : settings;
+          if(owner!==`${state.me?.tenant}/${state.me?.user}`)return false;
+          if(session && saveGeneration===taskSettingsGeneration){
+            const saved={...session,task_settings:stored};
+            state.sessions=state.sessions.map(item=>item.project_id===saved.project_id&&item.id===saved.id?saved:item);
+          } else if(!session) {
+            environmentDrafts.set(selectedEnvironment,stored);
+            for(const [environmentID,value] of environmentDrafts)ls.set(draftTaskSettingsKey(environmentID),JSON.stringify(value));
+            ls.set(draftEnvironmentKey(),selectedEnvironment);
+          }
+          if(context!==personalChoiceKey() || saveGeneration!==taskSettingsGeneration)return false;
+          if(session)state.session={...state.session,task_settings:stored};
+          else state.draftEnvironment=selectedEnvironment;
+          installTaskSettings(stored);
+          close();updateComposer(true);renderStatus();return true;
+        } catch(ex) {
+          if(context===personalChoiceKey())error.textContent=ex.message;
+          return false;
+        } finally {
+          saving=false;
+          panel.querySelectorAll(".task-settings-actions button,.task-settings-tools").forEach(button=>button.disabled=false);
+        }
       };
       const panel = h("div", { class: "task-settings-panel" },
         h("div", { class: "task-settings-heading" }, h("strong", {}, t("taskSettings.title"))),
         h("div", {class:"task-settings-scroll"},
+          h("p",{class:"muted small"},t(state.session?.environment_id?"taskSettings.boundScope":"taskSettings.scope")),
           h("label", { class: "lbl" }, t("sandbox.heading"), sandbox),
           h("div", { class: "task-settings-network" }, h("div", { class: "lbl" }, t("network.title")), options, hostField, durationField, note),
           h("label", { class: "lbl" }, t("envcfg.heading"), environment),
-          h("button", { class: "btn task-settings-tools personal-tools", onclick: () => {if(apply())openPersonalConfig(true);} }, icon("box","sm"), t("personal.tools")),
+          h("button", { class: "btn task-settings-tools personal-tools", onclick: async () => {if(await apply())openPersonalConfig(true);} }, icon("box","sm"), t("personal.tools")),
           error),
         h("div", { class: "task-settings-actions" }, h("button", { class: "btn ghost sm", onclick: close }, t("common.cancel")), h("button", { class: "btn primary sm", "data-task-settings-apply": "", onclick: apply }, t("taskSettings.apply"))));
       draw();return panel;
@@ -3899,6 +3976,14 @@ function meterTool(m) {
 async function submit(text) {
   const message = (text ?? (ui.input ? ui.input.value : "")).trim();
   if (!message || state.sending || !state.project) return;
+  const submittedContext=personalChoiceKey();
+  const taskSettings=selectedTaskSettings();
+  const selectedModel=state.settings.model;
+  const selectedEnvironment=draftEnvironment();
+  const selectedPersonal=personalSelection();
+  const targetProject=state.project;
+  let targetSession=state.session;
+  const owner=`${state.me?.tenant}/${state.me?.user}`;
   state.sending = true;
   refreshSend();
   // 消息先出现在对话里，下面说明在做什么：草稿要先开会话（复制工作副本，借沙箱），再提交。界面不等请求回来。
@@ -3906,23 +3991,26 @@ async function submit(text) {
   if (text === undefined && ui.input) { ui.input.value = ""; autosize(); }
   renderThread(true);
   try {
-    if (!state.session) {
-      const p = state.project;
-      const sess = await api("POST", `/api/projects/${p.id}/sessions`, { title: message, environment_id: draftEnvironment() || undefined, personal_config: personalSelection() });
+    if (!targetSession) {
+      const sess = await api("POST", `/api/projects/${targetProject.id}/sessions`, { title: message, environment_id: selectedEnvironment || undefined, personal_config: selectedPersonal, task_settings: taskSettings });
+      targetSession=sess;
+      if(owner!==`${state.me?.tenant}/${state.me?.user}`)return;
       state.sessions.unshift(sess);
-      state.session = sess;
-      state.pending = { ...state.pending, phase: "submit", session: sess.id };
-      setHash(`#/w/${p.id}/s/${sess.id}`);
-      await loadWorkspaceRepos();
-      renderApp();
-      loadEnv();
+      if(personalChoiceKey()===submittedContext){
+        state.session = sess;
+        installTaskSettings(sess.task_settings || taskSettings);
+        state.pending = { ...state.pending, phase: "submit", session: sess.id };
+        setHash(`#/w/${targetProject.id}/s/${sess.id}`);
+        await loadWorkspaceRepos();
+        if(sbase()===sessionURL(targetProject.id,sess.id)){renderApp();loadEnv();}
+      }
     }
-    const base = sbase();
-    const selection = personalSelection();
-    const t = await api("POST", `${base}/tasks`, { message, sandbox: state.settings.sandbox, model: state.settings.model, personal_config: selection, network_request: state.networkRequestTenant === state.me?.tenant ? state.networkRequest || undefined : undefined });
-    if (selection) state.session.personal_config = selection;
-    state.networkRequest = null;
+    if(owner!==`${state.me?.tenant}/${state.me?.user}`)return;
+    const base = sessionURL(targetProject.id,targetSession.id);
+    const selection = selectedPersonal;
+    const t = await api("POST", `${base}/tasks`, { message, sandbox: taskSettings.sandbox, model: selectedModel, personal_config: selection, network_request: taskSettings.network_request });
     if (sbase() !== base) return;
+    if (selection) state.session.personal_config = selection;
     state.pending = null;
     state.tasks.push(t);
     // 这个会话成了最近活动的：排到最前。

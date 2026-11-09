@@ -6,6 +6,8 @@
 const plural = (n, one, many) => (Number(n) === 1 ? one : many);
 
 const ZH = {
+  "taskSettings.scope": "对本会话后续任务生效",
+  "taskSettings.boundScope": "本会话设置覆盖环境默认值，对后续任务生效",
   "topbar.actions": "更多操作",
   "topbar.repository": "打开仓库",
   "topbar.review": "查看 {type}",
@@ -933,6 +935,8 @@ const ZH = {
 };
 
 const EN = {
+  "taskSettings.scope": "Applies to subsequent tasks in this session",
+  "taskSettings.boundScope": "Session settings override environment defaults for subsequent tasks",
   "topbar.actions": "More actions",
   "topbar.repository": "Open repository",
   "topbar.review": "Open {type}",

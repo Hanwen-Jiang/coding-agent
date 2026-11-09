@@ -27,6 +27,9 @@ func (s *Store) PutPersonalSession(tenant, user, workspace string, selection *pe
 func (s *Server) personalSession(id identity, sess Session) (Session, error) {
 	var err error
 	sess.PersonalConfig, err = s.store.PersonalSession(id.TenantID, id.UserID, sess.WorkspaceID)
+	if err == nil {
+		sess.TaskSettings, err = s.store.TaskSettings(id.TenantID, id.UserID, sess.WorkspaceID)
+	}
 	return sess, err
 }
 
@@ -40,8 +43,9 @@ func (s *Store) readSessions(tenant string) ([]Session, error) {
 	}
 	dirty := false
 	for i := range sessions {
-		if sessions[i].PersonalConfig != nil {
+		if sessions[i].PersonalConfig != nil || sessions[i].TaskSettings != nil {
 			sessions[i].PersonalConfig = nil
+			sessions[i].TaskSettings = nil
 			dirty = true
 		}
 	}
@@ -56,7 +60,11 @@ func (s *Store) removePersonalSessions(tenant, workspace string) error {
 
 // Private projections are response-only; even an update callback must not put
 // them back into tenant-shared storage.
-func sessionWithoutPersonal(sess Session) Session { sess.PersonalConfig = nil; return sess }
+func sessionWithoutPersonal(sess Session) Session {
+	sess.PersonalConfig = nil
+	sess.TaskSettings = nil
+	return sess
+}
 
 // Clone before caching the private response in the owner's HTTP operation.
 func clonePersonalSelection(selection *personalSelection) *personalSelection {

@@ -93,14 +93,26 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		return
 	}
 	var req struct {
-		Message        string              `json:"message"`
-		Sandbox        string              `json:"sandbox"`
-		Model          string              `json:"model"`
-		Network        *taskNetworkRequest `json:"network_request"`
-		PersonalConfig *personalSelection  `json:"personal_config"`
+		Message        string             `json:"message"`
+		Sandbox        string             `json:"sandbox"`
+		Model          string             `json:"model"`
+		Network        json.RawMessage    `json:"network_request"`
+		PersonalConfig *personalSelection `json:"personal_config"`
 	}
 	if !readJSON(w, r, &req) {
 		return
+	}
+	settings := cloneTaskSettings(sess.TaskSettings)
+	if req.Sandbox == "" {
+		req.Sandbox = settings.Sandbox
+	}
+	network := settings.Network
+	if len(req.Network) > 0 {
+		network = nil // An explicit request replaces the saved preference, including null.
+		if err := json.Unmarshal(req.Network, &network); err != nil {
+			writeMsg(w, r, 400, "联网设置不合法")
+			return
+		}
 	}
 	selection := req.PersonalConfig
 	if selection == nil {
@@ -138,12 +150,12 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 	if selection != nil {
 		submit["inputs"].(map[string]any)["personal_config"] = selection
 	}
-	if req.Network != nil {
-		if err := req.Network.validate(); err != nil {
+	if network != nil {
+		if err := network.validate(); err != nil {
 			writeErr(w, r, http.StatusBadRequest, err)
 			return
 		}
-		submit["networkRequest"] = req.Network.wire()
+		submit["networkRequest"] = network.wire()
 	}
 	if sess.RuntimeSessionID != "" {
 		submit["sessionId"] = sess.RuntimeSessionID

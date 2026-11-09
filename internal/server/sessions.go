@@ -132,6 +132,7 @@ func (s *Server) updateSession(tenant string, sess Session, fn func(*Session)) (
 		return nil, msg("会话不存在")
 	})
 	out.PersonalConfig = clonePersonalSelection(sess.PersonalConfig)
+	out.TaskSettings = cloneTaskSettings(sess.TaskSettings)
 	return out, err
 }
 
@@ -161,15 +162,20 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	var req struct {
-		Title          string             `json:"title"`
-		EnvironmentID  string             `json:"environment_id"`
-		PersonalConfig *personalSelection `json:"personal_config"`
+		Title          string               `json:"title"`
+		EnvironmentID  string               `json:"environment_id"`
+		PersonalConfig *personalSelection   `json:"personal_config"`
+		TaskSettings   *sessionTaskSettings `json:"task_settings"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
 	if err := req.PersonalConfig.validate(); err != nil {
 		writeErr(w, r, http.StatusBadRequest, err)
+		return
+	}
+	if err := req.TaskSettings.validate(); err != nil {
+		writeErr(w, r, 400, err)
 		return
 	}
 	if _, err := s.ensureSessions(id.TenantID); err != nil { // 旧项目先迁移出 main 会话，免得被新会话挤掉
@@ -201,6 +207,11 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 		}
 		sess.PersonalConfig = clonePersonalSelection(req.PersonalConfig)
 	}
+	if err := s.store.PutTaskSettings(id.TenantID, id.UserID, sess.WorkspaceID, req.TaskSettings); err != nil {
+		writeErr(w, r, 500, err)
+		return
+	}
+	sess.TaskSettings = cloneTaskSettings(req.TaskSettings)
 	writeJSON(w, http.StatusCreated, sess)
 }
 
@@ -219,6 +230,7 @@ func (s *Server) createSession(r *http.Request, id identity, p Project, title st
 	if from != nil {
 		source = from.WorkspaceID
 		sess.PersonalConfig = from.PersonalConfig
+		sess.TaskSettings = cloneTaskSettings(from.TaskSettings)
 	}
 	info, err := s.ws.Create(ctx, id, sess.WorkspaceID, CreateSpec{From: source, Layout: p.Layout})
 	if err != nil {
@@ -285,6 +297,11 @@ func (s *Server) createSession(r *http.Request, id identity, p Project, title st
 	}
 	if from != nil && from.PersonalConfig != nil {
 		if err := s.store.PutPersonalSession(id.TenantID, id.UserID, sess.WorkspaceID, from.PersonalConfig); err != nil {
+			return Session{}, err
+		}
+	}
+	if from != nil {
+		if err := s.store.PutTaskSettings(id.TenantID, id.UserID, sess.WorkspaceID, from.TaskSettings); err != nil {
 			return Session{}, err
 		}
 	}

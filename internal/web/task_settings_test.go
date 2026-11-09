@@ -17,12 +17,13 @@ func TestTaskSettingsRespectNetworkPolicyInBrowser(t *testing.T) {
 	}{{"denied", false, []string{"deny"}, "", false}, {"hosts", true, []string{"deny", "allowlist"}, "hosts", false}, {"public", true, []string{"deny", "allowlist", "open"}, "public", false}, {"unlimited", true, []string{"deny", "allowlist", "open"}, "public", true}} {
 		t.Run(scenario.name, func(t *testing.T) {
 			var mu sync.Mutex
-			var task params
+			var task, created params
 			extra := map[string]any{
 				"/api/projects": []params{{"id": "p", "name": "Workspace", "source": "empty"}}, "/api/personal-config": params{"config": params{}}, "/api/environments": []any{},
 				"/api/network-policy": params{"allowed": scenario.allowed, "modes": scenario.modes, "hosts": []string{"a.example.com", "b.example.com"}, "max_grant_minutes": 60, "supports_unlimited": scenario.unlimited},
 				"POST /api/projects/p/sessions": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					_ = json.NewEncoder(w).Encode(params{"id": "s", "project_id": "p", "title": "Network task"})
+					_ = json.NewDecoder(r.Body).Decode(&created)
+					_ = json.NewEncoder(w).Encode(params{"id": "s", "project_id": "p", "title": "Network task", "task_settings": created["task_settings"]})
 				}),
 				"POST /api/projects/p/sessions/s/tasks": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					mu.Lock()
@@ -42,6 +43,10 @@ func TestTaskSettingsRespectNetworkPolicyInBrowser(t *testing.T) {
 			}
 			mu.Lock()
 			defer mu.Unlock()
+			createdSettings, _ := created["task_settings"].(map[string]any)
+			if createdSettings == nil {
+				t.Fatalf("draft preferences missing from CreateSession: %v", created)
+			}
 			network, _ := task["network_request"].(map[string]any)
 			if scenario.scope == "" {
 				if network != nil {
