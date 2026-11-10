@@ -137,6 +137,8 @@
 
 ### G-06 自动触发（2026-11-03 人定一起做）
 
+> 2026-11-10：这一块迁成了接入点的第一个类型（EP-01，`docs/plan/entry-points.md`）：代码在 `internal/server/entry_github.go` 与 `internal/entry`，后台推进是 `AdvanceEntries`，记录在接入点的存储里（配了 `CODING_GITHUB_DSN` 时是 Postgres，否则是 `<数据目录>/entry.json`），旧的 `github-triggers.json` 启动时搬过去。下面说的行为没变，只有回帖失败改成退避 5 次后进死信。
+>
 > 2026-11-03 已完成（代码，没部署）：`internal/server/githubtrigger.go`，经收件箱登记 `issue_comment`，后台每 10 秒推进一次（`AdvanceGitHubTriggers`）；记录在 `<数据目录>/github-triggers.json`，按触发评论的 ID。下面 8 条都有测试（`githubtrigger_test.go`，每个事件投递两次）。计划没写死、实现时定的（都取保守的一边，要改告诉我）：
 > 1. 触发评论以 `@coding-agent-link` 开头（后面跟空白或冒号、逗号），后面的文字是指令；确认是 `@coding-agent-link confirm`（或“确认”）开头的评论。只认 `issue_comment` 的 created，编辑过的评论不算。
 > 2. GitHub 一侧全用安装令牌：核对权限（`metadata: read`）、拉基线分支（`contents: read`）、推送与开 PR（`contents`、`pull_requests: write`）、回复（`issues: write`），每个都只含这个仓库、用完吊销。PR 由 App 开（草稿），正文写明谁触发的；提交的作者是触发者（noreply 地址）。不用触发者的用户令牌。

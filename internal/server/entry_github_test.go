@@ -17,11 +17,16 @@ package server
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/agentruntime/coding-agent/internal/entry"
 )
 
 type fakePush struct {
@@ -140,7 +145,7 @@ func (f *triggerFixture) comment(id int64, login string, uid int64, body string)
 
 func (f *triggerFixture) advance() {
 	f.t.Helper()
-	if err := f.srv.AdvanceGitHubTriggers(context.Background()); err != nil {
+	if err := f.srv.AdvanceEntries(context.Background()); err != nil {
 		f.t.Fatal(err)
 	}
 }
@@ -191,16 +196,11 @@ func (f *triggerFixture) pushes() []fakePush {
 
 func (f *triggerFixture) triggerState(comment int64) string {
 	f.t.Helper()
-	all, err := f.srv.loadTriggers()
+	t, _, err := f.srv.entry.Store().Trigger(context.Background(), ghTriggerID(comment))
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	for _, t := range all {
-		if t.Comment == comment {
-			return t.State
-		}
-	}
-	return ""
+	return string(t.State)
 }
 
 func TestWriterCommentStartsATaskWithTheIssueAsData(t *testing.T) {
@@ -474,13 +474,63 @@ func TestFailedOrEmptyTasksPushNothing(t *testing.T) {
 	}
 }
 
+// EP-01 第 2 条：旧的 github-triggers.json 搬进接入点的存储，可以重复执行；说过的话不再说，没说出去的那句补上。
+func TestOldTriggerRecordsMoveIntoTheEntryStoreOnce(t *testing.T) {
+	f := newTriggerFixture(t)
+	ctx, now := context.Background(), f.srv.now().UTC()
+	record := func(comment int64, state, reason string, notified ...string) map[string]any {
+		return map[string]any{"comment": comment, "repo": "octo-cat/demo", "repo_id": 555, "installation": 100, "issue": 12, "author": "octo-cat", "author_id": 42,
+			"tenant": f.id.TenantID, "user": f.id.UserID, "project_id": "p1", "session_id": "s1", "workspace_id": "p1--s1", "task_id": "tsk_done",
+			"state": state, "reason": reason, "notified": notified, "created_at": now}
+	}
+	path := filepath.Join(f.srv.cfg.DataDir, "github-triggers.json")
+	old := []map[string]any{
+		record(9001, "done", "Opened #91: https://github.com/octo-cat/demo/pull/91", "running", "done"),
+		record(9002, "failed", "The task ended with status FAILED, so nothing was pushed.", "running"),
+	}
+	for range 2 {
+		// 第二轮：上次搬到一半（文件还在）再来一遍，结果相同。
+		if err := writeFileAtomic(path, old); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.srv.migrateGitHubTriggers(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("搬完旧文件不再读：%v", err)
+	}
+	if err := f.srv.migrateGitHubTriggers(ctx); err != nil {
+		t.Fatalf("没有旧文件时什么也不做：%v", err)
+	}
+	if f.triggerState(9001) != "done" || f.triggerState(9002) != "failed" {
+		t.Fatalf("状态照搬：%s %s", f.triggerState(9001), f.triggerState(9002))
+	}
+	f.advance()
+	f.advance()
+	r := f.replies()
+	if len(r) != 1 || !strings.Contains(r[0].Body, "FAILED") || r[0].Path != "/repos/octo-cat/demo/issues/12/comments" {
+		t.Fatalf("说过的不再说，没说出去的补一次：%+v", r)
+	}
+	ds, err := f.srv.entry.Store().Deliveries(ctx, ghTriggerID(9001))
+	if err != nil || len(ds) != 2 || ds[0].State != entry.DeliverySent || ds[1].State != entry.DeliverySent {
+		t.Fatalf("旧记录里说过的两句记成已发出：%+v %v", ds, err)
+	}
+	// 搬过来的仓库照样算进每小时的次数。
+	f.comment(9003, "octo-cat", 42, "@coding-agent-link one")
+	f.comment(9004, "octo-cat", 42, "@coding-agent-link two")
+	if f.triggerState(9003) != "accepted" || f.triggerState(9004) != "refused" || !strings.Contains(f.lastReply(), "per hour") {
+		t.Fatalf("旧记录算进限流：%s %s %q", f.triggerState(9003), f.triggerState(9004), f.lastReply())
+	}
+}
+
 func TestAnInterruptedPushIsNotRetried(t *testing.T) {
 	f := newTriggerFixture(t)
 	f.comment(2001, "octo-cat", 42, "@coding-agent-link fix it")
 	f.advance()
 	f.finish("TASK_STATUS_DONE", 0.1)
 	// 推送进行到一半时进程没了：记录停在 publishing。
-	if _, _, err := f.srv.updateTrigger(2001, func(x *githubTrigger) bool { x.State = "publishing"; return true }); err != nil {
+	if _, _, err := f.srv.entry.Store().UpdateTrigger(context.Background(), ghTriggerID(2001), func(x *entry.Trigger) bool { x.State = entry.Publishing; return true }); err != nil {
 		t.Fatal(err)
 	}
 	f.advance()

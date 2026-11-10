@@ -1,6 +1,6 @@
 # 接入点计划
 
-> 状态：2026-11-10 设计稿，没有实现。第 10 节各条人已定（2026-11-10，都按建议），EP-01 起可以开工；EP-05 开工前还要定邮件怎么收。
+> 状态：2026-11-10 设计稿；第 10 节各条人已定（2026-11-10，都按建议）。EP-01 已完成（代码，没部署，见第 11 节）；EP-02 起没做；EP-05 开工前还要定邮件怎么收。
 > 来源：人提的要求（除网页外，任务可以由别的地方触发；都能在网页上看；结果回到触发的地方；接入点可扩展），对照本仓库已有的 GitHub 评论触发（G-06，`docs/plan/github-app.md`）与参考实现 dsh-superagent（第 11 节）。
 
 ## 1. 目标与范围
@@ -160,6 +160,17 @@ type Sink interface {
 顺序：EP-01 → EP-02 → EP-03 → EP-04，EP-05 最后。
 
 ### EP-01 框架，GitHub 评论迁成第一个类型
+
+> 2026-11-10 已完成（代码，没部署）：`internal/entry`（`entry.go` 是状态机与发件箱，`filestore.go`、`pgstore.go` 是两种存储），`internal/server/entry_host.go`（建会话、提交 Task、看状态与花费，旧记录的迁移），`internal/server/entry_github.go`（GitHub 评论这个类型与回帖这个出口，取代 `githubtrigger.go`）。下面 5 条都有测试：`internal/entry/entry_test.go` 在文件与 Postgres 两种存储上各跑一遍，G-06 原有的 12 条用例（`entry_github_test.go`）没改断言照样过。与第 4、8 节的设计稿不一样的地方：
+> 1. **存储有两种。** 配了 `CODING_GITHUB_DSN` 时用 Postgres（表 `entry_triggers`、`entry_deliveries`，与收件箱同一个库）；没配时用数据目录里的 `entry.json`，只能单进程（开发、测试）。
+> 2. **话由类型说，出口只管发。** 设计稿里是出口的 `Render`；实际上同一个出口上不同类型说的话不一样（“requested by @某人”只有评论触发才有），所以改成 `Kind.Words` 把框架的结果说成一句话，`Sink.Deliver` 发出去。
+> 3. **接口比设计稿少。** `Schema` 与 `Connection` 等 EP-02 有了用户配置再加；`Ingest` 没进接口，GitHub 评论由收件箱的处理函数（`onIssueComment`）翻译成触发后调 `Engine.Receive`。任务做完之后的事是可选的 `Finisher`（`Review`、`Publish`），没实现它的类型做完就说一句。
+> 4. **发到一半进程没了的投递不重发**，标成 `unknown`（GitHub 的回帖没有幂等键，查不出对方收到没有）；死信与 `unknown` 能用 `Engine.Redeliver` 放回去，界面上的入口在 EP-02。
+> 5. **回帖失败不再无限重试**：以前每 10 秒试一次直到成功，现在退避 5 次后进死信。
+> 6. **推进一条触发的租约是 15 分钟**（建会话与推送各自最多 10 分钟）：进程崩溃后这条触发最多等 15 分钟才被别的副本接手。
+> 7. 指标：`coding.entry.triggers`（`kind`、`result`：accepted、refused、duplicate、ignored）、`coding.entry.ended`（`kind`、`result` 是结束时的状态）、`coding.entry.deliveries`（`sink`、`result`：sent、pending、dead、unknown）。Grafana 的告警没加。
+>
+> 没做的：上线（部署后第一次启动会把 `github-triggers.json` 搬进库并改名为 `.migrated`）；本仓库 CLAUDE.md 里“由人点按钮触发”那句（第 10 节第 7 条，人改）。
 
 1. `internal/entry` 有第 4 节的接口与框架；`githubtrigger.go` 的逻辑迁成 `github_comment` 类型与 `github_comment` 出口，对外行为不变（G-06 的 8 条验收照样过）。
 2. 触发记录从 `github-triggers.json` 迁进 Postgres；迁移可以重复执行，迁完旧文件不再读。
