@@ -1,0 +1,17 @@
+=== RUN   TestEntryProbeScheduleRestartAndResult
+    entry_probe_test.go:140: schedule task=tsk_gh_1 session=s66284fba204bbe28 restart_idempotent=true read_ceiling=true disabled_existing_complete=true deliveries=2 deep_link=http://127.0.0.1:62319/#/w/p1/s/s66284fba204bbe28
+--- PASS: TestEntryProbeScheduleRestartAndResult (0.13s)
+=== RUN   TestEntryProbeAlertAuthenticationDedupSnapshot
+    entry_probe_test.go:238: unsigned_no_body_read=true exact_dedup=true fingerprint_window=true snapshot_instruction=true snapshot_autonomy=true snapshot_sink=true restart_idempotent=true deliveries=2
+--- PASS: TestEntryProbeAlertAuthenticationDedupSnapshot (0.13s)
+=== RUN   TestEntryProbeConcurrentWorkers
+    entry_probe_test.go:274: two_servers_shared_store=true tasks=1 workspaces=1
+--- PASS: TestEntryProbeConcurrentWorkers (0.13s)
+=== RUN   TestEntryProbeScheduleMissedAndPreviousActive
+    entry_probe_test.go:312: offline_catchup_latest_only=true previous_active_skipped=true next_slot_runs=true
+--- PASS: TestEntryProbeScheduleMissedAndPreviousActive (0.18s)
+=== RUN   TestEntryProbeAlertBatchBudget
+    entry_probe_test.go:350: batch_alerts=8 tasks=2 refused=6 reserved_usd=2.00 limit_usd=2.50
+--- PASS: TestEntryProbeAlertBatchBudget (0.14s)
+PASS
+ok  	github.com/agentruntime/coding-agent/internal/server	1.758s
