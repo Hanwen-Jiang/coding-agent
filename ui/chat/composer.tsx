@@ -3,7 +3,7 @@ import {PromptInput} from '@heroui-pro/react/prompt-input';
 import {Button} from '@heroui/react';
 import {ChatAttachment} from '@heroui-pro/react/chat-attachment';
 
-type Upload = {id:string;name:string;size_bytes:number;mime_type:string;preview_url?:string;status:string;error?:string};
+type Upload = {id:string;name:string;size_bytes:number;mime_type:string;preview_url?:string;status:string;error?:string;version_label?:string};
 interface ComposerSnapshot {
  attachments?:Upload[];
  collectionLabel?:string;
@@ -84,7 +84,7 @@ function ComposerView(props: ComposerProps) {
     {!!state.attachments?.length&&<div className="composer-attachments" aria-live="polite">{state.attachments.map(file=><div key={file.id} className="composer-attachment" data-upload-id={file.id} data-upload-state={file.status}>
      <ChatAttachment className="composer-attachment-file" mediaType="document" name={file.name} size={file.size_bytes}>
       {file.preview_url?<ChatAttachment.Preview><img className="composer-attachment-preview" src={file.preview_url} alt=""/></ChatAttachment.Preview>:<ChatAttachment.Preview/>}
-      <ChatAttachment.Info><ChatAttachment.Name/><span className="upload-state">{file.status==='uploading'?state.uploadLabels?.uploading:file.status==='ready'?state.uploadLabels?.ready:file.status==='error'?file.error:state.uploadLabels?.pending}</span></ChatAttachment.Info>
+      <ChatAttachment.Info><ChatAttachment.Name/>{file.version_label&&<small className="upload-version">{file.version_label}</small>}<span className="upload-state">{file.status==='uploading'?state.uploadLabels?.uploading:file.status==='ready'?state.uploadLabels?.ready:file.status==='error'?file.error:state.uploadLabels?.pending}</span></ChatAttachment.Info>
      </ChatAttachment>
      {file.status==='error'&&<Button size="sm" variant="ghost" className="upload-retry" onPress={()=>props.onRetryUpload(file.id)}>{state.uploadLabels?.retry}</Button>}
      <Button size="sm" variant="ghost" isIconOnly className="upload-remove" isDisabled={file.status==='uploading'} aria-label={`${state.uploadLabels?.remove}: ${file.name}`} onPress={()=>props.onRemoveUpload(file.id)}>×</Button>

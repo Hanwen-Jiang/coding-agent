@@ -139,10 +139,14 @@ type runtimeFilePage struct {
 	NextCursor string              `json:"next_cursor"`
 }
 
-func (record runtimeFileRecord) source(id identity, workspace, alias string) (SourceRecord, error) {
+func (record runtimeFileRecord) source(id identity, workspace, alias string, requestedVersions ...string) (SourceRecord, error) {
+	expectedVersion := record.File.HeadVersionID
+	if len(requestedVersions) > 0 && requestedVersions[0] != "" {
+		expectedVersion = requestedVersions[0]
+	}
 	f, v := record.File, record.Version
 	_, _, err := mime.ParseMediaType(v.MIMEType)
-	if !sourceIDPattern.MatchString(f.ID) || !sourceVersionPattern.MatchString(v.ID) || v.FileID != f.ID || f.HeadVersionID != v.ID || f.WorkspaceID != workspace || f.Lifecycle != "active" || sourceName(f.Name) != f.Name || f.Name == "" || v.SizeBytes < 0 || v.SizeBytes > maxSourceBytes || !sourceDigestPattern.MatchString(v.SHA256) || err != nil {
+	if !sourceIDPattern.MatchString(f.ID) || !sourceVersionPattern.MatchString(v.ID) || v.FileID != f.ID || expectedVersion != v.ID || f.WorkspaceID != workspace || f.Lifecycle != "active" || sourceName(f.Name) != f.Name || f.Name == "" || v.SizeBytes < 0 || v.SizeBytes > maxSourceBytes || !sourceDigestPattern.MatchString(v.SHA256) || err != nil {
 		return SourceRecord{}, msg("附件不存在或不属于当前会话")
 	}
 	sourceID := f.ID
@@ -483,7 +487,16 @@ func (a *TaskAPI) sourceContent(ctx context.Context, token, workspace string, so
 	req.Header.Set("Authorization", "Bearer "+token)
 	return a.slow.Do(req)
 }
-func (s *Server) resolveSources(ctx context.Context, id identity, workspace string, ids []string) ([]SourceRecord, error) {
+func (s *Server) resolveSources(ctx context.Context, id identity, workspace string, ids []string, choices ...map[string]string) ([]SourceRecord, error) {
+	selectedVersions := map[string]string{}
+	if len(choices) > 0 && choices[0] != nil {
+		selectedVersions = choices[0]
+	}
+	for id, version := range selectedVersions {
+		if !slices.Contains(ids, id) || !sourceVersionPattern.MatchString(version) {
+			return nil, msg("附件版本无效")
+		}
+	}
 	if len(ids) > maxTaskSources {
 		return nil, msg("每个任务最多使用 10 个附件")
 	}
@@ -503,10 +516,15 @@ func (s *Server) resolveSources(ctx context.Context, id identity, workspace stri
 		}
 		seen[ref] = true
 		var record runtimeFileRecord
-		if err := s.api.fileRequest(ctx, id.token, http.MethodGet, "/v1/files/"+ref+"?"+filesQuery(workspace).Encode(), nil, &record); err != nil {
+		target := "/v1/files/" + ref
+		requested := selectedVersions[ref]
+		if requested != "" {
+			target += "/versions/" + requested
+		}
+		if err := s.api.fileRequest(ctx, id.token, http.MethodGet, target+"?"+filesQuery(workspace).Encode(), nil, &record); err != nil {
 			return nil, err
 		}
-		source, err := record.source(id, workspace, ref)
+		source, err := record.source(id, workspace, ref, requested)
 		if err != nil {
 			return nil, err
 		}

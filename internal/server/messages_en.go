@@ -4,6 +4,7 @@ package server
 // TestEveryMessageHasEnglish 按源码核对每一句都有、参数个数对得上、这里没有用不到的。
 // 用词与网页一致：“项目”在界面上叫 workspace。
 var english = map[string]string{
+	"附件版本无效":             "Invalid source version",
 	"每次任务最多选择一个知识集合":     "Select at most one knowledge collection per task",
 	"知识集合标识无效":           "Invalid knowledge collection identity",
 	"文件服务暂时不可用":          "File service is temporarily unavailable",

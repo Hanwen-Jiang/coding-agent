@@ -1,0 +1,62 @@
+{
+  "date": "2026-11-10",
+  "environment": "cloudnium_cloud isolated fi-ui-20261110-browser-verified, real Chromium, 3 CPUs / 4 GiB; production unchanged",
+  "commands": [
+    "CODING_TEST_BROWSER=/usr/bin/chromium go test -json ./...",
+    "go vet ./..."
+  ],
+  "status": "tests=0 vet=0",
+  "passed_top_level_tests": 257,
+  "passed_test_events": 335,
+  "failed": [],
+  "skipped": [
+    {
+      "package": "github.com/agentruntime/coding-agent/internal/server",
+      "test": "TestPublicDiscoveryLiveSources"
+    }
+  ],
+  "packages": [
+    {
+      "package": "github.com/agentruntime/coding-agent/cmd/coding-web",
+      "status": "no_test_files",
+      "elapsed_seconds": 0
+    },
+    {
+      "package": "github.com/agentruntime/coding-agent/internal/samples",
+      "status": "no_test_files",
+      "elapsed_seconds": 0
+    },
+    {
+      "package": "github.com/agentruntime/coding-agent/internal/github",
+      "status": "pass",
+      "elapsed_seconds": 0.002
+    },
+    {
+      "package": "github.com/agentruntime/coding-agent/internal/server",
+      "status": "pass",
+      "elapsed_seconds": 91.334
+    },
+    {
+      "package": "github.com/agentruntime/coding-agent/internal/web",
+      "status": "pass",
+      "elapsed_seconds": 228.832
+    }
+  ],
+  "source_manifest": "server-source-manifest-final.json",
+  "raw_log_sha256": "7142ade3a0f2c2b126f3407f202562b350ea538ea54830e17417656ab9203d84",
+  "runtime_status": "tests=0 vet=0",
+  "runtime_source_manifest": "runtime-verified-source-manifest.json",
+  "artifact_sha256": {
+    "cleanup.json": "d4ce0ff14fd668b4064498a237f0e7514b5f4621ae4fb3b2b3b47ff87ef87b08",
+    "coding-verified-vet.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "coding-verified.json.gz": "88a130cd8190d565f544b0ff07189dfcf0aa0c2bd67bc1f903da27e444f4ad2b",
+    "pop-force-fixed.log": "345b529e061c1e0a6f63f0b5e8e66a40b0aa8e98192b937b00ae23eaf518aad8",
+    "pop-force.log": "949a31033be1c496cec4815573235f551b9e65639c6254ce6e3f4baeb2978fac",
+    "runtime-verified-source-manifest.json": "9e27fa58b69e76d6a86c50937a8651d8f0026a231d59609100ce95e1860036ec",
+    "runtime-verified-vet.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "runtime-verified.log": "284a88595e16e25a4b55231647da1c8215504a493188cf03c155d2b94f554158",
+    "server-source-manifest-final.json": "e5eb829d71feb2d7fa4e0ee2e54c740255eaefee0822fdddce0ddb2f93b1abb3",
+    "settings-fixed.log": "0320f04c306891df98b195cf955628cdb2521c53def91b910ffe32ccba633332",
+    "settings-repro.log": "a57a6c1caa7b2601e38e8ec1551efc5d701dabacfe8f79916d2c6424e92c09c4"
+  }
+}

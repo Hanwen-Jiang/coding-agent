@@ -94,6 +94,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 	}
 	var req struct {
 		SourceIDs         []string           `json:"source_ids"`
+		SourceVersions    map[string]string  `json:"source_versions"`
 		FileCollectionIDs []string           `json:"file_collection_ids"`
 		Message           string             `json:"message"`
 		Sandbox           string             `json:"sandbox"`
@@ -149,7 +150,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 			return
 		}
 	}
-	sources, err := s.resolveSources(r.Context(), id, sess.WorkspaceID, req.SourceIDs)
+	sources, err := s.resolveSources(r.Context(), id, sess.WorkspaceID, req.SourceIDs, req.SourceVersions)
 	if err != nil {
 		writeErr(w, r, 400, err)
 		return
@@ -210,7 +211,11 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		}
 		x.UpdatedAt = now
 	})
-	record := TaskRecord{FileCollectionIDs: append([]string(nil), req.FileCollectionIDs...), SourceIDs: append([]string(nil), req.SourceIDs...), ID: resp.TaskID, Message: msg, CreatedAt: now, CreatedBy: id.UserID, Status: "TASK_STATUS_QUEUED", Sandbox: sandbox, Model: model}
+	resolvedVersions := map[string]string{}
+	for _, source := range sources {
+		resolvedVersions[source.ID] = source.VersionID
+	}
+	record := TaskRecord{SourceVersions: resolvedVersions, FileCollectionIDs: append([]string(nil), req.FileCollectionIDs...), SourceIDs: append([]string(nil), req.SourceIDs...), ID: resp.TaskID, Message: msg, CreatedAt: now, CreatedBy: id.UserID, Status: "TASK_STATUS_QUEUED", Sandbox: sandbox, Model: model}
 	if err := s.store.UpdateTasks(id.TenantID, sess.WorkspaceID, func(ts []TaskRecord) []TaskRecord {
 		if slices.ContainsFunc(ts, func(t TaskRecord) bool { return t.ID == record.ID }) {
 			return ts

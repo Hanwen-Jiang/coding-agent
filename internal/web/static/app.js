@@ -3420,7 +3420,7 @@ function clearUploadDrafts() {
 }
 function refreshUploadUI() {
   const items=uploadItems();
-  ui.composerModel?.update({collectionLabel:state.collectionDrafts.get(personalChoiceKey())?.label||"",attachments:items.map(item=>({id:item.id,name:item.source?.name||item.file.name,size_bytes:item.source?.size_bytes??item.file.size,mime_type:item.source?.mime_type||item.file?.type,preview_url:item.preview||item.source?.preview_url,status:item.status,error:item.error||""})),canAttach:uploadAllowed(),
+  ui.composerModel?.update({collectionLabel:state.collectionDrafts.get(personalChoiceKey())?.label||"",attachments:items.map(item=>({id:item.id,name:item.source?.name||item.file.name,size_bytes:item.source?.size_bytes??item.file.size,mime_type:item.source?.mime_type||item.file?.type,preview_url:item.preview||item.source?.preview_url,status:item.status,error:item.error||"",version_label:item.fixedVersion?(item.source?.version_label||item.source?.version_id?.slice(-8)):undefined})),canAttach:uploadAllowed(),
     uploadLabels:{add:t("sources.add",{m:Math.floor(sourcePolicy().max_file_bytes/1024/1024)}),remove:t("sources.remove"),retry:t("common.retry"),uploading:t("sources.uploading"),ready:t("sources.ready"),pending:t("sources.pending"),drop:t("sources.drop"),unavailable:t("sources.afterTask")}});
   refreshSend();renderStatus();
 }
@@ -3438,15 +3438,15 @@ async function loadSources(base=sbase(),force=false) {
   finally {cache.loading=false;if(sbase()===base){renderStatus();renderThread();}if(cache.reload){cache.reload=false;void loadSources(base);}}
 }
 function sourceByID(id) {return state.sourceLists.get(sbase())?.list.find(source=>source.id===id||source.alias_ids?.includes(id));}
-function openSource(source) {void openFileWorkbench(source?.id);}
-async function openFileWorkbench(sourceID) {
+function openSource(source) {void openFileWorkbench(source?.id,source?.version_id);}
+async function openFileWorkbench(sourceID,initialVersionID) {
   const base=sbase();if(!base)return;
   const dialog=h("dialog",{class:"file-workbench-dialog"});const host=h("div",{class:"pro-chat file-workbench-host"});dialog.append(host);document.getElementById("app").append(dialog);
   let handle;const close=()=>{handle?.unmount();dialog.close();dialog.remove();};dialog.addEventListener("cancel",event=>{event.preventDefault();close();});
   dialog.showModal();host.textContent=t("sources.panel.loading");
   try {chatComponentsPromise ||= import("./chat-ui.js");const module=await chatComponentsPromise;if(!dialog.isConnected)return;
-    handle=module.mountFileWorkbench(host,{base,sources:state.sourceLists.get(base)?.list||[],initialSourceID:sourceID,
-      onClose:close,onUse:source=>{close();useSource(source);},onUseCollection:collection=>{if(!uploadAllowed()){toast(t("sources.afterTask"));return;}state.collectionDrafts.set(personalChoiceKey(),{id:collection.id,label:(document.documentElement.lang.startsWith("zh")?"知识集合 · ":"Knowledge collection · ")+(collection.roots?.length||0)+(document.documentElement.lang.startsWith("zh")?" 份资料":" sources")});close();refreshUploadUI();},onChanged:()=>{void loadSources(base,true);}});
+    handle=module.mountFileWorkbench(host,{base,sources:state.sourceLists.get(base)?.list||[],initialSourceID:sourceID,initialVersionID,
+      onClose:close,onUse:source=>{if(sbase()!==base)return;const cache=state.sourceLists.get(base)||{list:[],loading:false,error:""};if(!cache.list.some(item=>item.id===source.id||item.file_id===source.file_id)){cache.list.push(source);state.sourceLists.set(base,cache);}close();useSource(source);},onUseCollection:collection=>{if(sbase()!==base)return;if(!uploadAllowed()){toast(t("sources.afterTask"));return;}state.collectionDrafts.set(personalChoiceKey(),{id:collection.id,label:(document.documentElement.lang.startsWith("zh")?"知识集合 · ":"Knowledge collection · ")+(collection.roots?.length||0)+(document.documentElement.lang.startsWith("zh")?" 份资料":" sources")});close();refreshUploadUI();},onChanged:()=>{void loadSources(base,true);}});
   } catch(error){close();report(error);}
 }
 
@@ -3492,10 +3492,11 @@ function useSource(source) {
   if(!uploadAllowed()){toast(t("sources.afterTask"));return;}
   if(!sourceByID(source.id))return;
   const key=personalChoiceKey(),items=uploadItems(key);
-  if(items.some(item=>item.source?.id===source.id))return;
+  const existing=items.find(item=>item.source?.id===source.id);
+  if(existing){if(source.selected_version){if(selectedSourceBytes(items.filter(item=>item!==existing))+source.size_bytes>sourcePolicy().max_task_bytes){toast(t("sources.limitTotal",{m:Math.floor(sourcePolicy().max_task_bytes/1024/1024)}),true);return;}existing.source=source;existing.fixedVersion=true;state.uploadDrafts.set(key,items);refreshUploadUI();ui.input?.focus();}return;}
   if(items.length>=MAX_UPLOAD_FILES){toast(t("sources.limitCount"),true);return;}
   if(selectedSourceBytes(items)+source.size_bytes>sourcePolicy().max_task_bytes){toast(t("sources.limitTotal",{m:Math.floor(sourcePolicy().max_task_bytes/1024/1024)}),true);return;}
-  items.push({id:crypto.randomUUID(),file:null,source,status:"ready",preview:"",error:""});
+  items.push({id:crypto.randomUUID(),file:null,source,fixedVersion:!!source.selected_version,status:"ready",preview:"",error:""});
   state.uploadDrafts.set(key,items);refreshUploadUI();ui.input?.focus();
 }
 function removeUpload(id) {
@@ -3507,7 +3508,7 @@ function removeUpload(id) {
 }
 function retryUpload(id) {const key=personalChoiceKey(),item=uploadItems(key).find(item=>item.id===id);if(item&&sbase()&&!state.sending)void uploadOne(item,key,sbase()).catch(()=>{});}
 function taskSourceAttachments(task) {
-  const sources=(task.source_ids||[]).map(sourceByID).filter(Boolean);
+  const sources=(task.source_ids||[]).map(id=>{const s=sourceByID(id);return s?{...s,version_id:task.source_versions?.[id]||s.version_id}:null;}).filter(Boolean);
   return sources.length?h("div",{class:"task-source-attachments"},sources.map(source=>h("button",{class:"task-source-link",title:source.name,onclick:()=>openSource(source)},icon("file","xs"),h("span",{},source.name)))):null;
 }
 
@@ -3820,8 +3821,8 @@ function updateComposer(force = false) {
   const key = [ph.mode, ph.ask && ph.ask.qid, state.settings.sandbox, state.settings.model, JSON.stringify(state.networkRequest), meterText(m),
     state.changes ? state.changes.files.length : -1, ph.mode === "failed" || ph.mode === "done" ? ph.last.id : "", ph.last ? taskEditedFiles(ph.last.id) : false,
     state.env && state.env.sandbox ? state.env.sandbox.mode : "", environmentKey()].join("|");
-  if (!force && key !== ui.barKey && pop && ui.tools.contains(pop.anchor)) {
-    ui.barDirty = true; // 菜单开着：等它关上再重画
+  if ((force || key !== ui.barKey) && pop && ui.tools.contains(pop.anchor)) {
+    ui.barDirty = true; // Preserve the live anchor, including a delayed React mount; flush after close.
   } else if (force || key !== ui.barKey) {
     ui.barKey = key;
     ui.barDirty = false;
@@ -4226,12 +4227,12 @@ async function submit(text) {
     const selection = selectedPersonal;
     // A new-session draft stays local until the session exists. Successfully
     // uploaded entries are retained on task submission failure for safe retry.
-    const sourceIDs=[];
+    const sourceIDs=[];const sourceVersions={};
     const activeKey=`${owner}/${targetProject.id}/${targetSession.id}`;
     if(selectedUploads.length){state.uploadDrafts.set(activeKey,selectedUploads);if(activeKey!==submittedContext)state.uploadDrafts.delete(submittedContext);}
-    for(const item of selectedUploads){if(!sameOwner())return;const source=await uploadOne(item,activeKey,base,owner,uploadGeneration);if(!sameOwner())return;if(!sourceIDs.includes(source.id))sourceIDs.push(source.id);}
+    for(const item of selectedUploads){if(!sameOwner())return;const source=await uploadOne(item,activeKey,base,owner,uploadGeneration);if(!sameOwner())return;if(!sourceIDs.includes(source.id))sourceIDs.push(source.id);if(item.fixedVersion&&source.version_id)sourceVersions[source.id]=source.version_id;}
     if(owner!==`${state.me?.tenant}/${state.me?.user}`)return;
-    const t = await api("POST", `${base}/tasks`, { message, sandbox: taskSettings.sandbox, model: selectedModel, personal_config: selection, network_request: taskSettings.network_request,...(sourceIDs.length?{source_ids:sourceIDs}:{}),...(selectedCollection?{file_collection_ids:[selectedCollection.id]}:{}) });
+    const t = await api("POST", `${base}/tasks`, { message, sandbox: taskSettings.sandbox, model: selectedModel, personal_config: selection, network_request: taskSettings.network_request,...(sourceIDs.length?{source_ids:sourceIDs}:{}),...(Object.keys(sourceVersions).length?{source_versions:sourceVersions}:{}),...(selectedCollection?{file_collection_ids:[selectedCollection.id]}:{}) });
     if(!sameOwner())return;
     if(selectedCollection)state.collectionDrafts.delete(submittedContext);
     if(selectedUploads.length){state.uploadDrafts.delete(activeKey);for(const item of selectedUploads)if(item.preview)URL.revokeObjectURL(item.preview);}

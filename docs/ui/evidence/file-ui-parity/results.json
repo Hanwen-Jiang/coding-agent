@@ -1,0 +1,424 @@
+{
+  "mode": "Real Chromium / actual React bundle / clearly marked synthetic HTTP fixture",
+  "results": [
+    {
+      "check": "PDF 11-page selection rejected before request",
+      "passed": true
+    },
+    {
+      "check": "PDF one-based range maps to page 0",
+      "passed": true
+    },
+    {
+      "check": "PDF region OCR sends normalized original coordinates",
+      "passed": true
+    },
+    {
+      "check": "Notebook does not execute without selection and explicit agreement",
+      "passed": true
+    },
+    {
+      "check": "Notebook execution only selects approved cells",
+      "passed": true
+    },
+    {
+      "check": "Archive extraction sends selected members only",
+      "passed": true
+    },
+    {
+      "check": "ZIP-sniffed XLSX exposes spreadsheet controls",
+      "passed": true
+    },
+    {
+      "check": "Cross-file SQL preserves per-input selectors",
+      "passed": true
+    },
+    {
+      "check": "PPTX image replacement pins an uploaded image version",
+      "passed": true
+    },
+    {
+      "check": "Publishing requires explicit candidate review",
+      "passed": true
+    },
+    {
+      "check": "Publish conflict remains visible and never reports success",
+      "passed": true
+    },
+    {
+      "check": "Shared read-only source cannot create a candidate",
+      "passed": true
+    },
+    {
+      "check": "Shared read-only source cannot grant access",
+      "passed": true
+    },
+    {
+      "check": "390px mobile layout has no horizontal overflow",
+      "passed": true
+    },
+    {
+      "check": "Reduced-motion preference is respected",
+      "passed": true
+    },
+    {
+      "check": "Citation selects the immutable source version",
+      "passed": true
+    },
+    {
+      "check": "Citation selects its exact source page",
+      "passed": true
+    },
+    {
+      "check": "Using a historical version preserves its selected version",
+      "passed": true
+    },
+    {
+      "check": "L2 freezes explicit allowed page regions",
+      "passed": true
+    },
+    {
+      "check": "Pointer drag creates a normalized source crop",
+      "passed": true
+    },
+    {
+      "check": "Collection includes multiple read ranges for the same source",
+      "passed": true
+    },
+    {
+      "check": "Upload failure can retry without losing the file",
+      "passed": true
+    },
+    {
+      "check": "Trash restore explains that previous sharing stays revoked",
+      "passed": true
+    },
+    {
+      "check": "No page-level JavaScript errors",
+      "passed": true
+    },
+    {
+      "check": "Expired history is terminal and does not poll",
+      "passed": true
+    },
+    {
+      "check": "Reloaded history cancels exactly its active consumer",
+      "passed": true
+    },
+    {
+      "check": "Cancelled state remains visible after reload",
+      "passed": true
+    },
+    {
+      "check": "Late processing result does not replace a newly selected file",
+      "passed": true
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs",
+      "body": {
+        "operation": "render",
+        "inputs": [
+          {
+            "file_id": "src_00000000000000000000000000000001",
+            "version_id": "ver_00000000000000000000000000000001"
+          }
+        ],
+        "options": {},
+        "selector": {
+          "pages": [
+            0
+          ]
+        },
+        "request_id": "6fa7a05f-f945-45f5-9be8-1c6aa4f4282c"
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs/fjob_000000000000000000000000000000000000000000000033",
+      "method": "GET"
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs",
+      "body": {
+        "operation": "read",
+        "inputs": [
+          {
+            "file_id": "src_00000000000000000000000000000001",
+            "version_id": "ver_00000000000000000000000000000001"
+          }
+        ],
+        "options": {
+          "ocr": true
+        },
+        "selector": {
+          "page_index": 0,
+          "bbox": [
+            0.2,
+            0.25,
+            0.8,
+            0.75
+          ]
+        },
+        "request_id": "696b2252-59b8-4111-b2ae-6a931f9cc0d2"
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs/fjob_000000000000000000000000000000000000000000000034",
+      "method": "GET"
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs",
+      "body": {
+        "operation": "notebook_execute",
+        "inputs": [
+          {
+            "file_id": "src_00000000000000000000000000000005",
+            "version_id": "ver_00000000000000000000000000000005"
+          }
+        ],
+        "options": {
+          "timeout_seconds": 30,
+          "fidelity": "L1"
+        },
+        "selector": {
+          "cell_indices": [
+            0
+          ]
+        },
+        "request_id": "4b3cf4a0-25f7-4448-a79f-973905986baa"
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs",
+      "body": {
+        "operation": "extract",
+        "inputs": [
+          {
+            "file_id": "src_00000000000000000000000000000007",
+            "version_id": "ver_00000000000000000000000000000007"
+          }
+        ],
+        "options": {},
+        "selector": {
+          "members": [
+            "notes/readme.md"
+          ]
+        },
+        "request_id": "13713a7b-b9a7-4500-a8a0-eab02f680e96"
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs",
+      "body": {
+        "operation": "query",
+        "inputs": [
+          {
+            "file_id": "src_00000000000000000000000000000003",
+            "version_id": "ver_00000000000000000000000000000003"
+          },
+          {
+            "file_id": "src_0000000000000000000000000000000a",
+            "version_id": "ver_0000000000000000000000000000000a"
+          }
+        ],
+        "options": {
+          "sql": "SELECT SUM(data.price * data_2.qty) AS total FROM data JOIN data_2 USING(id)",
+          "parameters": [],
+          "max_rows": 100,
+          "header": true,
+          "input_selectors": [
+            {
+              "sheet": "Data",
+              "range": "A1:B3"
+            },
+            {
+              "row_offset": 1
+            }
+          ],
+          "input_headers": [
+            true,
+            true
+          ]
+        },
+        "selector": {
+          "sheet": "Data",
+          "range": "A1:B3"
+        },
+        "request_id": "ec2e152e-5002-4d3b-ae16-822afd30e1b5"
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs/fjob_000000000000000000000000000000000000000000000037",
+      "method": "GET"
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs",
+      "body": {
+        "operation": "edit",
+        "inputs": [
+          {
+            "file_id": "src_00000000000000000000000000000004",
+            "version_id": "ver_00000000000000000000000000000004"
+          },
+          {
+            "file_id": "src_00000000000000000000000000000006",
+            "version_id": "ver_00000000000000000000000000000006"
+          }
+        ],
+        "options": {
+          "base_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "operations": [
+            {
+              "type": "replace_image",
+              "slide_index": 1,
+              "shape_id": "3",
+              "image_version_id": "ver_00000000000000000000000000000006"
+            }
+          ],
+          "fidelity": "L1",
+          "visual_regions": []
+        },
+        "selector": {},
+        "request_id": "415e3726-d244-40d2-b6e7-0b7ee6dd8a0c"
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs/fjob_000000000000000000000000000000000000000000000038",
+      "method": "GET"
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs/fjob_000000000000000000000000000000000000000000000038",
+      "method": "GET"
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs/fjob_000000000000000000000000000000000000000000000038",
+      "method": "GET"
+    },
+    {
+      "path": "/api/projects/p/sessions/s/files/src_00000000000000000000000000000004/publish",
+      "body": {
+        "changeset_id": "chg_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expected_head": "ver_00000000000000000000000000000004",
+        "verification_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/knowledge/search",
+      "body": {
+        "query": "refund",
+        "limit": 8
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs",
+      "body": {
+        "operation": "read",
+        "inputs": [
+          {
+            "file_id": "src_00000000000000000000000000000001",
+            "version_id": "ver_00000000000000000000000000000001"
+          }
+        ],
+        "options": {
+          "layout": "simple",
+          "ocr": true
+        },
+        "selector": {
+          "pages": [
+            1
+          ]
+        },
+        "request_id": "d4c605f0-25f7-4115-85e2-401ad436f840"
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs",
+      "body": {
+        "operation": "edit",
+        "inputs": [
+          {
+            "file_id": "src_00000000000000000000000000000004",
+            "version_id": "ver_00000000000000000000000000000004"
+          }
+        ],
+        "options": {
+          "base_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "operations": [
+            {
+              "type": "replace_text",
+              "slide_index": 1,
+              "shape_id": "2",
+              "expected_text": "old text",
+              "text": "new text",
+              "occurrences": 1
+            }
+          ],
+          "fidelity": "L2",
+          "visual_regions": [
+            {
+              "page_index": 1,
+              "bbox": [
+                0.1,
+                0.2,
+                0.8,
+                0.6
+              ]
+            }
+          ]
+        },
+        "selector": {},
+        "request_id": "2e1a4811-45bd-462a-94e7-7ddcf28cf433"
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/file-jobs",
+      "body": {
+        "operation": "render",
+        "inputs": [
+          {
+            "file_id": "src_00000000000000000000000000000006",
+            "version_id": "ver_00000000000000000000000000000006"
+          }
+        ],
+        "options": {},
+        "selector": {
+          "bbox": [
+            0.15,
+            0.2000000515880877,
+            0.7,
+            0.7999999484119124
+          ]
+        },
+        "request_id": "9533e85d-de47-4dd5-b89b-8022318ebdfc"
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/knowledge/index",
+      "body": {
+        "job_ids": [
+          "fjob_000000000000000000000000000000000000000000000001",
+          "fjob_000000000000000000000000000000000000000000000034"
+        ],
+        "expected_revision": 1
+      }
+    },
+    {
+      "path": "/api/projects/p/sessions/s/sources",
+      "upload_name": "retry.txt",
+      "size": 21
+    },
+    {
+      "path": "/api/projects/p/sessions/s/sources",
+      "upload_name": "retry.txt",
+      "size": 21
+    },
+    {
+      "path": "/api/projects/p/sessions/s/files/src_ffffffffffffffffffffffffffffffff/actions",
+      "body": {
+        "action": "restore"
+      }
+    }
+  ],
+  "final_recheck": "2026-11-10 fresh Chrome profiles after candidate-owner title and explicit Notebook byte-limit parentheses; no test assertions removed"
+}

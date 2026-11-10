@@ -1,0 +1,194 @@
+{
+  "checks": [
+    "multi-source fixed version request",
+    "secondary worksheet and range retained",
+    "XLSX formula preserves exact base and L1",
+    "oversize replacement image unavailable",
+    "PPTX image uses explicitly pinned source version, never a local path",
+    "L2 no regions cannot submit or auto-enlarge region",
+    "Notebook edit creates candidate without execution",
+    "L2 explicitly entered normalized region frozen exactly",
+    "UNO recalculation expected value is typed number",
+    "candidate review shows real before and after values",
+    "publish requires deliberate review confirmation",
+    "conflicting publication never displays success"
+  ],
+  "errors": [],
+  "requests": [
+    {
+      "operation": "query",
+      "selector": {
+        "sheet": "Budget",
+        "range": "A1:D20"
+      },
+      "inputs": [
+        {
+          "file_id": "src_a",
+          "version_id": "ver_a"
+        },
+        {
+          "file_id": "src_b",
+          "version_id": "ver_b"
+        }
+      ],
+      "options": {
+        "sql": "SELECT * FROM data LIMIT 100",
+        "parameters": [],
+        "max_rows": 100,
+        "header": true,
+        "input_selectors": [
+          {
+            "sheet": "Budget",
+            "range": "A1:D20"
+          },
+          {
+            "sheet": "Orders",
+            "range": "A1:C30"
+          }
+        ],
+        "input_headers": [
+          true,
+          true
+        ]
+      }
+    },
+    {
+      "operation": "edit",
+      "selector": {},
+      "inputs": [
+        {
+          "file_id": "src_a",
+          "version_id": "ver_a"
+        }
+      ],
+      "options": {
+        "base_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "operations": [
+          {
+            "type": "set_formula",
+            "sheet": "Budget",
+            "cell": "B2",
+            "formula": "=SUM(B3:B10)"
+          }
+        ],
+        "fidelity": "L1",
+        "visual_regions": [],
+        "recalculate": false,
+        "expected_values": []
+      }
+    },
+    {
+      "operation": "edit",
+      "selector": {},
+      "inputs": [
+        {
+          "file_id": "src_p",
+          "version_id": "ver_p"
+        },
+        {
+          "file_id": "src_img",
+          "version_id": "ver_img"
+        }
+      ],
+      "options": {
+        "base_sha256": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+        "operations": [
+          {
+            "type": "replace_image",
+            "slide_index": 2,
+            "shape_id": "8",
+            "image_version_id": "ver_img"
+          }
+        ],
+        "fidelity": "L1",
+        "visual_regions": []
+      }
+    },
+    {
+      "operation": "edit",
+      "selector": {},
+      "inputs": [
+        {
+          "file_id": "src_n",
+          "version_id": "ver_n"
+        }
+      ],
+      "options": {
+        "base_sha256": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+        "operations": [
+          {
+            "type": "set_cell_source",
+            "cell_index": 1,
+            "expected_text": "print(1)",
+            "text": "print(2)"
+          }
+        ],
+        "fidelity": "L1",
+        "visual_regions": []
+      }
+    },
+    {
+      "operation": "edit",
+      "selector": {},
+      "inputs": [
+        {
+          "file_id": "src_a",
+          "version_id": "ver_a"
+        }
+      ],
+      "options": {
+        "base_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "operations": [
+          {
+            "type": "set_formula",
+            "sheet": "Budget",
+            "cell": "B2",
+            "formula": "=1+1"
+          }
+        ],
+        "fidelity": "L2",
+        "visual_regions": [
+          {
+            "page_index": 0,
+            "bbox": [
+              0.1,
+              0.2,
+              0.4,
+              0.5
+            ]
+          }
+        ],
+        "recalculate": false,
+        "expected_values": []
+      }
+    },
+    {
+      "operation": "recalculate",
+      "selector": {},
+      "options": {
+        "base_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fidelity": "L1",
+        "expected_values": [
+          {
+            "sheet": "Budget",
+            "cell": "D2",
+            "value": 42,
+            "tolerance": 1e-09
+          }
+        ]
+      }
+    }
+  ],
+  "date": "2026-11-10",
+  "scope": "Actual Chrome rendering compiled React/HeroUI file-actions components; backend responses are explicit synthetic fixtures, not a document processor acceptance claim",
+  "source": "ui/chat/file-actions.tsx",
+  "source_sha256": "6991347e1df95d558dd098a7c54455528562b96075a6aac14caf3221c48bf893",
+  "browser": "Google Chrome headless on local macOS",
+  "fixture_dir": "/tmp/file-actions-qa",
+  "tested_operations": [
+    "query",
+    "edit",
+    "recalculate",
+    "changeset publication preconditions/conflict"
+  ]
+}

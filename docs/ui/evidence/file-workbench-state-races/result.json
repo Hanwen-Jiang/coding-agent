@@ -1,0 +1,21 @@
+{
+  "errors": [],
+  "checks": [
+    "historical job displays old result",
+    "next operation pins historical version",
+    "late A publish preserves selected B",
+    "late A publish never writes A version into B",
+    "late source GET cannot erase successful upload",
+    "same running record keeps polling through completion"
+  ],
+  "date": "2026-11-10",
+  "browser": "real headless Google Chrome",
+  "fixture": "Actual FileWorkbench React code with controlled synthetic fetch responses; no backend processing or deployment claim",
+  "source_sha256": "a3a9f5a56c24ea2df07c451799160713d6fd7408f3f3ce03fdcb233220b8353d",
+  "scenarios": [
+    "select historical v1 job while v2 is current, then issue a read",
+    "hold A publication refresh, select B, then release A response",
+    "hold initial source listing, upload X successfully, then release old listing",
+    "select the same running history entry and require continued polling to completed"
+  ]
+}

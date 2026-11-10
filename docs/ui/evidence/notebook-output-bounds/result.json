@@ -1,0 +1,23 @@
+{
+  "errors": [],
+  "checks": [
+    "selected cell output via small-header",
+    "unselected cell output excluded via small-header",
+    "HTML is inert plain text via small-header",
+    "selected cell output via small-stream",
+    "unselected cell output excluded via small-stream",
+    "HTML is inert plain text via small-stream",
+    "oversized body rejected via large-header",
+    "download remains available via large-header",
+    "oversized body rejected via large-stream",
+    "download remains available via large-stream"
+  ],
+  "viewport": 800,
+  "mode": "Actual headless Chrome with standalone compiled React StructurePanel and controlled synthetic notebook responses",
+  "source_sha256": "cec248fec5dcc064458243249c1bf2317df0fe1749ec0bd2a82a0ddcf4e75b27",
+  "response_bytes": {
+    "small": 313,
+    "large": 2097465
+  },
+  "date": "2026-11-10"
+}

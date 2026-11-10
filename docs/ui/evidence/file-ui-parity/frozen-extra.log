@@ -1,0 +1,1 @@
+[{"check":"Expired history is terminal and does not poll","passed":true},{"check":"Reloaded history cancels exactly its active consumer","passed":true},{"check":"Cancelled state remains visible after reload","passed":true},{"check":"Late processing result does not replace a newly selected file","passed":true}]

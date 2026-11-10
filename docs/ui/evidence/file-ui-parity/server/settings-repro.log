@@ -1,0 +1,6 @@
+--- FAIL: TestTaskSettingsRespectNetworkPolicyInBrowser (10.73s)
+    --- FAIL: TestTaskSettingsRespectNetworkPolicyInBrowser/unlimited (10.73s)
+        task_settings_test.go:42: UI: <nil> {"errors":["Error: reopened unlimited settings New session\nWhat should we do in Workspace?\nBalanced\nTask settings\n$0\nEnter send · Shift+Enter new line\nExplain this repository\nFind and fix failing tests\nAdd unit tests\n    at wait (http://127.0.0.1:34197/__probe.js:5:126)\n    at async http://127.0.0.1:34197/__probe.js:29:54"]}
+FAIL
+FAIL	github.com/agentruntime/coding-agent/internal/web	29.591s
+FAIL

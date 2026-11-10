@@ -1,0 +1,55 @@
+{
+  "scope": "Only ui_test_finish created stopped regression/diagnostic containers; original server evidence and images preserved",
+  "removed": [
+    {
+      "name": "fi-ui-20261110-settings-repro",
+      "id": "4f7402054f4deba6b81813befcffba11bd866be6b4822f71b1a71d48ed5fe204",
+      "status": "exited",
+      "exit_code": 1,
+      "oom_killed": false
+    },
+    {
+      "name": "fi-ui-20261110-pop-instrument",
+      "id": "9e389c1316932ee5ffb635a138ca366acaf06bf2b32eab3779c734482a3fb551",
+      "status": "exited",
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    {
+      "name": "fi-ui-20261110-pop-force",
+      "id": "3133b73fae01283af8d7d89beb664a90c01cc2918ffa2e588ffc1d7b2cf30875",
+      "status": "exited",
+      "exit_code": 1,
+      "oom_killed": false
+    },
+    {
+      "name": "fi-ui-20261110-pop-force-fixed",
+      "id": "aa0d4303be6cfeb1c2a3d9e31523a1c040d374e0acffd0b8aa285900346278b6",
+      "status": "exited",
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    {
+      "name": "fi-ui-20261110-settings-fixed",
+      "id": "34caabb6bad679db1a325ee10d8b3d59e75f707102e71b53a76432651bda4c3b",
+      "status": "exited",
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    {
+      "name": "fi-ui-20261110-browser-verified",
+      "id": "8c25f22901a188399587cf7c68f5f564cb4bc21917f517194671dca40cb472a2",
+      "status": "exited",
+      "exit_code": 0,
+      "oom_killed": false
+    },
+    {
+      "name": "fi-ui-20261110-runtime-verified",
+      "id": "328fbfef8ec8a6927109a08b887979b07be71fa84d17b1a2d10d42fb7512e9b6",
+      "status": "exited",
+      "exit_code": 0,
+      "oom_killed": false
+    }
+  ],
+  "retained": []
+}

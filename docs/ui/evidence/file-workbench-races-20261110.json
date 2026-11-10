@@ -1,0 +1,19 @@
+{
+  "errors": [],
+  "checks": [
+    "historical job displays old result",
+    "next operation pins historical version",
+    "late A publish preserves selected B",
+    "late A publish never writes A version into B",
+    "late source GET cannot erase successful upload"
+  ],
+  "date": "2026-11-10",
+  "browser": "real headless Chrome",
+  "fixture": "Isolated React FileWorkbench with controlled synthetic API responses; does not claim backend execution",
+  "source_sha256": "561ae68d313364e5b5573b99a3d7089082a3019eb8b92f32338b68a4df05f5af",
+  "scenarios": [
+    "historical job selects its immutable source version and next read pins it",
+    "late publish refresh cannot overwrite a subsequently selected file/version",
+    "late initial source GET cannot erase a newly uploaded source"
+  ]
+}
