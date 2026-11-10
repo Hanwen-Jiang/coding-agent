@@ -72,8 +72,15 @@ spec:
             # 再从 coding-oauth 删掉那一项。
             - {name: CODING_GITHUB_APP_SLUG, value: coding-agent-link}
             - {name: CODING_GITHUB_APP_PRIVATE_KEY_FILE, value: /etc/coding/github-app/private-key.pem}
+          # 接入点：CODING_ENTRY_DSN 未设时沿用 CODING_GITHUB_DSN。
+          # coding-entry 可含 CODING_ENTRY_DSN；必须指向 GitHub 收件箱同一个 Postgres 库。
+          # SMTP 出口可在同一个 Secret 配 CODING_SMTP_ADDR、CODING_SMTP_FROM、
+          # CODING_SMTP_USERNAME、CODING_SMTP_PASSWORD、CODING_SMTP_IMPLICIT_TLS。
+          # 全部不配时关闭邮件出口；部分配置拒绝启动。凭据不要写在本文件。
+          # 生产不要配置 CODING_ENTRY_MEMORY；入站邮件 Webhook/告警密钥在连接页生成。
           envFrom:
             - secretRef: {name: coding-oauth}
+            - secretRef: {name: coding-entry, optional: true}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
           securityContext:

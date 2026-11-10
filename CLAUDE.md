@@ -21,7 +21,7 @@
 
 - 凭据与密钥（OAuth 令牌、签名密钥、Client Secret）不进日志、错误说明、浏览器与 `.git/config`；令牌只在服务端加密存放。
 - 租户只来自登录得到的令牌；工作区路径一律由服务端按（租户、工作区、会话）拼出并校验。
-- 推送只推会话自己的 `agent/*` 分支，不强推；由人点按钮触发。
+- 推送只推会话自己的 `agent/*` 分支，不强推。网页推送由用户触发；已启用接入点的单次触发按连接的自主程度授权，GitHub 评论还要现查写权限。改 `.github/workflows/` 或 Agent 自行提交的改动必须先确认，24 小时后授权过期（`docs/plan/github-app.md` G-06、`docs/plan/entry-points.md`）。
 - 给用户看的文字两种语言都要有：网页的在 `internal/web/static/i18n.js`（两份字典同样的键）；服务端的用 `msg`、`writeMsg` 写中文，英文加进 `internal/server/messages_en.go`（`TestEveryMessageHasEnglish` 会查）。
 - 不引入新的 Go 依赖（现在只有标准库与 `libs/go-core`）；网页不用构建工具与外部 CDN（CSP 只允许同源）。
 

@@ -48,6 +48,16 @@
 //	有收件箱时，Issue 与 PR 里以 @<slug> 开头的评论触发自动运行（G-06，internal/server/githubtrigger.go），每 10 秒推进一次；
 //	App 要有 Issues 读写权限并订阅 issue_comment。
 //
+// 接入点（docs/plan/entry-points-providers.md）：
+//
+//	CODING_ENTRY_DSN           接入点 Postgres，未设时沿用 CODING_GITHUB_DSN；无库时关闭
+//	CODING_ENTRY_MEMORY        仅开发登录、无 JWT 时显式设 1，生产禁止
+//	CODING_SMTP_ADDR           邮件出口服务器 host:port，与 FROM 同时配置
+//	CODING_SMTP_FROM           发信地址
+//	CODING_SMTP_USERNAME       SMTP 用户名，与 PASSWORD 成对；支持无认证的受信 TLS relay
+//	CODING_SMTP_PASSWORD       SMTP 密码（不能打印或回传浏览器）
+//	CODING_SMTP_IMPLICIT_TLS   true/1 用 TLS 直连；否则要求 STARTTLS，绝不降级明文
+//
 //	coding-web github-replay <delivery>   把收件箱里的一条投递重新入队（死信修好之后用）
 //
 // 第三方登录（<平台> 是 GITHUB、GITEE、GITLAB、GITEA、BITBUCKET、GOOGLE；Client ID 与 Secret 都给了才打开这一家）：
@@ -140,6 +150,12 @@ func main() {
 		}
 		cfg.Metrics = github.TelemetryMetrics(platform)
 	}
+	if err := configureEntries(ctx, &cfg, os.Getenv); err != nil {
+		log.Fatalf("coding-web: %v", err)
+	}
+	if cfg.EntryStore != nil {
+		defer cfg.EntryStore.Close()
+	}
 	var inbox *github.Service
 	if cfg.GitHubApp != nil {
 		if os.Getenv("CODING_GITHUB_DSN") == "" {
@@ -163,13 +179,18 @@ func main() {
 	} else if r.Accounts > 0 || r.Secrets > 0 || r.Unreadable > 0 {
 		log.Printf("coding-web: 旧数据重新加密：账号 %d 个（改写 %d 个），环境密钥 %d 个，哪把密钥都解不开的 %d 个", r.Accounts, r.AccountsResealed, r.Secrets, r.Unreadable)
 	}
+	if cfg.EntryStore != nil {
+		if err := srv.MigrateEntryTriggers(ctx); err != nil {
+			log.Fatal("coding-web: 旧 GitHub 触发记录迁移失败；未启动接入点处理")
+		}
+		go srv.RunEntries(ctx)
+	}
 	if inbox != nil {
 		// 事件到动作（G-04）：处理函数在 Server 上，Server 建好之后再注册、再起后台循环。
 		for event, h := range srv.GitHubHandlers() {
 			inbox.Handle(event, h)
 		}
 		go inbox.Run(ctx)
-		go advanceTriggers(ctx, srv)
 	}
 	if cfg.GitHubApp != nil {
 		go reconcileInstallations(ctx, srv)

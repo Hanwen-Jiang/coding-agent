@@ -1,0 +1,30 @@
+[
+  {
+    "language": "zh",
+    "width": 1440,
+    "default_disabled": true,
+    "mention": "触发示例：@coding-agent 你来做xxx；确认：@coding-agent confirm",
+    "kind_locked": true,
+    "secret_once": true,
+    "retry": true,
+    "rotation": true,
+    "web_confirmation": true,
+    "unknown_no_retry": true,
+    "source_filter": true,
+    "errors": []
+  },
+  {
+    "language": "en",
+    "width": 390,
+    "default_disabled": true,
+    "mention": "Trigger: @coding-agent please do this · Confirm: @coding-agent confirm",
+    "kind_locked": true,
+    "secret_once": true,
+    "retry": true,
+    "rotation": true,
+    "web_confirmation": true,
+    "unknown_no_retry": true,
+    "source_filter": true,
+    "errors": []
+  }
+]
