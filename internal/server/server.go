@@ -24,6 +24,7 @@ import (
 
 	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/jwtingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/dev/localingress"
+	"github.com/agentruntime/agent-runtime/libs/go-core/providers/cache"
 	"github.com/agentruntime/agent-runtime/libs/go-core/providers/ingress"
 	"github.com/agentruntime/coding-agent/internal/entry"
 	"github.com/agentruntime/coding-agent/internal/github"
@@ -69,6 +70,10 @@ type Config struct {
 	Webhook http.Handler
 	// Metrics 是 GitHub App 一侧的计数（G-05，经 libs/go-core 的 Telemetry）；nil 时不记。
 	Metrics github.Metrics
+	// SharedCache is coding-web's own cache namespace; it contains only rebuildable
+	// public discovery responses and scoped permission metadata, never credentials.
+	// Nil retains the local implementation for development and tests.
+	SharedCache cache.Cache
 	// NetworkSecrets 打开网络密钥页（WEB-SEC，user_secrets.go）；D-23 第二阶段之前默认关着。
 	NetworkSecrets bool
 	// SessionIdle、SessionMaxAge 是浏览器会话的空闲与绝对有效期（AUTH-02，browser_sessions.go；默认 24 小时、7 天）。Now 只给测试换时钟。
@@ -208,6 +213,7 @@ func New(cfg Config) (*Server, error) {
 		providers: providers,
 		handoff:   pendingHandoff{},
 	}
+	s.discovery.shared = cfg.SharedCache
 	if cfg.Workspaces == "local" {
 		if err := os.MkdirAll(cfg.WorkspaceRoot, 0o755); err != nil {
 			return nil, err

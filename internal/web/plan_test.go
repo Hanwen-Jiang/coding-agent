@@ -101,6 +101,8 @@ type planResult struct {
 }
 
 func (s *streamSite) frame(name string, value map[string]any) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.seq++
 	data, _ := json.Marshal(params{"event_id": s.seq, "emitted_at": "2026-11-03T08:00:00Z", "payload": params{"value": value}})
 	return fmt.Sprintf("id: %d\nevent: %s\ndata: %s\n\n", s.seq, name, data)

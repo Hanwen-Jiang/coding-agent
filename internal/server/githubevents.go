@@ -7,6 +7,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -128,7 +129,7 @@ func (s *Server) updateGitHubProjects(match func(Project) bool, fn func(*Project
 
 func (s *Server) onInstallation(ctx context.Context, d github.Delivery) error {
 	e, err := parseEvent(d)
-	if err != nil {
+	if err != nil || e.Installation.ID <= 0 {
 		return err
 	}
 	state := ""
@@ -141,9 +142,7 @@ func (s *Server) onInstallation(ctx context.Context, d github.Delivery) error {
 	default:
 		return nil
 	}
-	s.github.mu.Lock()
-	s.github.perms = nil // 权限可能变了：下次重新查
-	s.github.mu.Unlock()
+	cacheErr := s.invalidatePermissions(ctx)
 	now := s.now().UTC()
 	changed, err := s.updateGitHubProjects(func(p Project) bool { return p.InstallationID == e.Installation.ID }, func(p *Project) {
 		if state != "" || p.RemoteState == "app_suspended" || p.RemoteState == "app_removed" {
@@ -151,12 +150,12 @@ func (s *Server) onInstallation(ctx context.Context, d github.Delivery) error {
 		}
 	})
 	if err != nil || state == "" {
-		return err
+		return errors.Join(cacheErr, err)
 	}
 	if state == "app_removed" {
 		// 卸载：关联到账号的这个安装立即去掉（G-05 第 4 条）。
 		if err := s.unlinkInstallation(e.Installation.ID); err != nil {
-			return err
+			return errors.Join(cacheErr, err)
 		}
 	}
 	for tenant, ps := range changed {
@@ -164,7 +163,7 @@ func (s *Server) onInstallation(ctx context.Context, d github.Delivery) error {
 			s.cancelProjectTasks(ctx, tenant, p, msg("GitHub App 在这个仓库上的安装已暂停或卸载").In(langEN))
 		}
 	}
-	return nil
+	return cacheErr
 }
 
 // cancelProjectTasks 取消这个项目各会话里还在跑的 Task（以提交者的身份；Runtime 那边重复取消没有副作用）。
@@ -193,11 +192,12 @@ func (s *Server) cancelProjectTasks(ctx context.Context, tenant string, p Projec
 	}
 }
 
-func (s *Server) onInstallationRepositories(_ context.Context, d github.Delivery) error {
+func (s *Server) onInstallationRepositories(ctx context.Context, d github.Delivery) error {
 	e, err := parseEvent(d)
-	if err != nil {
+	if err != nil || e.Installation.ID <= 0 || (e.Action != "added" && e.Action != "removed") {
 		return err
 	}
+	cacheErr := s.invalidatePermissions(ctx)
 	set := func(repos []ghRepo, from, to string) error {
 		ids := map[int64]bool{}
 		for _, r := range repos {
@@ -207,15 +207,20 @@ func (s *Server) onInstallationRepositories(_ context.Context, d github.Delivery
 		return err
 	}
 	if err := set(e.ReposRemoved, "", "repo_removed"); err != nil {
-		return err
+		return errors.Join(cacheErr, err)
 	}
-	return set(e.ReposAdded, "repo_removed", "")
+	return errors.Join(cacheErr, set(e.ReposAdded, "repo_removed", ""))
 }
 
-func (s *Server) onRepository(_ context.Context, d github.Delivery) error {
+func (s *Server) onRepository(ctx context.Context, d github.Delivery) error {
 	e, err := parseEvent(d)
 	if err != nil || e.Repository.ID == 0 {
 		return err
+	}
+	var cacheErr error
+	switch e.Action {
+	case "renamed", "transferred", "deleted":
+		cacheErr = s.invalidatePermissions(ctx)
 	}
 	match := func(p Project) bool { return p.RepoID == e.Repository.ID }
 	switch e.Action {
@@ -224,7 +229,7 @@ func (s *Server) onRepository(_ context.Context, d github.Delivery) error {
 	case "deleted":
 		_, err = s.updateGitHubProjects(match, func(p *Project) { p.RemoteState = "remote_deleted" })
 	}
-	return err
+	return errors.Join(cacheErr, err)
 }
 
 func (s *Server) onPush(_ context.Context, d github.Delivery) error {
@@ -344,14 +349,15 @@ func (s *Server) onPullRequestReview(_ context.Context, d github.Delivery) error
 	})
 }
 
-func (s *Server) onAppAuthorization(_ context.Context, d github.Delivery) error {
+func (s *Server) onAppAuthorization(ctx context.Context, d github.Delivery) error {
 	e, err := parseEvent(d)
 	if err != nil || e.Action != "revoked" || e.Sender.ID == 0 {
 		return err
 	}
+	cacheErr := s.invalidatePermissions(ctx)
 	ref, ok := s.lookupIdentity(identityKey("github", strconv.FormatInt(e.Sender.ID, 10)))
 	if !ok {
-		return nil
+		return cacheErr
 	}
 	_, err = s.updateAccount(ref.Tenant, ref.User, func(a *Account) error {
 		if c, ok := a.Connections["github"]; ok {
@@ -361,5 +367,5 @@ func (s *Server) onAppAuthorization(_ context.Context, d github.Delivery) error 
 		return nil
 	})
 	log.Printf("GitHub 用户 %d 撤销了对 App 的授权：删了 %s/%s 的令牌", e.Sender.ID, ref.Tenant, ref.User)
-	return err
+	return errors.Join(cacheErr, err)
 }
