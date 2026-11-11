@@ -1,0 +1,14 @@
+=== RUN   TestMetadataProbeSeparateStores
+    metadata_lock_probe_test.go:70: two_store_instances sessions=60 tasks=60 projects=60 no_lost_updates
+--- PASS: TestMetadataProbeSeparateStores (0.21s)
+=== RUN   TestMetadataProbeChild
+    metadata_lock_probe_test.go:75: child helper
+--- SKIP: TestMetadataProbeChild (0.00s)
+=== RUN   TestMetadataProbeSeparateProcesses
+    metadata_lock_probe_test.go:122: two_processes sessions=60 tasks=60 projects=60 stable_lock_inode=true
+--- PASS: TestMetadataProbeSeparateProcesses (1.24s)
+=== RUN   TestMetadataProbeCrashReleasesLock
+    metadata_lock_probe_test.go:155: killed_holder_lock_released=true stale_pid_heuristics=false
+--- PASS: TestMetadataProbeCrashReleasesLock (0.02s)
+PASS
+ok  	github.com/agentruntime/coding-agent/internal/server	2.497s

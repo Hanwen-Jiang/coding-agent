@@ -184,13 +184,34 @@ func terminal(status string) bool {
 }
 
 // Store 把元数据存成 JSON 文件：<dir>/<租户>/projects.json、sessions.json、environments.json
-// 与 tasks-<会话的 WorkspaceID>.json。MVP 用，单进程。
+// 与 tasks-<会话的 WorkspaceID>.json。读改写同时持实例互斥锁与共享目录的 OS 文件锁。
+// 多进程必须使用同一支持跨客户端 advisory locks 的数据卷；不能各用一份本地目录。
 type Store struct {
 	dir string
 	mu  sync.Mutex
 }
 
 func NewStore(dir string) *Store { return &Store{dir: dir} }
+
+// lockMetadata serializes metadata mutations across Store instances and processes.
+// The lock file is persistent: removing it could let a new process lock a different
+// inode while a previous holder still owns the old one. The OS releases the lock
+// on close/process exit, so no PID files or stale-lock heuristics are needed.
+// Callers already hold s.mu. Never call it inside an Update callback or readSessions.
+func (s *Store) lockMetadata() (func(), error) {
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(filepath.Join(s.dir, ".metadata.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err = lockMetadataFile(file); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return func() { unlockMetadataFile(file); _ = file.Close() }, nil
+}
 
 func (s *Store) projectsFile(tenant string) string {
 	return filepath.Join(s.dir, tenant, "projects.json")
@@ -232,12 +253,24 @@ func (s *Store) Snapshot(tenant, workspaceID string) (EnvironmentSnapshot, bool,
 func (s *Store) PutSnapshot(tenant, workspaceID string, snap EnvironmentSnapshot) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, lockErr := s.lockMetadata()
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	return writeFileAtomic(s.snapshotFile(tenant, workspaceID), snap)
 }
 
+// Sessions also migrates legacy private fields via readSessions, so it needs
+// the same exclusive lock as writers. Ordinary read-only methods do not lock.
 func (s *Store) Sessions(tenant string) ([]Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, lockErr := s.lockMetadata()
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	defer unlock()
 	return s.readSessions(tenant)
 }
 
@@ -245,6 +278,11 @@ func (s *Store) Sessions(tenant string) ([]Session, error) {
 func (s *Store) UpdateSessions(tenant string, fn func([]Session) ([]Session, error)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, lockErr := s.lockMetadata()
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	sessions, err := s.readSessions(tenant)
 	if err != nil {
 		return err
@@ -285,6 +323,11 @@ func (s *Store) Environment(tenant, id string) (Environment, bool, error) {
 func (s *Store) UpdateEnvironments(tenant string, fn func([]Environment) ([]Environment, error)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, lockErr := s.lockMetadata()
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	envs, err := readJSONFile[[]Environment](s.environmentsFile(tenant))
 	if err != nil {
 		return err
@@ -324,6 +367,11 @@ func (s *Store) HasTasks(tenant, workspaceID string) bool {
 func (s *Store) DeleteSession(tenant string, sess Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, lockErr := s.lockMetadata()
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	sessions, err := s.readSessions(tenant)
 	if err != nil {
 		return err
@@ -424,6 +472,11 @@ func (s *Store) Project(tenant, id string) (Project, bool, error) {
 func (s *Store) UpdateProjects(tenant string, fn func([]Project) ([]Project, error)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, lockErr := s.lockMetadata()
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	projects, err := s.readProjects(tenant)
 	if err != nil {
 		return err
@@ -446,6 +499,11 @@ func (s *Store) Tasks(tenant, workspaceID string) ([]TaskRecord, error) {
 func (s *Store) UpdateTasks(tenant, workspaceID string, fn func([]TaskRecord) []TaskRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, lockErr := s.lockMetadata()
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	tasks, err := readJSONFile[[]TaskRecord](s.tasksFile(tenant, workspaceID))
 	if err != nil {
 		return err
@@ -457,6 +515,11 @@ func (s *Store) UpdateTasks(tenant, workspaceID string, fn func([]TaskRecord) []
 func (s *Store) DeleteProject(tenant, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	unlock, lockErr := s.lockMetadata()
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	projects, err := readJSONFile[[]Project](s.projectsFile(tenant))
 	if err != nil {
 		return err

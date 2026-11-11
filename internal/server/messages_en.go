@@ -4,6 +4,12 @@ package server
 // TestEveryMessageHasEnglish 按源码核对每一句都有、参数个数对得上、这里没有用不到的。
 // 用词与网页一致：“项目”在界面上叫 workspace。
 var english = map[string]string{
+	"接入点尚未配置数据库":       "Entry points require a configured database",
+	"接入点记录不存在":         "Entry point record not found",
+	"接入点配置无效，请检查字段与限制": "Invalid entry point configuration. Check the fields and limits.",
+	"接入点记录已变化，请刷新后重试":  "The entry point changed. Refresh and try again.",
+	"接入点服务暂时不可用":       "Entry point service is temporarily unavailable",
+
 	"附件版本无效":             "Invalid source version",
 	"每次任务最多选择一个知识集合":     "Select at most one knowledge collection per task",
 	"知识集合标识无效":           "Invalid knowledge collection identity",

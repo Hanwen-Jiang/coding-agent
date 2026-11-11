@@ -17,6 +17,7 @@ package server
 
 import (
 	"context"
+	"github.com/agentruntime/coding-agent/internal/entry"
 	"strconv"
 	"strings"
 	"sync"
@@ -109,6 +110,10 @@ func newTriggerFixture(t *testing.T) *triggerFixture {
 		t.Fatal(err)
 	}
 	f.gh.perms = map[string]string{"octo-cat": "write"}
+	f.srv.cfg.EntryStore = entry.NewMemory()
+	if err := f.srv.cfg.EntryStore.PutConnection(context.Background(), entry.Connection{ID: "test-github", Tenant: f.id.TenantID, User: f.id.UserID, ProjectID: "p1", Kind: "github_comment", Name: "GitHub", Enabled: true, Config: map[string]any{"mention": "coding-agent-link", "autonomy": "draft_pr", "language": "en"}, Sinks: []entry.Destination{{Sink: "github_comment"}}, Limits: entry.DefaultLimits(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	return f
 }
 
@@ -140,6 +145,7 @@ func (f *triggerFixture) comment(id int64, login string, uid int64, body string)
 
 func (f *triggerFixture) advance() {
 	f.t.Helper()
+	time.Sleep(2 * time.Millisecond)
 	if err := f.srv.AdvanceGitHubTriggers(context.Background()); err != nil {
 		f.t.Fatal(err)
 	}
@@ -270,17 +276,14 @@ func TestOnlyWritersCanTriggerAndBotsAreIgnored(t *testing.T) {
 	}
 }
 
-func TestCommentersWithoutAnAccountOrProjectGetOneReply(t *testing.T) {
+func TestCommentersWithoutAnAccountOrConnectionAreIgnored(t *testing.T) {
 	f := newTriggerFixture(t)
 	f.gh.perms["stranger"] = "write"
 	f.comment(2007, "stranger", 55, "@coding-agent-link fix it")
-	if r := f.replies(); len(r) != 1 || !strings.Contains(r[0].Body, "linked") {
-		t.Fatalf("没有关联的账号：%+v", r)
-	}
 	other := map[string]any{"id": 777, "full_name": "octo-cat/other"}
 	f.deliver("issue_comment", commentEvent(2008, ghUser("octo-cat", 42, "User"), "@coding-agent-link fix it", map[string]any{"repository": other}))
-	if r := f.replies(); len(r) != 2 || !strings.Contains(r[1].Body, "project") || r[1].Path != "/repos/octo-cat/other/issues/12/comments" {
-		t.Fatalf("没有这个仓库的项目：%+v", r)
+	if r := f.replies(); len(r) != 0 {
+		t.Fatalf("没有关联账号或启用连接时不接收也不回复：%+v", r)
 	}
 	f.advance()
 	if n := len(f.submitted()); n != 0 {
@@ -312,6 +315,7 @@ func TestRunsPerRepositoryPerHourAreLimited(t *testing.T) {
 		f.comment(int64(3001+i), "octo-cat", 42, "@coding-agent-link task")
 	}
 	f.comment(3004, "octo-cat", 42, "@coding-agent-link one more")
+	f.advance()
 	if !strings.Contains(f.lastReply(), "per hour") {
 		t.Fatalf("超了次数：%q", f.lastReply())
 	}
@@ -445,7 +449,7 @@ func TestUnconfirmedWorkflowChangesExpire(t *testing.T) {
 	f.advance()
 	f.clock.advance(25 * time.Hour)
 	f.advance()
-	if !strings.Contains(f.lastReply(), "No confirmation") || f.triggerState(2001) != "expired" {
+	if !strings.Contains(f.lastReply(), "Confirmation expired") || f.triggerState(2001) != "expired" {
 		t.Fatalf("超时说明并结束：%q %s", f.lastReply(), f.triggerState(2001))
 	}
 	f.comment(2002, "octo-cat", 42, "@coding-agent-link confirm")

@@ -8,6 +8,7 @@ import { abortMarkdown, doneWhenText, errorText, exitWhenText, goalText, network
 import { LANGS, lang, locale, setLang, t } from "./i18n.js";
 import { installScrollbars } from "./scrollbars.js";
 import { conversationFlow, toolGroupCounts } from "./conversation-flow.js";
+import { createEntryUI } from "./entry-ui.js";
 
 const EVENT_TYPES = [
   "task_accepted", "round_started", "stage_started", "node_started", "node_finished",
@@ -107,6 +108,10 @@ const state = {
 };
 
 const ui = {}; // 常驻的 DOM 节点（重画时只换内容）
+const entryUI = createEntryUI({api,h,t,lang,icon,copy,state,openSession,changed:()=>{
+  renderTopbar(); if(state.view === "activity") renderActivity();
+}});
+let entryActivityFilter = "all";
 
 // 当前会话的接口前缀；草稿（还没开出会话）时为 null。
 function sbase() {
@@ -1516,6 +1521,7 @@ function langSwitch() {
 }
 
 async function logout() {
+  entryUI.reset(); entryActivityFilter = "all";
   await api("POST", "/api/logout").catch(() => {});
   state.me = null;
   state.project = null;
@@ -1530,6 +1536,7 @@ async function logout() {
 // ---------------------------------------------------------------- 主界面与路由
 
 async function enterApp() {
+  entryUI.reset(); entryActivityFilter = "all";
   state.personalChoices.clear();
   state.personalConfig = null;
   state.draftEnvironment = "";
@@ -1539,6 +1546,7 @@ async function enterApp() {
   state.draftEnvironment = personalEnv ?? "";
   [state.projects, state.samples, state.sessions] = await Promise.all([api("GET", "/api/projects"), api("GET", "/api/samples"), api("GET", "/api/sessions")]);
   loadActive();
+  entryUI.refreshIndex(true);
   await loadEnvironments();
   await route();
   resumeWorkspaceOperations().catch(report);
@@ -1624,6 +1632,7 @@ async function openSession(pid, sid) {
   }
   renderApp();
   if (state.session) {
+    entryUI.refreshIndex();
     await loadWorkspaceRepos();
     loadChanges();
     loadEnv();
@@ -1650,6 +1659,7 @@ function openDraft(pid) {
 }
 
 function go(view) {
+  if(view === "activity") entryUI.refreshIndex();
   resetSessionState();
   state.view = view;
   state.session = null;
@@ -1661,7 +1671,7 @@ function go(view) {
 function goSettings(section = "personal") {
   resetSessionState();
   state.view = "settings";
-  state.settingsSection = ["personal", "skills", "mcp"].includes(section) ? section : "personal";
+  state.settingsSection = ["personal", "skills", "mcp", "entry"].includes(section) ? section : "personal";
   state.sideOpen = false;
   setHash(`#/settings/${state.settingsSection}`);
   renderApp();
@@ -1673,10 +1683,13 @@ function renderSettings() {
   ui.scroll.replaceChildren(h("div", { class: "page settings-page" },
     h("div", { class: "page-head" }, h("h1", {}, t("settings.title"))),
     h("nav", { class: "settings-tabs seg", role: "tablist", "aria-label": t("settings.title") },
-      [["personal", "personal.title"], ["skills", "skills.title"], ["mcp", "mcp.title"]].map(([key, label]) =>
+      [["personal", "personal.title"], ["skills", "skills.title"], ["mcp", "mcp.title"], ["entry", "entry.title"]].map(([key, label]) =>
         h("button", { role: "tab", "aria-selected": String(section === key), "aria-controls": "settings-panel", class: section === key ? "active" : "", onclick: () => goSettings(key) }, t(label)))),
     content));
-  if (section === "skills") openSkills(content);
+  const tabs=ui.scroll.querySelector(".settings-tabs"), selected=tabs?.querySelector('[aria-selected="true"]');
+  if(tabs&&selected&&selected.offsetLeft+selected.offsetWidth>tabs.offsetLeft+tabs.clientWidth)tabs.scrollLeft=selected.offsetLeft-tabs.offsetLeft;
+  if (section === "entry") entryUI.renderPage(content);
+  else if (section === "skills") openSkills(content);
   else if (section === "mcp") openMcp(content);
   else openPersonalConfig(false, content);
 }
@@ -2007,6 +2020,7 @@ function renderTopbar() {
   }
   if(p){
     const actions=h("div",{class:"topbar-actions"});
+    if(s){const badge=entryUI.sourceBadge(s.id);if(badge)actions.append(badge);}
     if(inSession())actions.append(
       h("button",{class:"btn ghost sm icon-only",title:t("drawer.title"),"data-topbar-drawer":"changes",onclick:()=>openDrawer("changes")},icon("diff","sm")),
       h("button",{class:"btn ghost sm icon-only",title:t(state.statusOpen?"status.hide":"status.show"),"aria-pressed":String(state.statusOpen),onclick:toggleStatus},icon("panelRight","sm")));
@@ -2052,17 +2066,22 @@ function renderWorkspaces() {
 
 function renderActivity() {
   if (!ui.scroll) return;
-  const rows = state.active.map((a) => h("div", { class: "act-row", role: "button", tabindex: 0, onclick: () => jumpTo(a.project_id, a.session_id, a.task.id) },
+  const sourceFilter=h("select",{class:"field entry-activity-filter","aria-label":t("entry.filter")},
+    h("option",{value:"all"},t("entry.allSources")),...entryUI.filterOptions().map(kind=>h("option",{value:kind},entryUI.kindLabel(kind))));
+  sourceFilter.value=entryActivityFilter;
+  sourceFilter.addEventListener("change",()=>{entryActivityFilter=sourceFilter.value;renderActivity();});
+  const filtered=state.active.filter(a=>entryActivityFilter==="all"||entryUI.sourceKind(a.session_id)===entryActivityFilter);
+  const rows = filtered.map((a) => h("div", { class: "act-row", role: "button", tabindex: 0, onclick: () => jumpTo(a.project_id, a.session_id, a.task.id), onkeydown:e=>{if(e.key==="Enter"&&e.target===e.currentTarget)jumpTo(a.project_id,a.session_id,a.task.id);} },
     a.task.status === "TASK_STATUS_RUNNING" ? h("span", { class: "spinner" }) : icon("clock", "sm"),
     h("div", { class: "grow" },
       h("div", { class: "t" }, a.task.message),
-      h("div", { class: "m" }, `${a.project_name} / ${a.session_title || t("session.untitled")} · ${fmtAgo(a.task.created_at)}`)),
+      h("div", { class: "m" }, `${a.project_name} / ${a.session_title || t("session.untitled")} · ${entryUI.kindLabel(entryUI.sourceKind(a.session_id))} · ${fmtAgo(a.task.created_at)}`)),
     statusChip(a.task.status),
     h("button", { class: "btn sm", onclick: (e) => { e.stopPropagation(); cancelTask(a.task.id, sessionURL(a.project_id, a.session_id)); } }, icon("stop", "xs"), t("common.stop")),
   ));
   ui.scroll.replaceChildren(h("div", { class: "page" },
     h("div", { class: "page-head" },
-      h("div", { class: "grow" }, h("h1", {}, t("nav.activity")))),
+      h("div", { class: "grow" }, h("h1", {}, t("nav.activity"))),sourceFilter),
     rows.length ? h("div", { class: "act-list" }, rows)
       : h("div", { class: "empty-page" }, icon("check", "lg"), h("div", {}, t("activity.empty")),
         h("button", { class: "btn sm", onclick: newSession }, icon("compose", "sm"), t("nav.newSession"))),
@@ -3340,6 +3359,7 @@ async function loadEnv() {
 }
 
 async function loadActive() {
+  entryUI.refreshIndex();
   try {
     state.active = await api("GET", "/api/tasks/active");
     renderSide();

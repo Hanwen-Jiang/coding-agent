@@ -1,0 +1,16 @@
+=== RUN   TestEntryFinalStoreFixes
+=== RUN   TestEntryFinalStoreFixes/memory
+    entry_final_probe_test.go:99: memory deleted_hidden=true background_tombstone=true concurrent_alias_one_success=true stale_edit_preserves_rotated_secret=true
+=== RUN   TestEntryFinalStoreFixes/postgres
+    entry_final_probe_test.go:99: postgres deleted_hidden=true background_tombstone=true concurrent_alias_one_success=true stale_edit_preserves_rotated_secret=true
+--- PASS: TestEntryFinalStoreFixes (0.18s)
+    --- PASS: TestEntryFinalStoreFixes/memory (0.00s)
+    --- PASS: TestEntryFinalStoreFixes/postgres (0.18s)
+=== RUN   TestEntryFinalMigration
+    entry_final_probe_test.go:197: two_server_migration_idempotent=true preserved_migrated_file=true disabled_new_connection=true original_active_task_preserved=true accepted_only_started_once=true
+--- PASS: TestEntryFinalMigration (0.26s)
+=== RUN   TestEntryFinalConfirmation
+    entry_final_probe_test.go:268: two_owner_same_alias=true frozen_alias_after_edit=true expired_github_rejected=true expired_web_github_and_generic_rejected=true confirmed=github-comment-9101,github-comment-9102
+--- PASS: TestEntryFinalConfirmation (0.08s)
+PASS
+ok  	github.com/agentruntime/coding-agent/internal/server	2.329s
