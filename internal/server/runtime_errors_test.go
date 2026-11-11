@@ -31,7 +31,7 @@ func TestRuntimeErrorsFollowTheLanguage(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "/api/projects", nil)
 		req.Header.Set("Accept-Language", lang)
-		writeWorkspaceError(rec, req, err, http.StatusInternalServerError)
+		writeWorkspaceError(testContext(rec, req), err, http.StatusInternalServerError)
 		var out map[string]string
 		_ = json.Unmarshal(rec.Body.Bytes(), &out)
 		return rec.Code, out["error"]

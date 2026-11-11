@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
 	"strings"
@@ -124,13 +125,13 @@ func statusOf(err error, fallback int) int {
 }
 
 // writeWorkspaceError 写出工作区操作的错误：Workspace API 的说明原样转出（同 Task API），local 的按请求的语言。
-func writeWorkspaceError(w http.ResponseWriter, r *http.Request, err error, fallback int) {
+func writeWorkspaceError(c *gin.Context, err error, fallback int) {
 	var ae *APIError
 	if errors.As(err, &ae) {
-		writeAPIError(w, r, err)
+		writeAPIError(c, err)
 		return
 	}
-	writeErr(w, r, statusOf(err, fallback), err)
+	writeErr(c, statusOf(err, fallback), err)
 }
 
 // isNotFound：工作区或里面的东西不存在（Workspace API 的 404，local 的 workspaceError 404）。

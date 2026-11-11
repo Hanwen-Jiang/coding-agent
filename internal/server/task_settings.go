@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"path/filepath"
 )
@@ -64,26 +65,26 @@ func (s *Store) PutTaskSettings(tenant, user, workspace string, value *sessionTa
 	defer s.mu.Unlock()
 	return writeFileAtomic(s.taskSettingsFile(tenant, user, workspace), value)
 }
-func (s *Server) handleSessionTaskSettings(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+func (s *Server) handleSessionTaskSettings(c *gin.Context, id identity) {
+	_, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
-	if r.Method == http.MethodGet {
-		writeJSON(w, 200, cloneTaskSettings(sess.TaskSettings))
+	if c.Request.Method == http.MethodGet {
+		writeJSON(c, 200, cloneTaskSettings(sess.TaskSettings))
 		return
 	}
 	var settings sessionTaskSettings
-	if !readJSON(w, r, &settings) {
+	if !readJSON(c, &settings) {
 		return
 	}
 	if err := settings.validate(); err != nil {
-		writeErr(w, r, 400, err)
+		writeErr(c, 400, err)
 		return
 	}
 	if err := s.store.PutTaskSettings(id.TenantID, id.UserID, sess.WorkspaceID, &settings); err != nil {
-		writeErr(w, r, 500, err)
+		writeErr(c, 500, err)
 		return
 	}
-	writeJSON(w, 200, &settings)
+	writeJSON(c, 200, &settings)
 }

@@ -8,6 +8,7 @@ package server
 // 才打开），关着时三个接口都 404。
 
 import (
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"regexp"
 	"strings"
@@ -48,60 +49,60 @@ func (s *Server) callSecrets(r *http.Request, id identity, method string, req, r
 }
 
 // secretsEnabled 在关着时回 404（不去问 Runtime）。
-func (s *Server) secretsEnabled(w http.ResponseWriter, r *http.Request) bool {
+func (s *Server) secretsEnabled(c *gin.Context) bool {
 	if !s.cfg.NetworkSecrets {
-		writeMsg(w, r, http.StatusNotFound, "网络密钥还没有打开")
+		writeMsg(c, http.StatusNotFound, "网络密钥还没有打开")
 		return false
 	}
 	return true
 }
 
-func (s *Server) handleListSecrets(w http.ResponseWriter, r *http.Request, id identity) {
-	if !s.secretsEnabled(w, r) {
+func (s *Server) handleListSecrets(c *gin.Context, id identity) {
+	if !s.secretsEnabled(c) {
 		return
 	}
 	var resp struct {
 		Secrets []wireSecret `json:"secrets"`
 	}
-	if err := s.callSecrets(r, id, "ListUserSecrets", map[string]string{"tenantId": id.TenantID}, &resp); err != nil {
-		writeAPIError(w, r, err)
+	if err := s.callSecrets(c.Request, id, "ListUserSecrets", map[string]string{"tenantId": id.TenantID}, &resp); err != nil {
+		writeAPIError(c, err)
 		return
 	}
 	out := make([]userSecret, 0, len(resp.Secrets))
 	for _, x := range resp.Secrets {
 		out = append(out, x.view())
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"secrets": out})
+	writeJSON(c, http.StatusOK, map[string]any{"secrets": out})
 }
 
-func (s *Server) handlePutSecret(w http.ResponseWriter, r *http.Request, id identity) {
-	if !s.secretsEnabled(w, r) {
+func (s *Server) handlePutSecret(c *gin.Context, id identity) {
+	if !s.secretsEnabled(c) {
 		return
 	}
-	name := r.PathValue("name")
+	name := c.Param("name")
 	if !secretName.MatchString(name) {
-		writeMsg(w, r, http.StatusBadRequest, "密钥名只能用字母、数字与 . _ -，最多 128 个字符")
+		writeMsg(c, http.StatusBadRequest, "密钥名只能用字母、数字与 . _ -，最多 128 个字符")
 		return
 	}
 	var req struct {
 		Value string `json:"value"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	if problem := secretValueProblem(req.Value); problem != nil {
-		writeErr(w, r, http.StatusBadRequest, problem)
+		writeErr(c, http.StatusBadRequest, problem)
 		return
 	}
 	var resp struct {
 		Secret  wireSecret `json:"secret"`
 		Created bool       `json:"created"`
 	}
-	if err := s.callSecrets(r, id, "PutUserSecret", map[string]string{"tenantId": id.TenantID, "name": name, "value": req.Value}, &resp); err != nil {
-		writeAPIError(w, r, err)
+	if err := s.callSecrets(c.Request, id, "PutUserSecret", map[string]string{"tenantId": id.TenantID, "name": name, "value": req.Value}, &resp); err != nil {
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"secret": resp.Secret.view(), "created": resp.Created})
+	writeJSON(c, http.StatusOK, map[string]any{"secret": resp.Secret.view(), "created": resp.Created})
 }
 
 // secretValueProblem 是值不合规的原因（不带值）；合规时为 nil。
@@ -119,21 +120,21 @@ func secretValueProblem(v string) *Msg {
 	return nil
 }
 
-func (s *Server) handleDeleteSecret(w http.ResponseWriter, r *http.Request, id identity) {
-	if !s.secretsEnabled(w, r) {
+func (s *Server) handleDeleteSecret(c *gin.Context, id identity) {
+	if !s.secretsEnabled(c) {
 		return
 	}
-	name := r.PathValue("name")
+	name := c.Param("name")
 	if !secretName.MatchString(name) {
-		writeMsg(w, r, http.StatusBadRequest, "密钥名只能用字母、数字与 . _ -，最多 128 个字符")
+		writeMsg(c, http.StatusBadRequest, "密钥名只能用字母、数字与 . _ -，最多 128 个字符")
 		return
 	}
 	var resp struct {
 		Deleted bool `json:"deleted"`
 	}
-	if err := s.callSecrets(r, id, "DeleteUserSecret", map[string]string{"tenantId": id.TenantID, "name": name}, &resp); err != nil {
-		writeAPIError(w, r, err)
+	if err := s.callSecrets(c.Request, id, "DeleteUserSecret", map[string]string{"tenantId": id.TenantID, "name": name}, &resp); err != nil {
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": resp.Deleted})
+	writeJSON(c, http.StatusOK, map[string]any{"deleted": resp.Deleted})
 }

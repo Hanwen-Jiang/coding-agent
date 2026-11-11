@@ -11,6 +11,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"time"
 
@@ -22,8 +23,8 @@ import (
 // maxEventCursors 同 Runtime 的 ListSessionEvents：一次最多取这么多个任务。
 const maxEventCursors = 50
 
-func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+func (s *Server) handleSessionEvents(c *gin.Context, id identity) {
+	_, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
@@ -34,47 +35,47 @@ func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request, id 
 		} `json:"cursors"`
 		PageSize int32 `json:"page_size"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
-		writeMsg(w, r, http.StatusBadRequest, "请求体不是合法的 JSON")
+	if err := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)).Decode(&body); err != nil {
+		writeMsg(c, http.StatusBadRequest, "请求体不是合法的 JSON")
 		return
 	}
 	if len(body.Cursors) > maxEventCursors {
-		writeMsg(w, r, http.StatusBadRequest, "一次最多取 %d 个任务的事件", maxEventCursors)
+		writeMsg(c, http.StatusBadRequest, "一次最多取 %d 个任务的事件", maxEventCursors)
 		return
 	}
 	if sess.RuntimeSessionID == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"tasks": []any{}})
+		writeJSON(c, http.StatusOK, map[string]any{"tasks": []any{}})
 		return
 	}
 	cursors := make([]map[string]any, 0, len(body.Cursors))
-	for _, c := range body.Cursors {
-		cursors = append(cursors, map[string]any{"taskId": c.TaskID, "afterEventId": c.After})
+	for _, cursor := range body.Cursors {
+		cursors = append(cursors, map[string]any{"taskId": cursor.TaskID, "afterEventId": cursor.After})
 	}
 	req := map[string]any{"sessionId": sess.RuntimeSessionID, "cursors": cursors, "pageSize": body.PageSize}
-	ctx, cancel := ctxTimeout(r, 30*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 30*time.Second)
 	defer cancel()
 	var raw json.RawMessage
 	if err := s.api.Call(ctx, id.token, "ListSessionEvents", req, &raw); err != nil {
 		var apiErr *APIError
 		if errors.As(err, &apiErr) && (apiErr.Status == http.StatusNotFound || apiErr.Code == "not_found" || apiErr.Code == "unimplemented") {
-			writeMsg(w, r, http.StatusNotFound, "会话不存在")
+			writeMsg(c, http.StatusNotFound, "会话不存在")
 			return
 		}
-		writeMsg(w, r, http.StatusBadGateway, "暂时取不到会话的事件")
+		writeMsg(c, http.StatusBadGateway, "暂时取不到会话的事件")
 		return
 	}
 	resp := &taskapiv1.ListSessionEventsResponse{}
 	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(raw, resp); err != nil {
-		writeMsg(w, r, http.StatusBadGateway, "暂时取不到会话的事件")
+		writeMsg(c, http.StatusBadGateway, "暂时取不到会话的事件")
 		return
 	}
 	out, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(resp)
 	if err != nil {
-		writeMsg(w, r, http.StatusBadGateway, "暂时取不到会话的事件")
+		writeMsg(c, http.StatusBadGateway, "暂时取不到会话的事件")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(out)
+	c.Header("Content-Type", "application/json; charset=utf-8")
+	c.Header("Cache-Control", "no-store")
+	c.Status(http.StatusOK)
+	_, _ = c.Writer.Write(out)
 }

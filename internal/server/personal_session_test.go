@@ -82,11 +82,10 @@ func TestWorkspaceHTTPRecoveryPreservesPersonalSelectionAndShortWorkspaceID(t *t
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(http.MethodPost, "/api/projects/"+project.ID+"/sessions", strings.NewReader(`{"title":"test","personal_config":{"skill_names":[],"mcp_connection_ids":[]}}`))
-	request.SetPathValue("project", project.ID)
 	request.Header.Set("X-Coding-Async", "1")
 	request.Header.Set("Idempotency-Key", "personal-recovery-1")
 	out := httptest.NewRecorder()
-	first.workspaceHTTP("create_session")(out, request, owner)
+	first.workspaceHTTP("create_session")(testContext(out, request, "project", project.ID), owner)
 	if out.Code != 202 {
 		t.Fatal(out.Body)
 	}

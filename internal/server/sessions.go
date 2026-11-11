@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"slices"
 	"strings"
@@ -75,35 +76,35 @@ func (s *Server) ensureSessions(tenant string) ([]Session, error) {
 }
 
 // session 取出请求路径里的工作区与会话，确认它们属于这个租户。
-func (s *Server) session(w http.ResponseWriter, r *http.Request, id identity) (Project, Session, bool) {
-	p, ok := s.project(w, r, id)
+func (s *Server) session(c *gin.Context, id identity) (Project, Session, bool) {
+	p, ok := s.project(c, id)
 	if !ok {
 		return Project{}, Session{}, false
 	}
-	sid := r.PathValue("session")
+	sid := c.Param("session")
 	var saved Session
-	if workspaceFact(r.Context(), "session:"+p.ID+":"+sid, &saved) {
+	if workspaceFact(c.Request.Context(), "session:"+p.ID+":"+sid, &saved) {
 		projected, err := s.personalSession(id, saved)
 		if err != nil {
-			writeErr(w, r, 500, err)
+			writeErr(c, 500, err)
 			return Project{}, Session{}, false
 		}
 		return p, projected, true
 	}
 	sessions, err := s.ensureSessions(id.TenantID)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return Project{}, Session{}, false
 	}
 	i := slices.IndexFunc(sessions, func(x Session) bool { return x.ProjectID == p.ID && x.ID == sid })
 	if !slug.MatchString(sid) || i < 0 {
-		writeMsg(w, r, http.StatusNotFound, "会话不存在")
+		writeMsg(c, http.StatusNotFound, "会话不存在")
 		return Project{}, Session{}, false
 	}
-	saveWorkspaceFact(r.Context(), "session:"+p.ID+":"+sid, sessions[i])
+	saveWorkspaceFact(c.Request.Context(), "session:"+p.ID+":"+sid, sessions[i])
 	projected, err := s.personalSession(id, sessions[i])
 	if err != nil {
-		writeErr(w, r, 500, err)
+		writeErr(c, 500, err)
 		return Project{}, Session{}, false
 	}
 	return p, projected, true
@@ -136,10 +137,10 @@ func (s *Server) updateSession(tenant string, sess Session, fn func(*Session)) (
 	return out, err
 }
 
-func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleListSessions(c *gin.Context, id identity) {
 	sessions, err := s.ensureSessions(id.TenantID)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	if sessions == nil {
@@ -148,16 +149,16 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request, id i
 	for i := range sessions {
 		sessions[i], err = s.personalSession(id, sessions[i])
 		if err != nil {
-			writeErr(w, r, 500, err)
+			writeErr(c, 500, err)
 			return
 		}
 	}
 	slices.SortFunc(sessions, func(a, b Session) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
-	writeJSON(w, http.StatusOK, sessions)
+	writeJSON(c, http.StatusOK, sessions)
 }
 
-func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id identity) {
-	p, ok := s.project(w, r, id)
+func (s *Server) handleCreateSession(c *gin.Context, id identity) {
+	p, ok := s.project(c, id)
 	if !ok {
 		return
 	}
@@ -167,52 +168,52 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request, id 
 		PersonalConfig *personalSelection   `json:"personal_config"`
 		TaskSettings   *sessionTaskSettings `json:"task_settings"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	if err := req.PersonalConfig.validate(); err != nil {
-		writeErr(w, r, http.StatusBadRequest, err)
+		writeErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if err := req.TaskSettings.validate(); err != nil {
-		writeErr(w, r, 400, err)
+		writeErr(c, 400, err)
 		return
 	}
 	if _, err := s.ensureSessions(id.TenantID); err != nil { // 旧项目先迁移出 main 会话，免得被新会话挤掉
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	var env *Environment
 	if req.EnvironmentID != "" {
 		found, ok, err := s.environmentForUser(id.TenantID, id.UserID, req.EnvironmentID)
 		if err != nil {
-			writeErr(w, r, http.StatusInternalServerError, err)
+			writeErr(c, http.StatusInternalServerError, err)
 			return
 		} else if !ok {
-			writeMsg(w, r, http.StatusBadRequest, "环境不存在或不属于当前用户")
+			writeMsg(c, http.StatusBadRequest, "环境不存在或不属于当前用户")
 			return
 		}
 		env = &found
 	}
-	sess, err := s.createSession(r, id, p, sessionTitle(req.Title), env, nil)
+	sess, err := s.createSession(c.Request, id, p, sessionTitle(req.Title), env, nil)
 	if err != nil {
-		writeMsg(w, r, http.StatusInternalServerError, "开会话失败：%v", err)
+		writeMsg(c, http.StatusInternalServerError, "开会话失败：%v", err)
 		return
 	}
 	if req.PersonalConfig != nil {
 		err = s.store.PutPersonalSession(id.TenantID, id.UserID, sess.WorkspaceID, req.PersonalConfig)
 		if err != nil {
-			writeErr(w, r, http.StatusInternalServerError, err)
+			writeErr(c, http.StatusInternalServerError, err)
 			return
 		}
 		sess.PersonalConfig = clonePersonalSelection(req.PersonalConfig)
 	}
 	if err := s.store.PutTaskSettings(id.TenantID, id.UserID, sess.WorkspaceID, req.TaskSettings); err != nil {
-		writeErr(w, r, 500, err)
+		writeErr(c, 500, err)
 		return
 	}
 	sess.TaskSettings = cloneTaskSettings(req.TaskSettings)
-	writeJSON(w, http.StatusCreated, sess)
+	writeJSON(c, http.StatusCreated, sess)
 }
 
 // createSession 从工作区的基线仓库复制出会话的工作副本（Workspaces.Create 的 From），Git 平台的工作区再尽量切到基线分支
@@ -310,80 +311,80 @@ func (s *Server) createSession(r *http.Request, id identity, p Project, title st
 
 // handleDuplicateSession 复制会话（Workspace API 的 copy）：新会话的工作副本从这个会话的工作副本复制，环境配置的快照沿用（配置删掉了也照用，没有密钥），
 // 对话、分支与 PR 不带过去（新会话推送时有自己的 agent/* 分支）。在跑任务时不复制：拿到的会是半截的改动。
-func (s *Server) handleDuplicateSession(w http.ResponseWriter, r *http.Request, id identity) {
-	p, src, ok := s.session(w, r, id)
+func (s *Server) handleDuplicateSession(c *gin.Context, id identity) {
+	p, src, ok := s.session(c, id)
 	if !ok {
 		return
 	}
 	var req struct {
 		Title string `json:"title"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
-	if s.busy(r, id, src.WorkspaceID) {
-		writeMsg(w, r, http.StatusConflict, "还有任务在跑，等它结束再复制")
+	if s.busy(c.Request, id, src.WorkspaceID) {
+		writeMsg(c, http.StatusConflict, "还有任务在跑，等它结束再复制")
 		return
 	}
 	title := sessionTitle(req.Title)
 	if title == "" {
 		title = src.Title
 	}
-	sess, err := s.createSession(r, id, p, title, nil, &src)
+	sess, err := s.createSession(c.Request, id, p, title, nil, &src)
 	if err != nil {
-		writeMsg(w, r, statusOf(err, http.StatusInternalServerError), "复制会话失败：%v", err)
+		writeMsg(c, statusOf(err, http.StatusInternalServerError), "复制会话失败：%v", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, sess)
+	writeJSON(c, http.StatusCreated, sess)
 }
 
-func (s *Server) handleRenameSession(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+func (s *Server) handleRenameSession(c *gin.Context, id identity) {
+	_, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
 	var req struct {
 		Title string `json:"title"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	title := sessionTitle(req.Title)
 	if title == "" {
-		writeMsg(w, r, http.StatusBadRequest, "标题不能为空")
+		writeMsg(c, http.StatusBadRequest, "标题不能为空")
 		return
 	}
 	updated, err := s.updateSession(id.TenantID, sess, func(x *Session) { x.Title = title })
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, updated)
+	writeJSON(c, http.StatusOK, updated)
 }
 
 // handleDeleteSession 删掉会话与它的工作副本；迁移来的 main 会话用的是工作区自己的目录，只删记录，不删目录。
-func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request, id identity) {
-	p, sess, ok := s.session(w, r, id)
+func (s *Server) handleDeleteSession(c *gin.Context, id identity) {
+	p, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
-	if s.busy(r, id, sess.WorkspaceID) {
-		writeMsg(w, r, http.StatusConflict, "还有任务在跑，等它结束或先取消")
+	if s.busy(c.Request, id, sess.WorkspaceID) {
+		writeMsg(c, http.StatusConflict, "还有任务在跑，等它结束或先取消")
 		return
 	}
 	if sess.WorkspaceID != p.ID {
-		ctx, cancel := ctxTimeout(r, 5*time.Minute)
+		ctx, cancel := ctxTimeout(c.Request, 5*time.Minute)
 		defer cancel()
 		if err := s.deleteWorkspace(ctx, id, sess.WorkspaceID); err != nil {
-			writeWorkspaceError(w, r, err, http.StatusInternalServerError)
+			writeWorkspaceError(c, err, http.StatusInternalServerError)
 			return
 		}
 	}
 	if err := s.store.DeleteSession(id.TenantID, sess); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(c, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // projectSessions 是工作区下的全部会话。

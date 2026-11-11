@@ -18,7 +18,7 @@ import (
 	"github.com/agentruntime/coding-agent/internal/samples"
 )
 
-// sourceMessages 按源码找出全部给用户看的中文格式串：msg 的第一个参数、writeMsg 的第四个参数。
+// sourceMessages 按源码找出全部给用户看的中文格式串：msg 的第一个参数、writeMsg 与 abortMsg 的第三个参数。
 // 它们必须是字符串字面量，否则抽不出来、也就核对不了有没有英文。
 func sourceMessages(t *testing.T) map[string]string {
 	t.Helper()
@@ -29,7 +29,7 @@ func sourceMessages(t *testing.T) map[string]string {
 	out := map[string]string{} // 格式串 → 第一次出现的位置
 	fset := token.NewFileSet()
 	for _, name := range files {
-		if strings.HasSuffix(name, "_test.go") || name == "i18n.go" { // i18n.go 只定义 msg 与 writeMsg
+		if strings.HasSuffix(name, "_test.go") || name == "i18n.go" { // i18n.go 只定义 msg、writeMsg 与 abortMsg
 			continue
 		}
 		f, err := parser.ParseFile(fset, name, nil, 0)
@@ -45,8 +45,8 @@ func sourceMessages(t *testing.T) map[string]string {
 			if !ok {
 				return true
 			}
-			at := map[string]int{"msg": 0, "writeMsg": 3}[fn.Name]
-			if (fn.Name != "msg" && fn.Name != "writeMsg") || len(call.Args) <= at {
+			at, known := map[string]int{"msg": 0, "writeMsg": 2, "abortMsg": 2}[fn.Name]
+			if !known || len(call.Args) <= at {
 				return true
 			}
 			lit, ok := call.Args[at].(*ast.BasicLit)

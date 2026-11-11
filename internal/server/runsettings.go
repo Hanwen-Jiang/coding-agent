@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"math"
 	"net/http"
 	"slices"
@@ -68,12 +69,12 @@ func sameRecord(a, b TaskRecord) bool {
 // handleEnv 是右栏“环境”：Runtime 是否连得上、沙箱、会话选定的环境配置、Runtime 的环境记录、工作区来源与 Runtime 的 Session。
 // 它是只读的投影（人工验收 Q105）：不调 Workspace API（那会借沙箱、动环境的生命周期），分支、HEAD 与改动由网页从“改动”取；
 // 就绪、复用、到期只取 Runtime EnvironmentService 的记录（runtimeEnvironmentsOf），读不到时报 unknown 或 blocked_external。
-func (s *Server) handleEnv(w http.ResponseWriter, r *http.Request, id identity) {
-	p, sess, ok := s.session(w, r, id)
+func (s *Server) handleEnv(c *gin.Context, id identity) {
+	p, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 30*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 30*time.Second)
 	defer cancel()
 	sandbox := map[string]any{"mode": s.cfg.Sandbox}
 	if s.cfg.Sandbox == "docker" {
@@ -94,7 +95,7 @@ func (s *Server) handleEnv(w http.ResponseWriter, r *http.Request, id identity) 
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(c, http.StatusOK, map[string]any{
 		"runtime":              map[string]any{"ok": s.api.Healthy(ctx)},
 		"sandbox":              sandbox,
 		"environment":          config,
@@ -115,15 +116,15 @@ type activeTask struct {
 }
 
 // handleActiveTasks 是“进行中”：这个租户所有工作区、所有会话里还没结束的任务，按提交时间排。
-func (s *Server) handleActiveTasks(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleActiveTasks(c *gin.Context, id identity) {
 	projects, err := s.store.Projects(id.TenantID)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	sessions, err := s.ensureSessions(id.TenantID)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	names := map[string]string{}
@@ -132,14 +133,14 @@ func (s *Server) handleActiveTasks(w http.ResponseWriter, r *http.Request, id id
 	}
 	out := []activeTask{}
 	for _, sess := range sessions {
-		for _, t := range s.refresh(r, id, sess.WorkspaceID) {
+		for _, t := range s.refresh(c.Request, id, sess.WorkspaceID) {
 			if !terminal(t.Status) {
 				out = append(out, activeTask{ProjectID: sess.ProjectID, ProjectName: names[sess.ProjectID], SessionID: sess.ID, SessionTitle: sess.Title, Task: t})
 			}
 		}
 	}
 	slices.SortFunc(out, func(a, b activeTask) int { return a.Task.CreatedAt.Compare(b.Task.CreatedAt) })
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(c, http.StatusOK, out)
 }
 
 // notFound 判断 Task API 的错误是不是“没有这个任务”（例如 Runtime 的数据重建过）：这样的任务不再去查。

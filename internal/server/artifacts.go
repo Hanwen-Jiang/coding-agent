@@ -10,6 +10,7 @@ package server
 
 import (
 	"encoding/json"
+	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
 	"regexp"
@@ -32,21 +33,21 @@ type taskArtifact struct {
 	State      string      `json:"state"`
 }
 
-func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request, id identity) {
-	_, t, ok := s.task(w, r, id)
+func (s *Server) handleListArtifacts(c *gin.Context, id identity) {
+	_, t, ok := s.task(c, id)
 	if !ok {
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 15*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 15*time.Second)
 	defer cancel()
 	var out struct {
 		Artifacts []taskArtifact `json:"artifacts"`
 	}
 	if err := s.api.Call(ctx, id.token, "ListTaskArtifacts", map[string]string{"taskId": t.ID}, &out); err != nil {
-		writeAPIError(w, r, err)
+		writeAPIError(c, err)
 		return
 	}
-	base := strings.TrimSuffix(r.URL.Path, "/artifacts")
+	base := strings.TrimSuffix(c.Request.URL.Path, "/artifacts")
 	list := make([]map[string]any, 0, len(out.Artifacts))
 	for _, a := range out.Artifacts {
 		size, _ := a.SizeBytes.Int64()
@@ -60,40 +61,40 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request, id 
 			"created_at": a.CreatedAt, "expires_at": a.ExpiresAt, "expired": expired, "url": url,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"artifacts": list})
+	writeJSON(c, http.StatusOK, map[string]any{"artifacts": list})
 }
 
-func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request, id identity) {
-	_, t, ok := s.task(w, r, id)
+func (s *Server) handleArtifactDownload(c *gin.Context, id identity) {
+	_, t, ok := s.task(c, id)
 	if !ok {
 		return
 	}
-	artifact := r.PathValue("artifact")
+	artifact := c.Param("artifact")
 	if !artifactIDPattern.MatchString(artifact) {
-		writeMsg(w, r, http.StatusNotFound, "文件不存在")
+		writeMsg(c, http.StatusNotFound, "文件不存在")
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 2*time.Minute)
+	ctx, cancel := ctxTimeout(c.Request, 2*time.Minute)
 	defer cancel()
 	res, err := s.api.Artifact(ctx, id.token, t.ID, artifact)
 	if err != nil {
-		writeMsg(w, r, http.StatusBadGateway, "连不上 task-service")
+		writeMsg(c, http.StatusBadGateway, "连不上 task-service")
 		return
 	}
 	defer res.Body.Close()
 	switch res.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotFound:
-		writeMsg(w, r, http.StatusNotFound, "文件不存在")
+		writeMsg(c, http.StatusNotFound, "文件不存在")
 		return
 	case http.StatusGone:
-		writeMsg(w, r, http.StatusGone, "文件已过期")
+		writeMsg(c, http.StatusGone, "文件已过期")
 		return
 	default:
-		writeMsg(w, r, http.StatusBadGateway, "暂时下载不了这个文件")
+		writeMsg(c, http.StatusBadGateway, "暂时下载不了这个文件")
 		return
 	}
-	h := w.Header()
+	h := c.Writer.Header()
 	for _, k := range []string{"Content-Type", "Content-Length", "Content-Disposition"} {
 		if v := res.Header.Get(k); v != "" {
 			h.Set(k, v)
@@ -102,6 +103,6 @@ func (s *Server) handleArtifactDownload(w http.ResponseWriter, r *http.Request, 
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "sandbox")
 	h.Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, res.Body)
+	c.Status(http.StatusOK)
+	_, _ = io.Copy(c.Writer, res.Body)
 }

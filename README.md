@@ -118,7 +118,7 @@ coding-web 全部经环境变量配置，完整的说明在 [cmd/coding-web/main
 
 | 部分 | 位置 | 说明 |
 | --- | --- | --- |
-| coding-web | `cmd/coding-web`、`internal/server` | Go 服务：登录与账号、工作区与会话、经 Task API 下任务、代理 SSE、diff、提交与推送 |
+| coding-web | `cmd/coding-web`、`internal/server` | Go 服务，HTTP 层用 Gin：登录与账号、工作区与会话、经 Task API 下任务、代理 SSE、diff、提交与推送 |
 | 网页 | `ui/chat`、`internal/web/static` | 主对话、输入框与文件工作台用 React 19 + HeroUI；其余是原生 JS。构建产物同源，由 Go 内嵌 |
 | GitHub App | `internal/github` | Webhook 收件箱（Postgres）：验签、去重、退避重试、死信、重放、对账 |
 | 接入点 | `internal/entry` | 连接、触发、投递的存储与各类型（`githubcomment`、`schedule`、`alert`、`email`） |

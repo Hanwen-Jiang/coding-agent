@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"log"
 	"net/http"
 	"net/url"
@@ -504,16 +505,16 @@ func (s *Server) callbackURL(provider string) string {
 func stateCookieName(provider string) string { return "cw_oauth_" + provider }
 
 // handleOAuthLogin 跳到平台授权。?link=1 时是给已登录的账号连接这一家（要已登录）。
-func (s *Server) handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
-	p := s.providers[r.PathValue("provider")]
+func (s *Server) handleOAuthLogin(c *gin.Context) {
+	p := s.providers[c.Param("provider")]
 	if p == nil {
-		writeMsg(w, r, http.StatusNotFound, "没有配置这个登录方式")
+		writeMsg(c, http.StatusNotFound, "没有配置这个登录方式")
 		return
 	}
 	mode := "login"
-	if r.URL.Query().Get("link") == "1" {
-		if _, ok := s.currentIdentity(r); !ok {
-			http.Redirect(w, r, "/#/login?error="+url.QueryEscape(msg("先登录，再连接 %s", p.Name).In(requestLang(r))), http.StatusFound)
+	if c.Query("link") == "1" {
+		if _, ok := s.currentIdentity(c.Request); !ok {
+			c.Redirect(http.StatusFound, "/#/login?error="+url.QueryEscape(msg("先登录，再连接 %s", p.Name).In(requestLang(c.Request))))
 			return
 		}
 		mode = "link"
@@ -525,8 +526,8 @@ func (s *Server) handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 	if verifier != "" {
 		value += "." + verifier
 	}
-	http.SetCookie(w, &http.Cookie{Name: stateCookieName(p.id), Value: value, Path: "/api/auth/" + p.id, HttpOnly: true, Secure: s.cfg.SecureCookie, SameSite: http.SameSiteLaxMode, MaxAge: 600})
-	http.Redirect(w, r, p.authorizeURL(s.callbackURL(p.id), state, verifier), http.StatusFound)
+	http.SetCookie(c.Writer, &http.Cookie{Name: stateCookieName(p.id), Value: value, Path: "/api/auth/" + p.id, HttpOnly: true, Secure: s.cfg.SecureCookie, SameSite: http.SameSiteLaxMode, MaxAge: 600})
+	c.Redirect(http.StatusFound, p.authorizeURL(s.callbackURL(p.id), state, verifier))
 }
 
 // currentIdentity 读出请求里已登录的身份（不写错误）。
@@ -551,25 +552,25 @@ func (s *Server) currentIdentity(r *http.Request) (identity, bool) {
 }
 
 // handleOAuthCallback 换令牌、认人，然后登录（找到或新建账号）或把这一家连接到当前账号。
-func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
-	p := s.providers[r.PathValue("provider")]
+func (s *Server) handleOAuthCallback(c *gin.Context) {
+	p := s.providers[c.Param("provider")]
 	mode := "login"
 	// fail 跳回网页并带上原因（按请求的语言）；日志里记中文（平台给的错误说明，不含令牌），排查回调用。
 	fail := func(why *Msg) {
-		log.Printf("OAuth %s（%s）失败：%s", r.PathValue("provider"), mode, why)
+		log.Printf("OAuth %s（%s）失败：%s", c.Param("provider"), mode, why)
 		target := "/#/login?error="
 		if mode == "link" {
 			target = "/#/?error="
 		}
-		http.Redirect(w, r, target+url.QueryEscape(why.In(requestLang(r))), http.StatusFound)
+		c.Redirect(http.StatusFound, target+url.QueryEscape(why.In(requestLang(c.Request))))
 	}
 	if p == nil {
 		fail(msg("没有配置这个登录方式"))
 		return
 	}
-	cookie, err := r.Cookie(stateCookieName(p.id))
-	http.SetCookie(w, &http.Cookie{Name: stateCookieName(p.id), Value: "", Path: "/api/auth/" + p.id, HttpOnly: true, Secure: s.cfg.SecureCookie, SameSite: http.SameSiteLaxMode, MaxAge: -1})
-	state := r.URL.Query().Get("state")
+	cookie, err := c.Request.Cookie(stateCookieName(p.id))
+	http.SetCookie(c.Writer, &http.Cookie{Name: stateCookieName(p.id), Value: "", Path: "/api/auth/" + p.id, HttpOnly: true, Secure: s.cfg.SecureCookie, SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	state := c.Query("state")
 	var want, verifier string
 	if err == nil {
 		var rest string
@@ -581,13 +582,13 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		fail(msg("登录状态不匹配，请重新登录"))
 		return
 	}
-	if e := r.URL.Query().Get("error"); e != "" {
+	if e := c.Query("error"); e != "" {
 		fail(msg("%s 没有授权：%s", p.Name, e))
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 30*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 30*time.Second)
 	defer cancel()
-	t, err := p.exchange(ctx, r.URL.Query().Get("code"), s.callbackURL(p.id), verifier)
+	t, err := p.exchange(ctx, c.Query("code"), s.callbackURL(p.id), verifier)
 	if err != nil {
 		why, ok := err.(*Msg) // 换令牌的说明自己带着平台名
 		if !ok {
@@ -628,7 +629,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	var ref identityRef
 	if mode == "link" {
-		cur, ok := s.currentIdentity(r)
+		cur, ok := s.currentIdentity(c.Request)
 		if !ok {
 			fail(msg("登录已过期，请重新登录后再连接"))
 			return
@@ -682,15 +683,15 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	if mode == "link" {
 		log.Printf("OAuth %s（link）成功：%s 连到 %s/%s", p.id, u.Login, ref.Tenant, ref.User)
-		http.Redirect(w, r, "/#/?linked="+p.id, http.StatusFound)
+		c.Redirect(http.StatusFound, "/#/?linked="+p.id)
 		return
 	}
 	log.Printf("OAuth %s（login）成功：%s 登录为 %s/%s", p.id, u.Login, ref.Tenant, ref.User)
-	if _, err := s.setSession(w, ref.Tenant, ref.User); err != nil {
+	if _, err := s.setSession(c, ref.Tenant, ref.User); err != nil {
 		fail(msg("建会话失败：%v", err))
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusFound)
+	c.Redirect(http.StatusFound, "/")
 }
 
 // --- 账号接口 ---
@@ -726,24 +727,24 @@ func (s *Server) connections(id identity) (Account, []connectionView) {
 	return a, out
 }
 
-func (s *Server) handleAccount(w http.ResponseWriter, _ *http.Request, id identity) {
+func (s *Server) handleAccount(c *gin.Context, id identity) {
 	_, conns := s.connections(id)
-	writeJSON(w, http.StatusOK, map[string]any{"tenant": id.TenantID, "user": id.UserID, "connections": conns, "dev_account": !reservedTenant(id.TenantID)})
+	writeJSON(c, http.StatusOK, map[string]any{"tenant": id.TenantID, "user": id.UserID, "connections": conns, "dev_account": !reservedTenant(id.TenantID)})
 }
 
 // handleDisconnect 断开一家。平台账号建的账号至少要留一个登录方式（开发登录的账号可以全断）。
-func (s *Server) handleDisconnect(w http.ResponseWriter, r *http.Request, id identity) {
-	provider := r.PathValue("provider")
+func (s *Server) handleDisconnect(c *gin.Context, id identity) {
+	provider := c.Param("provider")
 	var removed Connection
 	_, err := s.updateAccount(id.TenantID, id.UserID, func(a *Account) error {
-		c, ok := a.Connections[provider]
+		conn, ok := a.Connections[provider]
 		if !ok {
 			return errNotConnected
 		}
 		if len(a.Connections) == 1 && reservedTenant(id.TenantID) {
 			return errLastLogin
 		}
-		removed = c
+		removed = conn
 		delete(a.Connections, provider)
 		if a.Primary == provider {
 			a.Primary = ""
@@ -758,46 +759,46 @@ func (s *Server) handleDisconnect(w http.ResponseWriter, r *http.Request, id ide
 	})
 	switch {
 	case errors.Is(err, errNotConnected):
-		writeMsg(w, r, http.StatusNotFound, "没有连接这个平台")
+		writeMsg(c, http.StatusNotFound, "没有连接这个平台")
 		return
 	case errors.Is(err, errLastLogin):
-		writeMsg(w, r, http.StatusConflict, "这是这个账号唯一的登录方式，先连接另一家再断开")
+		writeMsg(c, http.StatusConflict, "这是这个账号唯一的登录方式，先连接另一家再断开")
 		return
 	case err != nil:
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	_ = s.unbindIdentity(identityKey(provider, removed.RemoteID))
 	_, conns := s.connections(id)
-	writeJSON(w, http.StatusOK, map[string]any{"connections": conns})
+	writeJSON(c, http.StatusOK, map[string]any{"connections": conns})
 }
 
 var errLastLogin = errors.New("last login")
 
 // handleRepos 列出账号在一家 Git 平台上能推送的仓库（新建工作区时选）。
-func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request, id identity) {
-	name := r.PathValue("provider")
+func (s *Server) handleRepos(c *gin.Context, id identity) {
+	name := c.Param("provider")
 	if name == "" {
 		name = "github" // 旧地址 /api/github/repos
 	}
 	p := s.providers[name]
 	if p == nil || !p.git {
-		writeMsg(w, r, http.StatusNotFound, "没有配置这个 Git 平台")
+		writeMsg(c, http.StatusNotFound, "没有配置这个 Git 平台")
 		return
 	}
-	conn, token, err := s.connToken(r, id, p)
+	conn, token, err := s.connToken(c.Request, id, p)
 	if errors.Is(err, errNotConnected) {
-		writeMsg(w, r, http.StatusForbidden, "先在“账号与平台”里连接 %s", p.Name)
+		writeMsg(c, http.StatusForbidden, "先在“账号与平台”里连接 %s", p.Name)
 		return
 	} else if err != nil {
-		writeGitError(w, r, err)
+		writeGitError(c, err)
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 30*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 30*time.Second)
 	defer cancel()
 	repos, err := p.repos(ctx, token)
 	if err != nil {
-		writeGitError(w, r, err)
+		writeGitError(c, err)
 		return
 	}
 	for i := range repos {
@@ -815,7 +816,7 @@ func (s *Server) handleRepos(w http.ResponseWriter, r *http.Request, id identity
 		return 2
 	}
 	slices.SortStableFunc(repos, func(a, b remoteRepo) int { return rank(a) - rank(b) })
-	writeJSON(w, http.StatusOK, repos)
+	writeJSON(c, http.StatusOK, repos)
 }
 
 // providerOfURL 认出仓库地址属于哪一家已配置的 Git 平台，返回平台与仓库路径。

@@ -8,44 +8,45 @@ package server
 //   - 游标过期（事件流上游回 409 resnapshot_required）在 tasks.go 的 handleEvents 里换成一条 resnapshot_required 事件。
 
 import (
+	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
 	"net/url"
 	"time"
 )
 
-func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+func (s *Server) handleSnapshot(c *gin.Context, id identity) {
+	_, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
 	if sess.RuntimeSessionID == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"session_id": "", "tasks": []any{}, "errors": []any{}})
+		writeJSON(c, http.StatusOK, map[string]any{"session_id": "", "tasks": []any{}, "errors": []any{}})
 		return
 	}
 	query := url.Values{}
 	for _, k := range []string{"tasks", "events"} {
-		if v := r.URL.Query().Get(k); v != "" && allDigits(v) {
+		if v := c.Query(k); v != "" && allDigits(v) {
 			query.Set(k, v)
 		}
 	}
-	ctx, cancel := ctxTimeout(r, 30*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 30*time.Second)
 	defer cancel()
 	res, err := s.api.Snapshot(ctx, id.token, sess.RuntimeSessionID, query)
 	if err != nil {
-		writeMsg(w, r, http.StatusBadGateway, "连不上 task-service")
+		writeMsg(c, http.StatusBadGateway, "连不上 task-service")
 		return
 	}
 	defer res.Body.Close()
 	switch res.StatusCode {
 	case http.StatusOK:
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.Copy(w, io.LimitReader(res.Body, 32<<20))
+		c.Header("Content-Type", "application/json")
+		c.Status(http.StatusOK)
+		_, _ = io.Copy(c.Writer, io.LimitReader(res.Body, 32<<20))
 	case http.StatusNotFound:
-		writeMsg(w, r, http.StatusNotFound, "会话不存在")
+		writeMsg(c, http.StatusNotFound, "会话不存在")
 	default:
-		writeMsg(w, r, http.StatusBadGateway, "暂时取不到会话快照")
+		writeMsg(c, http.StatusBadGateway, "暂时取不到会话快照")
 	}
 }
 

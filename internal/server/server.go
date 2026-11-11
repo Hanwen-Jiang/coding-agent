@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,7 +29,6 @@ import (
 	"github.com/agentruntime/agent-runtime/libs/go-core/providers/ingress"
 	"github.com/agentruntime/coding-agent/internal/entry"
 	"github.com/agentruntime/coding-agent/internal/github"
-	"github.com/agentruntime/coding-agent/internal/web"
 )
 
 const (
@@ -223,146 +223,6 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
-// Handler 返回挂好全部路由的 http.Handler。
-func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	s.entryRoutes(mux)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
-	mux.HandleFunc("GET /.well-known/jwks.json", s.handleJWKS)
-	// GitHub App 的 Webhook（G-02）：不要登录与 X-Coding-Web 头，签名由收件箱验。
-	switch {
-	case s.cfg.Webhook != nil:
-		mux.Handle("POST /api/webhooks/github", s.cfg.Webhook)
-	case s.cfg.GitHubApp != nil:
-		mux.HandleFunc("POST /api/webhooks/github", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) })
-	}
-	mux.HandleFunc("GET /api/config", s.handleConfig)
-	mux.HandleFunc("POST /api/login", s.handleLogin)
-	mux.HandleFunc("POST /api/logout", s.handleLogout)
-	mux.HandleFunc("POST /api/sessions/revoke-all", s.authed(s.handleRevokeAll))
-	mux.HandleFunc("GET /api/me", s.authed(s.handleMe))
-	mux.HandleFunc("GET /api/workspace-operations", s.authed(s.handleWorkspaceHTTPList))
-	mux.HandleFunc("GET /api/workspace-operations/{operation}", s.authed(s.handleWorkspaceHTTPStatus))
-	mux.HandleFunc("GET /api/network-policy", s.authed(s.handleNetworkPolicy))
-	// 第三方登录与账号关联（accounts.go）。
-	mux.HandleFunc("GET /api/auth/{provider}/login", s.handleOAuthLogin)
-	mux.HandleFunc("GET /api/auth/{provider}/callback", s.handleOAuthCallback)
-	mux.HandleFunc("GET /api/account", s.authed(s.handleAccount))
-	mux.HandleFunc("POST /api/account/connections/{provider}/disconnect", s.authed(s.handleDisconnect))
-	mux.HandleFunc("GET /api/git/{provider}/repos", s.authed(s.handleRepos))
-	mux.HandleFunc("GET /api/github/repos", s.authed(s.handleRepos))
-	// GitHub App 的 Setup URL（G-03）：安装或调整之后跳回这里，核对过才关联。
-	mux.HandleFunc("GET /api/github/setup", s.authed(s.handleGitHubSetup))
-	mux.HandleFunc("GET /api/github/status", s.authed(s.handleGitHubStatus))
-	// 网络密钥（WEB-SEC）：转调 Runtime 的 UserSecretService，值只进不出；没打开时 404。
-	mux.HandleFunc("GET /api/secrets", s.authed(s.handleListSecrets))
-	mux.HandleFunc("PUT /api/secrets/{name}", s.authed(s.handlePutSecret))
-	mux.HandleFunc("DELETE /api/secrets/{name}", s.authed(s.handleDeleteSecret))
-	// 我的 Skill（WEB-SKILLS，Runtime 的 N-14）：转调 Runtime 的 SkillService；Runtime 没有它时列表回 available false。
-	mux.HandleFunc("GET /api/discovery/skills", s.authed(s.handleExploreSkills))
-	mux.HandleFunc("GET /api/discovery/skills/detail", s.authed(s.handleExploreSkillDetail))
-	mux.HandleFunc("GET /api/discovery/mcp", s.authed(s.handleExploreMCP))
-	mux.HandleFunc("GET /api/skills", s.authed(s.handleListSkills))
-	mux.HandleFunc("GET /api/personal-config", s.authed(s.handleGetPersonalConfig))
-	mux.HandleFunc("PUT /api/personal-config", s.authed(s.handlePutPersonalConfig))
-	mux.HandleFunc("DELETE /api/personal-config", s.authed(s.handleRetirePersonalConfig))
-	mux.HandleFunc("GET /api/skills/{name}", s.authed(s.handleGetSkill))
-	mux.HandleFunc("PUT /api/skills/{name}", s.authed(s.handlePutSkill))
-	mux.HandleFunc("DELETE /api/skills/{name}", s.authed(s.handleRetireSkill))
-	// 我的 MCP（Runtime 的 N-15）：转调 Runtime 的 McpConnectionService；Runtime 没有它时列表回 available false。
-	mux.HandleFunc("GET /api/mcp", s.authed(s.handleListMcp))
-	mux.HandleFunc("POST /api/mcp", s.authed(s.handleCreateMcp))
-	mux.HandleFunc("GET /api/mcp/{id}", s.authed(s.handleGetMcp))
-	mux.HandleFunc("POST /api/mcp/{id}/refresh", s.authed(s.handleRefreshMcp))
-	mux.HandleFunc("PUT /api/mcp/{id}/tools", s.authed(s.handleConfigureMcp))
-	mux.HandleFunc("DELETE /api/mcp/{id}", s.authed(s.handleDeleteMcp))
-
-	mux.HandleFunc("GET /api/projects/{project}/repos", s.authed(s.handleWorkspaceRepos))
-	mux.HandleFunc("POST /api/projects/{project}/repos", s.authed(s.workspaceHTTP("attach")))
-	mux.HandleFunc("POST /api/projects/{project}/repos/{repo}/detach", s.authed(s.workspaceHTTP("detach")))
-	mux.HandleFunc("GET /api/projects/{project}/sessions/{session}/repos", s.authed(s.handleWorkspaceRepos))
-	mux.HandleFunc("POST /api/projects/{project}/sessions/{session}/repos", s.authed(s.workspaceHTTP("attach")))
-	mux.HandleFunc("POST /api/projects/{project}/sessions/{session}/repos/{repo}/detach", s.authed(s.workspaceHTTP("detach")))
-	mux.HandleFunc("GET /api/samples", s.authed(s.handleSamples))
-	// 环境配置与项目解耦；这里仅保存普通配置，不报告 Runtime 生命周期状态。
-	mux.HandleFunc("GET /api/environments", s.authed(s.handleListEnvironments))
-	mux.HandleFunc("POST /api/environments", s.authed(s.handleCreateEnvironment))
-	mux.HandleFunc("GET /api/environments/{environment}", s.authed(s.handleGetEnvironment))
-	mux.HandleFunc("PUT /api/environments/{environment}", s.authed(s.handleUpdateEnvironment))
-	mux.HandleFunc("PATCH /api/environments/{environment}", s.authed(s.handleUpdateEnvironment))
-	mux.HandleFunc("DELETE /api/environments/{environment}", s.authed(s.handleDeleteEnvironment))
-	// 工作区（项目）：基线仓库。
-	mux.HandleFunc("GET /api/projects", s.authed(s.handleListProjects))
-	mux.HandleFunc("GET /api/projects/{project}/sources/capabilities", s.authed(s.handleSourceCapabilities))
-	mux.HandleFunc("POST /api/projects", s.authed(s.workspaceHTTP("create_project")))
-	mux.HandleFunc("DELETE /api/projects/{project}", s.authed(s.workspaceHTTP("delete_project")))
-	// 会话：一段对话加一份工作副本；文件、改动、提交、推送与任务都按会话。
-	mux.HandleFunc("GET /api/sessions", s.authed(s.handleListSessions))
-	mux.HandleFunc("POST /api/projects/{project}/sessions", s.authed(s.workspaceHTTP("create_session")))
-	const sess = "/api/projects/{project}/sessions/{session}"
-	mux.HandleFunc("DELETE "+sess, s.authed(s.workspaceHTTP("delete_session")))
-	mux.HandleFunc("POST "+sess+"/rename", s.authed(s.handleRenameSession))
-	mux.HandleFunc("POST "+sess+"/duplicate", s.authed(s.workspaceHTTP("duplicate_session")))
-	mux.HandleFunc("POST "+sess+"/sources", s.authed(s.handleUploadSource))
-	mux.HandleFunc("GET "+sess+"/sources", s.authed(s.handleListSources))
-	mux.HandleFunc("GET "+sess+"/files/{file_tail...}", s.authed(s.handleFileWorkbench))
-	mux.HandleFunc("POST "+sess+"/files/{file_tail...}", s.authed(s.handleFileWorkbench))
-	mux.HandleFunc("POST "+sess+"/file-jobs", s.authed(s.handleFileWorkbench))
-	mux.HandleFunc("GET "+sess+"/knowledge/{knowledge_action}", s.authed(s.handleFileWorkbench))
-	mux.HandleFunc("POST "+sess+"/knowledge/{knowledge_action}", s.authed(s.handleFileWorkbench))
-	mux.HandleFunc("GET "+sess+"/file-jobs/{file_tail...}", s.authed(s.handleFileWorkbench))
-	mux.HandleFunc("POST "+sess+"/file-jobs/{file_tail...}", s.authed(s.handleFileWorkbench))
-	mux.HandleFunc("GET "+sess+"/sources/capabilities", s.authed(s.handleSourceCapabilities))
-	mux.HandleFunc("GET "+sess+"/sources/{source}/content", s.authed(s.handleSourceContent))
-	mux.HandleFunc("GET "+sess+"/sources/{source}/preview", s.authed(s.handleSourceContent))
-	mux.HandleFunc("GET "+sess+"/settings", s.authed(s.handleSessionTaskSettings))
-	mux.HandleFunc("PUT "+sess+"/settings", s.authed(s.handleSessionTaskSettings))
-	mux.HandleFunc("GET "+sess+"/env", s.authed(s.handleEnv))
-	mux.HandleFunc("GET "+sess+"/tree", s.authed(s.handleTree))
-	mux.HandleFunc("GET "+sess+"/file", s.authed(s.handleFile))
-	mux.HandleFunc("GET "+sess+"/log", s.authed(s.handleLog))
-	mux.HandleFunc("GET "+sess+"/changes", s.authed(s.handleChanges))
-	mux.HandleFunc("GET "+sess+"/patch", s.authed(s.handlePatch))
-	mux.HandleFunc("POST "+sess+"/commit", s.authed(s.workspaceHTTP("commit")))
-	mux.HandleFunc("POST "+sess+"/discard", s.authed(s.workspaceHTTP("discard")))
-	mux.HandleFunc("POST "+sess+"/publish", s.authed(s.workspaceHTTP("publish")))
-	mux.HandleFunc("POST "+sess+"/reset-branch", s.authed(s.workspaceHTTP("reset")))
-	mux.HandleFunc("POST "+sess+"/sync", s.authed(s.workspaceHTTP("sync")))
-	mux.HandleFunc("GET "+sess+"/tasks", s.authed(s.handleListTasks))
-	mux.HandleFunc("POST "+sess+"/tasks", s.authed(s.handleSubmitTask))
-	mux.HandleFunc("GET "+sess+"/tasks/{task}", s.authed(s.handleQueryTask))
-	mux.HandleFunc("GET "+sess+"/tasks/{task}/events", s.authed(s.handleEvents))
-	mux.HandleFunc("POST "+sess+"/tasks/{task}/reply", s.authed(s.handleReply))
-	mux.HandleFunc("POST "+sess+"/tasks/{task}/guidance", s.authed(s.handleGuidance))
-	mux.HandleFunc("POST "+sess+"/tasks/{task}/guidance/{guidance}/edit", s.authed(s.handleGuidanceEdit))
-	mux.HandleFunc("POST "+sess+"/tasks/{task}/guidance/{guidance}/retract", s.authed(s.handleGuidanceRetract))
-	mux.HandleFunc("POST "+sess+"/tasks/{task}/message", s.authed(s.handleEditQueued))
-	mux.HandleFunc("POST "+sess+"/tasks/{task}/message/result", s.authed(s.handleQueuedResult))
-	mux.HandleFunc("POST "+sess+"/tasks/{task}/cancel", s.authed(s.handleCancel))
-	mux.HandleFunc("GET "+sess+"/tasks/{task}/artifacts", s.authed(s.handleListArtifacts))
-	mux.HandleFunc("GET "+sess+"/tasks/{task}/artifacts/{artifact}", s.authed(s.handleArtifactDownload))
-	mux.HandleFunc("GET "+sess+"/snapshot", s.authed(s.handleSnapshot))
-	mux.HandleFunc("POST "+sess+"/events", s.authed(s.handleSessionEvents))
-	mux.HandleFunc("GET /api/tasks/active", s.authed(s.handleActiveTasks))
-	// 网页报上来的计量（PERF-00，client_metrics.go）。
-	mux.HandleFunc("POST /api/metrics/history-load", s.authed(s.handleHistoryLoad))
-
-	mux.Handle("GET /", web.Handler())
-	return securityHeaders(mux)
-}
-
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "same-origin")
-		// 头像来自各家平台（GitHub、Gitee、GitLab、Gravatar、Google…），图片放开 https；脚本、样式、连接仍只许同源。
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self'; script-src 'self'; connect-src 'self'")
-		next.ServeHTTP(w, r)
-	})
-}
-
 // --- 认证 ---
 
 // tokens 签发与校验放进 Cookie、转给 Runtime 的令牌。
@@ -421,13 +281,13 @@ type identity struct {
 
 // handleJWKS 发布签 Runtime 令牌用的公钥（AUTH-03）：RFC 8037 的 OKP Ed25519 JWK，只有公钥。Runtime 或网关可以按它登记
 // 这个签发方（task-service 的登记文件现在是手写的，keygen 打印同一个公钥）。没有 JWT 私钥时 404。
-func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleJWKS(c *gin.Context) {
 	if s.cfg.JWTKey == nil {
-		writeMsg(w, r, http.StatusNotFound, "没有配置 JWT 私钥")
+		writeMsg(c, http.StatusNotFound, "没有配置 JWT 私钥")
 		return
 	}
-	w.Header().Set("Cache-Control", "public, max-age=300")
-	writeJSON(w, http.StatusOK, map[string]any{"keys": []map[string]string{{
+	c.Header("Cache-Control", "public, max-age=300")
+	writeJSON(c, http.StatusOK, map[string]any{"keys": []map[string]string{{
 		"kty": "OKP", "crv": "Ed25519", "x": jwtingress.EncodePublicKey(s.cfg.JWTKey.Public().(ed25519.PublicKey)),
 		"kid": s.cfg.JWTKeyID, "alg": "EdDSA", "use": "sig",
 	}}})
@@ -439,53 +299,7 @@ func (s *Server) sessionIdentity(sid string, sess browserSession) identity {
 	return identity{Identity: id, token: s.sessions.runtimeToken(sid, sess, s.ingress.IssueToken), session: sid}
 }
 
-type authedHandler func(w http.ResponseWriter, r *http.Request, id identity)
-
-func (s *Server) authed(h authedHandler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(cookieName)
-		if err != nil || cookie.Value == "" {
-			writeMsg(w, r, http.StatusUnauthorized, "请先登录")
-			return
-		}
-		csrfOK := r.Method == http.MethodGet || r.Header.Get(csrfHeader) != ""
-		sid := cookie.Value
-		if strings.Contains(sid, ".") {
-			// 过渡（AUTH-02 之前登录的）：Cookie 里还是令牌。有效的换成会话，之后浏览器只拿会话 id。
-			old, err := s.ingress.Authenticate(r.Context(), ingress.Credentials{BearerToken: sid})
-			if err != nil {
-				s.clearCookie(w)
-				writeMsg(w, r, http.StatusUnauthorized, "登录已过期，请重新登录")
-				return
-			}
-			if !csrfOK {
-				writeMsg(w, r, http.StatusForbidden, "缺少 X-Coding-Web 头")
-				return
-			}
-			if sid, err = s.setSession(w, old.TenantID, old.UserID); err != nil {
-				writeMsg(w, r, http.StatusInternalServerError, "建会话失败：%v", err)
-				return
-			}
-		}
-		sess, ok, err := s.sessions.lookup(sid)
-		if err != nil {
-			writeMsg(w, r, http.StatusInternalServerError, "读会话失败：%v", err)
-			return
-		}
-		if !ok {
-			s.clearCookie(w)
-			writeMsg(w, r, http.StatusUnauthorized, "登录已过期，请重新登录")
-			return
-		}
-		if !csrfOK {
-			writeMsg(w, r, http.StatusForbidden, "缺少 X-Coding-Web 头")
-			return
-		}
-		h(w, r, s.sessionIdentity(sid, sess))
-	}
-}
-
-func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleConfig(c *gin.Context) {
 	// 全部登录方式都列出来（没配置的 configured 为 false，开发环境的登录页用它说明还能接哪些）。
 	providers := []map[string]any{}
 	for _, sp := range providerSpecs {
@@ -510,98 +324,98 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 	if s.cfg.NetworkSecrets {
 		out["network_secrets"] = true
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(c, http.StatusOK, out)
 }
 
 // setSession 建一个浏览器会话（browser_sessions.go），会话 id 放进 HttpOnly Cookie；返回会话 id。
-func (s *Server) setSession(w http.ResponseWriter, tenant, user string) (string, error) {
+func (s *Server) setSession(c *gin.Context, tenant, user string) (string, error) {
 	id, err := s.sessions.create(tenant, user)
 	if err != nil {
 		return "", err
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(c.Writer, &http.Cookie{
 		Name: cookieName, Value: id, Path: "/", HttpOnly: true, Secure: s.cfg.SecureCookie,
 		SameSite: http.SameSiteLaxMode, MaxAge: int(s.sessions.maxAge.Seconds()),
 	})
 	return id, nil
 }
 
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleLogin(c *gin.Context) {
 	if !s.cfg.DevLogin {
-		writeMsg(w, r, http.StatusForbidden, "没有打开开发登录（CODING_DEV_LOGIN=1）")
+		writeMsg(c, http.StatusForbidden, "没有打开开发登录（CODING_DEV_LOGIN=1）")
 		return
 	}
-	if r.Header.Get(csrfHeader) == "" {
-		writeMsg(w, r, http.StatusForbidden, "缺少 X-Coding-Web 头")
+	if c.GetHeader(csrfHeader) == "" {
+		writeMsg(c, http.StatusForbidden, "缺少 X-Coding-Web 头")
 		return
 	}
 	var req struct {
 		Tenant string `json:"tenant"`
 		User   string `json:"user"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	req.Tenant, req.User = strings.ToLower(strings.TrimSpace(req.Tenant)), strings.ToLower(strings.TrimSpace(req.User))
 	if !slug.MatchString(req.Tenant) || !slug.MatchString(req.User) {
-		writeMsg(w, r, http.StatusBadRequest, "租户与用户名只能用小写字母、数字、- 与 _，以字母或数字开头")
+		writeMsg(c, http.StatusBadRequest, "租户与用户名只能用小写字母、数字、- 与 _，以字母或数字开头")
 		return
 	}
 	if reservedTenant(req.Tenant) {
-		writeMsg(w, r, http.StatusBadRequest, "gh-、gitee-、gl-、gitea-、bb-、google- 开头的租户留给第三方登录")
+		writeMsg(c, http.StatusBadRequest, "gh-、gitee-、gl-、gitea-、bb-、google- 开头的租户留给第三方登录")
 		return
 	}
 	if err := s.ensureTenantPolicy(req.Tenant); err != nil {
-		writeMsg(w, r, http.StatusInternalServerError, "写租户策略失败：%v", err)
+		writeMsg(c, http.StatusInternalServerError, "写租户策略失败：%v", err)
 		return
 	}
-	if _, err := s.setSession(w, req.Tenant, req.User); err != nil {
-		writeMsg(w, r, http.StatusInternalServerError, "建会话失败：%v", err)
+	if _, err := s.setSession(c, req.Tenant, req.User); err != nil {
+		writeMsg(c, http.StatusInternalServerError, "建会话失败：%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"tenant": req.Tenant, "user": req.User})
+	writeJSON(c, http.StatusOK, map[string]string{"tenant": req.Tenant, "user": req.User})
 }
 
 // handleLogout 删掉这个会话的记录（立即生效，AUTH-02）并清掉 Cookie。
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(cookieName); err == nil && cookie.Value != "" && !strings.Contains(cookie.Value, ".") {
+func (s *Server) handleLogout(c *gin.Context) {
+	if cookie, err := c.Request.Cookie(cookieName); err == nil && cookie.Value != "" && !strings.Contains(cookie.Value, ".") {
 		if err := s.sessions.revoke(cookie.Value); err != nil {
-			writeMsg(w, r, http.StatusInternalServerError, "删会话失败：%v", err)
+			writeMsg(c, http.StatusInternalServerError, "删会话失败：%v", err)
 			return
 		}
 	}
-	s.clearCookie(w)
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	s.clearCookie(c)
+	writeJSON(c, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // handleRevokeAll 退出所有设备：删掉这个用户的全部会话（AUTH-02）。
-func (s *Server) handleRevokeAll(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleRevokeAll(c *gin.Context, id identity) {
 	n, err := s.sessions.revokeUser(id.TenantID, id.UserID)
 	if err != nil {
-		writeMsg(w, r, http.StatusInternalServerError, "删会话失败：%v", err)
+		writeMsg(c, http.StatusInternalServerError, "删会话失败：%v", err)
 		return
 	}
-	s.clearCookie(w)
-	writeJSON(w, http.StatusOK, map[string]int{"revoked": n})
+	s.clearCookie(c)
+	writeJSON(c, http.StatusOK, map[string]int{"revoked": n})
 }
 
-func (s *Server) clearCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", HttpOnly: true, Secure: s.cfg.SecureCookie, SameSite: http.SameSiteLaxMode, MaxAge: -1})
+func (s *Server) clearCookie(c *gin.Context) {
+	http.SetCookie(c.Writer, &http.Cookie{Name: cookieName, Value: "", Path: "/", HttpOnly: true, Secure: s.cfg.SecureCookie, SameSite: http.SameSiteLaxMode, MaxAge: -1})
 }
 
-func (s *Server) handleMe(w http.ResponseWriter, _ *http.Request, id identity) {
+func (s *Server) handleMe(c *gin.Context, id identity) {
 	me := map[string]any{"tenant": id.TenantID, "user": id.UserID, "expires_at": id.ExpiresAt}
 	a, conns := s.connections(id)
 	me["connections"] = conns
-	for _, c := range conns {
-		if c.Provider == a.Primary || me["avatar_url"] == nil {
-			me["name"], me["avatar_url"], me["login"] = c.DisplayName, c.AvatarURL, c.Login
+	for _, conn := range conns {
+		if conn.Provider == a.Primary || me["avatar_url"] == nil {
+			me["name"], me["avatar_url"], me["login"] = conn.DisplayName, conn.AvatarURL, conn.Login
 		}
-		if c.Provider == "github" { // 旧的网页与测试读这个
-			me["github"] = map[string]any{"login": c.Login, "name": c.DisplayName, "avatar_url": c.AvatarURL}
+		if conn.Provider == "github" { // 旧的网页与测试读这个
+			me["github"] = map[string]any{"login": conn.Login, "name": conn.DisplayName, "avatar_url": conn.AvatarURL}
 		}
 	}
-	writeJSON(w, http.StatusOK, me)
+	writeJSON(c, http.StatusOK, me)
 }
 
 // ensureTenantPolicy 在开发租户策略文件里给新租户 write_reversible 的 effect 上限（改代码、跑测试要用；每个任务再经
@@ -662,43 +476,44 @@ func (s *Server) tenantCeiling(tenant string) string {
 
 // --- 小工具 ---
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+// writeJSON 写出 JSON 响应；接口的数据都不该被缓存。
+func writeJSON(c *gin.Context, status int, v any) {
+	c.Header("Cache-Control", "no-store")
+	c.JSON(status, v)
 }
 
-func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		writeMsg(w, r, http.StatusBadRequest, "请求体不是合法的 JSON")
+// readJSON 把请求体（有大小上限）绑定到 v；不是合法的 JSON 时写出 400 并返回 false。
+// 没有用 binding 标签做校验：给用户看的报错要有中英两种，校验都在各处理函数里手写。
+func readJSON(c *gin.Context, v any) bool {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodySize)
+	if err := c.ShouldBindJSON(v); err != nil {
+		writeMsg(c, http.StatusBadRequest, "请求体不是合法的 JSON")
 		return false
 	}
 	return true
 }
 
 // project 取出请求路径里的项目，确认它属于这个租户。
-func (s *Server) project(w http.ResponseWriter, r *http.Request, id identity) (Project, bool) {
-	pid := r.PathValue("project")
+func (s *Server) project(c *gin.Context, id identity) (Project, bool) {
+	pid := c.Param("project")
 	var saved Project
-	if workspaceFact(r.Context(), "project:"+pid, &saved) {
+	if workspaceFact(c.Request.Context(), "project:"+pid, &saved) {
 		return saved, true
 	}
 	if !slug.MatchString(pid) {
-		writeMsg(w, r, http.StatusNotFound, "项目不存在")
+		writeMsg(c, http.StatusNotFound, "项目不存在")
 		return Project{}, false
 	}
 	p, ok, err := s.store.Project(id.TenantID, pid)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return Project{}, false
 	}
 	if !ok {
-		writeMsg(w, r, http.StatusNotFound, "项目不存在")
+		writeMsg(c, http.StatusNotFound, "项目不存在")
 		return Project{}, false
 	}
-	saveWorkspaceFact(r.Context(), "project:"+pid, p)
+	saveWorkspaceFact(c.Request.Context(), "project:"+pid, p)
 	return p, true
 }
 

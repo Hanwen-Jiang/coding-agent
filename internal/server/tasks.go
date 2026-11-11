@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
 	"slices"
@@ -74,21 +75,21 @@ func (s *Server) busy(r *http.Request, id identity, workspaceID string) bool {
 	return slices.ContainsFunc(s.refresh(r, id, workspaceID), func(t TaskRecord) bool { return !terminal(t.Status) })
 }
 
-func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+func (s *Server) handleListTasks(c *gin.Context, id identity) {
+	_, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
-	tasks := s.refresh(r, id, sess.WorkspaceID)
+	tasks := s.refresh(c.Request, id, sess.WorkspaceID)
 	if tasks == nil {
 		tasks = []TaskRecord{}
 	}
 	slices.SortFunc(tasks, func(a, b TaskRecord) int { return b.CreatedAt.Compare(a.CreatedAt) })
-	writeJSON(w, http.StatusOK, tasks)
+	writeJSON(c, http.StatusOK, tasks)
 }
 
-func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+func (s *Server) handleSubmitTask(c *gin.Context, id identity) {
+	_, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
@@ -102,7 +103,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		Network           json.RawMessage    `json:"network_request"`
 		PersonalConfig    *personalSelection `json:"personal_config"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	settings := cloneTaskSettings(sess.TaskSettings)
@@ -113,7 +114,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 	if len(req.Network) > 0 {
 		network = nil // An explicit request replaces the saved preference, including null.
 		if err := json.Unmarshal(req.Network, &network); err != nil {
-			writeMsg(w, r, 400, "联网设置不合法")
+			writeMsg(c, 400, "联网设置不合法")
 			return
 		}
 	}
@@ -122,37 +123,37 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		selection = sess.PersonalConfig
 	}
 	if err := selection.validate(); err != nil {
-		writeErr(w, r, http.StatusBadRequest, err)
+		writeErr(c, http.StatusBadRequest, err)
 		return
 	}
 	msg := strings.TrimSpace(req.Message)
 	if msg == "" || utf8.RuneCountInString(msg) > maxMessageChars {
-		writeMsg(w, r, http.StatusBadRequest, "任务描述不能为空，也不能超过 20000 个字")
+		writeMsg(c, http.StatusBadRequest, "任务描述不能为空，也不能超过 20000 个字")
 		return
 	}
 	sandbox, ok := pickOption(req.Sandbox, sandboxLevels, defaultSandbox)
 	if !ok {
-		writeMsg(w, r, http.StatusBadRequest, "沙箱等级只能是 read 或 write_reversible")
+		writeMsg(c, http.StatusBadRequest, "沙箱等级只能是 read 或 write_reversible")
 		return
 	}
 	model, ok := pickOption(req.Model, modelPreferences, defaultModel)
 	if !ok {
-		writeMsg(w, r, http.StatusBadRequest, "模型倾向只能是 economy、balanced 或 best")
+		writeMsg(c, http.StatusBadRequest, "模型倾向只能是 economy、balanced 或 best")
 		return
 	}
 	if len(req.FileCollectionIDs) > 1 {
-		writeMsg(w, r, 400, "每次任务最多选择一个知识集合")
+		writeMsg(c, 400, "每次任务最多选择一个知识集合")
 		return
 	}
 	for _, collection := range req.FileCollectionIDs {
 		if len(collection) != 36 || !strings.HasPrefix(collection, "col_") {
-			writeMsg(w, r, 400, "知识集合标识无效")
+			writeMsg(c, 400, "知识集合标识无效")
 			return
 		}
 	}
-	sources, err := s.resolveSources(r.Context(), id, sess.WorkspaceID, req.SourceIDs, req.SourceVersions)
+	sources, err := s.resolveSources(c.Request.Context(), id, sess.WorkspaceID, req.SourceIDs, req.SourceVersions)
 	if err != nil {
-		writeErr(w, r, 400, err)
+		writeErr(c, 400, err)
 		return
 	}
 	submit := map[string]any{
@@ -180,7 +181,7 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 	}
 	if network != nil {
 		if err := network.validate(); err != nil {
-			writeErr(w, r, http.StatusBadRequest, err)
+			writeErr(c, http.StatusBadRequest, err)
 			return
 		}
 		submit["networkRequest"] = network.wire()
@@ -190,15 +191,15 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 	}
 	if req.PersonalConfig != nil {
 		if err := s.store.PutPersonalSession(id.TenantID, id.UserID, sess.WorkspaceID, selection); err != nil {
-			writeErr(w, r, 500, err)
+			writeErr(c, 500, err)
 			return
 		}
 	}
 	var resp submitResponse
-	ctx, cancel := ctxTimeout(r, 30*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 30*time.Second)
 	defer cancel()
 	if err := s.api.Call(ctx, id.token, "SubmitTask", submit, &resp); err != nil {
-		writeAPIError(w, r, err)
+		writeAPIError(c, err)
 		return
 	}
 	now := time.Now().UTC()
@@ -222,13 +223,13 @@ func (s *Server) handleSubmitTask(w http.ResponseWriter, r *http.Request, id ide
 		}
 		return append(ts, record)
 	}); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	// 任务开始时的提交记在后台补上：经 Workspace API 读 HEAD 要借一个沙箱环境（冷启动几秒到十几秒），不让提交等它。
 	// Task 自己不提交（提交由用户点按钮），所以晚一点读到的 HEAD 与提交那一刻相同。
 	s.background.Go(func() { s.recordBaseCommit(id, sess.WorkspaceID, record.ID) })
-	writeJSON(w, http.StatusCreated, record)
+	writeJSON(c, http.StatusCreated, record)
 }
 
 // recordBaseCommit 读工作区当前的提交，补进任务记录（读不到时留空，与以前相同）。
@@ -266,34 +267,34 @@ func (s *Server) deleteWorkspace(ctx context.Context, id identity, workspaceID s
 }
 
 // task 取出请求路径里的任务，确认它属于这个租户的这个会话。
-func (s *Server) task(w http.ResponseWriter, r *http.Request, id identity) (Session, TaskRecord, bool) {
-	_, sess, ok := s.session(w, r, id)
+func (s *Server) task(c *gin.Context, id identity) (Session, TaskRecord, bool) {
+	_, sess, ok := s.session(c, id)
 	if !ok {
 		return Session{}, TaskRecord{}, false
 	}
 	tasks, err := s.store.Tasks(id.TenantID, sess.WorkspaceID)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return Session{}, TaskRecord{}, false
 	}
-	i := slices.IndexFunc(tasks, func(t TaskRecord) bool { return t.ID == r.PathValue("task") })
+	i := slices.IndexFunc(tasks, func(t TaskRecord) bool { return t.ID == c.Param("task") })
 	if i < 0 {
-		writeMsg(w, r, http.StatusNotFound, "任务不存在")
+		writeMsg(c, http.StatusNotFound, "任务不存在")
 		return Session{}, TaskRecord{}, false
 	}
 	return sess, tasks[i], true
 }
 
-func (s *Server) handleQueryTask(w http.ResponseWriter, r *http.Request, id identity) {
-	sess, t, ok := s.task(w, r, id)
+func (s *Server) handleQueryTask(c *gin.Context, id identity) {
+	sess, t, ok := s.task(c, id)
 	if !ok {
 		return
 	}
 	var raw json.RawMessage
-	ctx, cancel := ctxTimeout(r, 15*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 15*time.Second)
 	defer cancel()
 	if err := s.api.Call(ctx, id.token, "QueryTask", map[string]string{"taskId": t.ID}, &raw); err != nil {
-		writeAPIError(w, r, err)
+		writeAPIError(c, err)
 		return
 	}
 	var q queryResponse
@@ -310,23 +311,23 @@ func (s *Server) handleQueryTask(w http.ResponseWriter, r *http.Request, id iden
 			t = next
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"task": t, "runtime": raw})
+	writeJSON(c, http.StatusOK, map[string]any{"task": t, "runtime": raw})
 }
 
 // handleEvents 代理 Task 的 SSE 流：浏览器的 EventSource 带不了 Authorization 头，由这里补上令牌。
 // 断线重连时浏览器会带 Last-Event-ID，原样转给 task-service 续传。
-func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, id identity) {
-	_, t, ok := s.task(w, r, id)
+func (s *Server) handleEvents(c *gin.Context, id identity) {
+	_, t, ok := s.task(c, id)
 	if !ok {
 		return
 	}
-	last := r.Header.Get("Last-Event-ID")
+	last := c.GetHeader("Last-Event-ID")
 	if last == "" {
-		last = r.URL.Query().Get("last_event_id")
+		last = c.Query("last_event_id")
 	}
-	res, err := s.api.Events(r.Context(), id.token, t.ID, last)
+	res, err := s.api.Events(c.Request.Context(), id.token, t.ID, last)
 	if err != nil {
-		writeMsg(w, r, http.StatusBadGateway, "连不上 task-service")
+		writeMsg(c, http.StatusBadGateway, "连不上 task-service")
 		return
 	}
 	defer res.Body.Close()
@@ -337,31 +338,28 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, id identit
 		}
 		if res.StatusCode == http.StatusConflict && json.Unmarshal(body, &reason) == nil && reason.Code == "resnapshot_required" {
 			// 游标过期（N-19）：EventSource 读不到状态码，换成一条 resnapshot_required 事件，页面据此重新取快照。
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.Header().Set("Cache-Control", "no-cache")
-			w.WriteHeader(http.StatusOK)
-			_, _ = io.WriteString(w, "event: resnapshot_required\ndata: {}\n\n")
+			c.Header("Content-Type", "text/event-stream")
+			c.Header("Cache-Control", "no-cache")
+			c.Status(http.StatusOK)
+			_, _ = io.WriteString(c.Writer, "event: resnapshot_required\ndata: {}\n\n")
 			return
 		}
-		writeErr(w, r, res.StatusCode, errors.New(strings.TrimSpace(string(body)))) // task-service 的说明原样转出
+		writeErr(c, res.StatusCode, errors.New(strings.TrimSpace(string(body)))) // task-service 的说明原样转出
 		return
 	}
-	flusher, _ := w.(http.Flusher)
-	h := w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-cache")
-	h.Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+	// 上游的事件原样转发，读到一块就写一块并刷新。不用 c.SSEvent：那会把事件重新编码。
 	buf := make([]byte, 32<<10)
 	for {
 		n, err := res.Body.Read(buf)
 		if n > 0 {
-			if _, werr := w.Write(buf[:n]); werr != nil {
+			if _, werr := c.Writer.Write(buf[:n]); werr != nil {
 				return
 			}
-			if flusher != nil {
-				flusher.Flush()
-			}
+			c.Writer.Flush()
 		}
 		if err != nil {
 			return
@@ -369,8 +367,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, id identit
 	}
 }
 
-func (s *Server) handleReply(w http.ResponseWriter, r *http.Request, id identity) {
-	_, t, ok := s.task(w, r, id)
+func (s *Server) handleReply(c *gin.Context, id identity) {
+	_, t, ok := s.task(c, id)
 	if !ok {
 		return
 	}
@@ -379,39 +377,39 @@ func (s *Server) handleReply(w http.ResponseWriter, r *http.Request, id identity
 		Option     string `json:"option"`
 		Guidance   string `json:"guidance"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	if req.QuestionID == "" || req.Option == "" {
-		writeMsg(w, r, http.StatusBadRequest, "要给出 question_id 与 option")
+		writeMsg(c, http.StatusBadRequest, "要给出 question_id 与 option")
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 15*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 15*time.Second)
 	defer cancel()
 	signal := map[string]any{"taskId": t.ID, "humanReply": map[string]string{"questionId": req.QuestionID, "option": req.Option, "guidance": req.Guidance}}
 	if err := s.api.Call(ctx, id.token, "SignalTask", signal, nil); err != nil {
-		writeAPIError(w, r, err)
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(c, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request, id identity) {
-	_, t, ok := s.task(w, r, id)
+func (s *Server) handleCancel(c *gin.Context, id identity) {
+	_, t, ok := s.task(c, id)
 	if !ok {
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 15*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 15*time.Second)
 	defer cancel()
 	var resp map[string]any
-	if err := s.api.Call(ctx, id.token, "CancelTask", map[string]string{"taskId": t.ID, "reason": msg("用户在网页上取消").In(requestLang(r))}, &resp); err != nil {
-		writeAPIError(w, r, err)
+	if err := s.api.Call(ctx, id.token, "CancelTask", map[string]string{"taskId": t.ID, "reason": msg("用户在网页上取消").In(requestLang(c.Request))}, &resp); err != nil {
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(c, http.StatusOK, resp)
 }
 
-func writeAPIError(w http.ResponseWriter, r *http.Request, err error) {
+func writeAPIError(c *gin.Context, err error) {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		status := apiErr.Status
@@ -420,20 +418,20 @@ func writeAPIError(w http.ResponseWriter, r *http.Request, err error) {
 		}
 		switch m := runtimeMsg(apiErr.Reason); {
 		case apiErr.Note != nil:
-			writeErr(w, r, status, apiErr.Note)
+			writeErr(c, status, apiErr.Note)
 		case m != nil:
-			writeErr(w, r, status, m)
-		case requestLang(r) == langEN:
+			writeErr(c, status, m)
+		case requestLang(c.Request) == langEN:
 			// Runtime 的说明是中文：没有翻译的错误，英文界面只给错误码。
 			code := apiErr.Reason
 			if code == "" {
 				code = apiErr.Code
 			}
-			writeMsg(w, r, status, "Runtime 返回了错误（%s）", code)
+			writeMsg(c, status, "Runtime 返回了错误（%s）", code)
 		default:
-			writeErr(w, r, status, errors.New(apiErr.Message)) // task-service 的说明原样转出
+			writeErr(c, status, errors.New(apiErr.Message)) // task-service 的说明原样转出
 		}
 		return
 	}
-	writeErr(w, r, http.StatusBadGateway, err)
+	writeErr(c, http.StatusBadGateway, err)
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -90,37 +91,37 @@ func (s *Server) repoProject(p Project, repo WorkspaceRepo, base string) Project
 	}
 	return out
 }
-func (s *Server) gitSession(w http.ResponseWriter, r *http.Request, id identity, write bool) (identity, Project, Session, bool) {
-	p, sess, ok := s.session(w, r, id)
+func (s *Server) gitSession(c *gin.Context, id identity, write bool) (identity, Project, Session, bool) {
+	p, sess, ok := s.session(c, id)
 	if !ok {
 		return id, p, sess, false
 	}
-	name := r.URL.Query().Get("repo")
+	name := c.Query("repo")
 	if p.Layout != layoutMulti {
 		if name != "" {
-			writeMsg(w, r, http.StatusBadRequest, "根仓工作区不能选择子仓库")
+			writeMsg(c, http.StatusBadRequest, "根仓工作区不能选择子仓库")
 			return id, p, sess, false
 		}
 		return id, p, sess, true
 	}
 	mw, ok := s.ws.(multiWorkspaces)
 	if !ok {
-		writeMsg(w, r, http.StatusBadRequest, "多仓工作区需要 Runtime Workspace API")
+		writeMsg(c, http.StatusBadRequest, "多仓工作区需要 Runtime Workspace API")
 		return id, p, sess, false
 	}
-	repos, err := mw.Repos(r.Context(), id, sess.WorkspaceID)
+	repos, err := mw.Repos(c.Request.Context(), id, sess.WorkspaceID)
 	if err != nil {
-		writeWorkspaceError(w, r, err, http.StatusBadGateway)
+		writeWorkspaceError(c, err, http.StatusBadGateway)
 		return id, p, sess, false
 	}
 	at := slices.IndexFunc(repos, func(x WorkspaceRepo) bool { return x.Name == name })
 	if name == "" || at < 0 {
-		writeMsg(w, r, http.StatusBadRequest, "请选择当前工作区中的仓库")
+		writeMsg(c, http.StatusBadRequest, "请选择当前工作区中的仓库")
 		return id, p, sess, false
 	}
 	repo := repos[at]
 	if write && repo.Access != repoWriteAccess {
-		writeMsg(w, r, http.StatusForbidden, "这个仓库是只读的，不能提交或推送")
+		writeMsg(c, http.StatusForbidden, "这个仓库是只读的，不能提交或推送")
 		return id, p, sess, false
 	}
 	base := sess.RepoStates[name].BaseBranch
@@ -136,21 +137,21 @@ func (s *Server) gitSession(w http.ResponseWriter, r *http.Request, id identity,
 	return id, p, sess, true
 }
 
-func (s *Server) repoWorkspace(w http.ResponseWriter, r *http.Request, id identity) (Project, Session, string, multiWorkspaces, bool) {
+func (s *Server) repoWorkspace(c *gin.Context, id identity) (Project, Session, string, multiWorkspaces, bool) {
 	var p Project
 	var sess Session
 	var ok bool
-	if r.PathValue("session") != "" {
-		p, sess, ok = s.session(w, r, id)
+	if c.Param("session") != "" {
+		p, sess, ok = s.session(c, id)
 	} else {
-		p, ok = s.project(w, r, id)
+		p, ok = s.project(c, id)
 	}
 	if !ok {
 		return p, sess, "", nil, false
 	}
 	mw, good := s.ws.(multiWorkspaces)
 	if p.Layout != layoutMulti || !good {
-		writeMsg(w, r, http.StatusBadRequest, "多仓工作区需要 Runtime Workspace API")
+		writeMsg(c, http.StatusBadRequest, "多仓工作区需要 Runtime Workspace API")
 		return p, sess, "", nil, false
 	}
 	ws := p.ID
@@ -160,14 +161,14 @@ func (s *Server) repoWorkspace(w http.ResponseWriter, r *http.Request, id identi
 	return p, sess, ws, mw, true
 }
 
-func (s *Server) handleWorkspaceRepos(w http.ResponseWriter, r *http.Request, id identity) {
-	p, sess, ws, mw, ok := s.repoWorkspace(w, r, id)
+func (s *Server) handleWorkspaceRepos(c *gin.Context, id identity) {
+	p, sess, ws, mw, ok := s.repoWorkspace(c, id)
 	if !ok {
 		return
 	}
-	repos, err := mw.Repos(r.Context(), id, ws)
+	repos, err := mw.Repos(c.Request.Context(), id, ws)
 	if err != nil {
-		writeWorkspaceError(w, r, err, http.StatusBadGateway)
+		writeWorkspaceError(c, err, http.StatusBadGateway)
 		return
 	}
 	type view struct {
@@ -188,62 +189,62 @@ func (s *Server) handleWorkspaceRepos(w http.ResponseWriter, r *http.Request, id
 		rp := s.repoProject(p, repo, st.BaseBranch)
 		out = append(out, view{repo, rp.Provider, rp.Repo, st})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"layout": p.Layout, "repos": out})
+	writeJSON(c, http.StatusOK, map[string]any{"layout": p.Layout, "repos": out})
 }
 
 var repoName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 var repoPath = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$`)
 
-func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request, id identity) {
-	p, sess, ws, mw, ok := s.repoWorkspace(w, r, id)
+func (s *Server) handleAttachRepo(c *gin.Context, id identity) {
+	p, sess, ws, mw, ok := s.repoWorkspace(c, id)
 	if !ok {
 		return
 	}
 	var req struct {
 		Repo WorkspaceRepo `json:"repo"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	repo := req.Repo
 	u, err := url.Parse(repo.URL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
-		writeMsg(w, r, http.StatusBadRequest, "只支持 https 的 Git 地址，且地址里不能带用户名或密码")
+		writeMsg(c, http.StatusBadRequest, "只支持 https 的 Git 地址，且地址里不能带用户名或密码")
 		return
 	}
 	if !repoName.MatchString(repo.Name) || !repoPath.MatchString(repo.Path) {
-		writeMsg(w, r, http.StatusBadRequest, "仓库名称或一级目录名不合法")
+		writeMsg(c, http.StatusBadRequest, "仓库名称或一级目录名不合法")
 		return
 	}
 	if repo.Access == "" {
 		repo.Access = "REPO_ACCESS_READ"
 	}
 	if repo.Access != "REPO_ACCESS_READ" && repo.Access != repoWriteAccess {
-		writeMsg(w, r, http.StatusBadRequest, "仓库权限只能是只读或可写")
+		writeMsg(c, http.StatusBadRequest, "仓库权限只能是只读或可写")
 		return
 	}
 	if strings.HasPrefix(repo.Ref, "-") || strings.ContainsAny(repo.Ref, " \t\n~^:?*[\\") {
-		writeMsg(w, r, http.StatusBadRequest, "分支名不合法")
+		writeMsg(c, http.StatusBadRequest, "分支名不合法")
 		return
 	}
-	if s.busy(r, id, ws) {
-		writeMsg(w, r, http.StatusConflict, "还有任务在跑，等它结束或先取消")
+	if s.busy(c.Request, id, ws) {
+		writeMsg(c, http.StatusConflict, "还有任务在跑，等它结束或先取消")
 		return
 	}
 	// Response-only metadata is ignored. Grant is restricted to this URL and call.
 	repo.Head, repo.Branch, repo.AttachedAt = "", "", ""
 	rp := s.repoProject(p, repo, repo.Ref)
-	grant, err := s.authorizeRepo(r, id, &rp, repoRead)
+	grant, err := s.authorizeRepo(c.Request, id, &rp, repoRead)
 	if err != nil {
-		writeGitError(w, r, err)
+		writeGitError(c, err)
 		return
 	}
 	defer grant.Done()
-	ctx, cancel := ctxTimeout(r, 10*time.Minute)
+	ctx, cancel := ctxTimeout(c.Request, 10*time.Minute)
 	defer cancel()
 	attached, err := mw.Attach(ctx, id, ws, repo, grant.Auth)
 	if err != nil {
-		writeWorkspaceError(w, r, err, http.StatusBadGateway)
+		writeWorkspaceError(c, err, http.StatusBadGateway)
 		return
 	}
 	if sess.ID != "" {
@@ -254,45 +255,45 @@ func (s *Server) handleAttachRepo(w http.ResponseWriter, r *http.Request, id ide
 			x.RepoStates[attached.Name] = RepoSessionState{BaseCommit: attached.Head, BaseBranch: attached.Branch}
 		})
 		if err != nil {
-			writeErr(w, r, http.StatusInternalServerError, err)
+			writeErr(c, http.StatusInternalServerError, err)
 			return
 		}
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"repo": attached})
+	writeJSON(c, http.StatusCreated, map[string]any{"repo": attached})
 }
-func (s *Server) handleDetachRepo(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ws, mw, ok := s.repoWorkspace(w, r, id)
+func (s *Server) handleDetachRepo(c *gin.Context, id identity) {
+	_, sess, ws, mw, ok := s.repoWorkspace(c, id)
 	if !ok {
 		return
 	}
 	var req struct {
 		DiscardChanges bool `json:"discard_changes"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
-	if s.busy(r, id, ws) {
-		writeMsg(w, r, http.StatusConflict, "还有任务在跑，等它结束或先取消")
+	if s.busy(c.Request, id, ws) {
+		writeMsg(c, http.StatusConflict, "还有任务在跑，等它结束或先取消")
 		return
 	}
-	name := r.PathValue("repo")
-	ctx, cancel := ctxTimeout(r, 10*time.Minute)
+	name := c.Param("repo")
+	ctx, cancel := ctxTimeout(c.Request, 10*time.Minute)
 	defer cancel()
 	out, err := mw.Detach(ctx, id, ws, name, req.DiscardChanges)
 	if err != nil {
 		var ae *APIError
 		if errors.As(err, &ae) && ae.Reason == "repo_dirty" {
-			writeJSON(w, http.StatusConflict, map[string]any{"code": "repo_dirty", "error": msg("仓库有未提交或未推送的改动，需要明确确认丢弃后才能卸下").In(requestLang(r))})
+			writeJSON(c, http.StatusConflict, map[string]any{"code": "repo_dirty", "error": msg("仓库有未提交或未推送的改动，需要明确确认丢弃后才能卸下").In(requestLang(c.Request))})
 		} else {
-			writeWorkspaceError(w, r, err, http.StatusBadGateway)
+			writeWorkspaceError(c, err, http.StatusBadGateway)
 		}
 		return
 	}
 	if sess.ID != "" {
 		if _, err := s.updateSession(id.TenantID, sess, func(x *Session) { delete(x.RepoStates, name) }); err != nil {
-			writeErr(w, r, http.StatusInternalServerError, err)
+			writeErr(c, http.StatusInternalServerError, err)
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(c, http.StatusOK, out)
 }

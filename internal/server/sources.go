@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"io"
 	"mime"
 	"net/http"
@@ -109,8 +110,8 @@ func sourceView(source SourceRecord, base string, tasks []TaskRecord) map[string
 	out["task_ids"] = taskIDs
 	return out
 }
-func sourceBase(r *http.Request) string {
-	return "/api/projects/" + url.PathEscape(r.PathValue("project")) + "/sessions/" + url.PathEscape(r.PathValue("session"))
+func sourceBase(c *gin.Context) string {
+	return "/api/projects/" + url.PathEscape(c.Param("project")) + "/sessions/" + url.PathEscape(c.Param("session"))
 }
 
 type runtimeFileRecord struct {
@@ -301,21 +302,21 @@ func (s *Server) runtimeSources(ctx context.Context, id identity, workspace stri
 	}
 	return nil, errors.New("file pagination limit reached")
 }
-func (s *Server) handleListSources(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+func (s *Server) handleListSources(c *gin.Context, id identity) {
+	_, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 30*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 30*time.Second)
 	defer cancel()
 	sources, err := s.runtimeSources(ctx, id, sess.WorkspaceID)
 	if err != nil {
-		writeMsg(w, r, 502, "暂时无法读取文件来源")
+		writeMsg(c, 502, "暂时无法读取文件来源")
 		return
 	}
 	tasks, err := s.store.Tasks(id.TenantID, sess.WorkspaceID)
 	if err != nil {
-		writeErr(w, r, 500, err)
+		writeErr(c, 500, err)
 		return
 	}
 	byID := map[string]int{}
@@ -343,10 +344,10 @@ func (s *Server) handleListSources(w http.ResponseWriter, r *http.Request, id id
 	}
 	out := []map[string]any{}
 	for _, source := range sources {
-		out = append(out, sourceView(source, sourceBase(r), tasks))
+		out = append(out, sourceView(source, sourceBase(c), tasks))
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]any{"sources": out})
+	c.Header("Cache-Control", "no-store")
+	writeJSON(c, 200, map[string]any{"sources": out})
 }
 
 // spoolSource bounds bytes on disk and hashes incrementally. It never uses the
@@ -383,71 +384,71 @@ func spoolSource(reader io.Reader, limit int64) (*os.File, int64, string, string
 	}
 	return file, count, hex.EncodeToString(hasher.Sum(nil)), http.DetectContentType(header[:n]), nil
 }
-func (s *Server) handleUploadSource(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+func (s *Server) handleUploadSource(c *gin.Context, id identity) {
+	_, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
-	release, err := acquireSourceTransfer(r.Context())
+	release, err := acquireSourceTransfer(c.Request.Context())
 	if err != nil {
 		return
 	}
 	defer release()
-	ctx, cancel := ctxTimeout(r, 2*time.Minute)
+	ctx, cancel := ctxTimeout(c.Request, 2*time.Minute)
 	defer cancel()
 	if err = s.migrateSources(ctx, id, sess.WorkspaceID); err != nil {
-		writeMsg(w, r, 502, "暂时无法读取文件来源")
+		writeMsg(c, 502, "暂时无法读取文件来源")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxSourceBytes+(64<<10))
-	reader, err := r.MultipartReader()
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSourceBytes+(64<<10))
+	reader, err := c.Request.MultipartReader()
 	if err != nil {
-		writeMsg(w, r, 400, "请选择一个有效文件")
+		writeMsg(c, 400, "请选择一个有效文件")
 		return
 	}
 	part, err := reader.NextPart()
 	if err != nil || part.FormName() != "file" {
-		writeMsg(w, r, 400, "请选择一个有效文件")
+		writeMsg(c, 400, "请选择一个有效文件")
 		return
 	}
 	name := sourceName(part.FileName())
 	if name == "" {
-		writeMsg(w, r, 400, "文件名不合法")
+		writeMsg(c, 400, "文件名不合法")
 		return
 	}
 	file, size, digest, media, err := spoolSource(part, maxSourceBytes)
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.Is(err, errSourceTooLarge) || errors.As(err, &tooLarge) {
-			writeMsg(w, r, 413, "单个文件不能超过 50 MiB")
+			writeMsg(c, 413, "单个文件不能超过 50 MiB")
 		} else {
-			writeMsg(w, r, 502, "暂时上传不了这个文件")
+			writeMsg(c, 502, "暂时上传不了这个文件")
 		}
 		return
 	}
 	defer func() { file.Close(); os.Remove(file.Name()) }()
 	_ = part.Close()
 	if _, err = reader.NextPart(); !errors.Is(err, io.EOF) {
-		writeMsg(w, r, 400, "每次只能上传一个文件")
+		writeMsg(c, 400, "每次只能上传一个文件")
 		return
 	}
 	source, err := s.api.uploadSource(ctx, id.token, sess.WorkspaceID, name, media, size, file)
 	if err != nil {
 		if statusOf(err, 502) == 413 {
-			writeMsg(w, r, 413, "文件来源存储配额已满")
+			writeMsg(c, 413, "文件来源存储配额已满")
 		} else {
-			writeMsg(w, r, 502, "暂时上传不了这个文件")
+			writeMsg(c, 502, "暂时上传不了这个文件")
 		}
 		return
 	}
 	expectedURI := "obj://" + id.TenantID + "/uploads/" + source.ID + "/" + name
 	if !sourceIDPattern.MatchString(source.ID) || source.FileID != source.ID || !sourceVersionPattern.MatchString(source.VersionID) || (source.ObjectURI != expectedURI && !strings.HasPrefix(source.ObjectURI, "obj://"+id.TenantID+"/file-derived/fjob_")) || source.Name != name || source.SizeBytes != size || source.SHA256 != digest {
-		writeMsg(w, r, 502, "暂时上传不了这个文件")
+		writeMsg(c, 502, "暂时上传不了这个文件")
 		return
 	}
 	source.MIMEType = media
 	source.CreatedBy = id.UserID
-	writeJSON(w, 201, map[string]any{"source": sourceView(source, sourceBase(r), nil)})
+	writeJSON(c, 201, map[string]any{"source": sourceView(source, sourceBase(c), nil)})
 }
 func (a *TaskAPI) uploadSource(ctx context.Context, token, workspace, name, media string, size int64, data io.Reader) (SourceRecord, error) {
 	query := filesQuery(workspace)
@@ -540,22 +541,22 @@ func (s *Server) resolveSources(ctx context.Context, id identity, workspace stri
 	}
 	return result, nil
 }
-func (s *Server) handleSourceContent(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+func (s *Server) handleSourceContent(c *gin.Context, id identity) {
+	_, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 2*time.Minute)
+	ctx, cancel := ctxTimeout(c.Request, 2*time.Minute)
 	defer cancel()
-	sources, err := s.resolveSources(ctx, id, sess.WorkspaceID, []string{r.PathValue("source")})
+	sources, err := s.resolveSources(ctx, id, sess.WorkspaceID, []string{c.Param("source")})
 	if err != nil {
-		writeMsg(w, r, 404, "文件不存在")
+		writeMsg(c, 404, "文件不存在")
 		return
 	}
 	source := sources[0]
-	preview := strings.HasSuffix(r.URL.Path, "/preview")
+	preview := strings.HasSuffix(c.Request.URL.Path, "/preview")
 	if preview && !sourcePreviewTypes[source.MIMEType] {
-		writeMsg(w, r, 404, "文件不存在")
+		writeMsg(c, 404, "文件不存在")
 		return
 	}
 	release, err := acquireSourceTransfer(ctx)
@@ -565,7 +566,7 @@ func (s *Server) handleSourceContent(w http.ResponseWriter, r *http.Request, id 
 	defer release()
 	res, err := s.api.sourceContent(ctx, id.token, sess.WorkspaceID, source)
 	if err != nil {
-		writeMsg(w, r, 502, "暂时下载不了这个文件")
+		writeMsg(c, 502, "暂时下载不了这个文件")
 		return
 	}
 	defer res.Body.Close()
@@ -574,55 +575,55 @@ func (s *Server) handleSourceContent(w http.ResponseWriter, r *http.Request, id 
 		if res.StatusCode == 404 || res.StatusCode == 410 {
 			status = res.StatusCode
 		}
-		writeMsg(w, r, status, "暂时下载不了这个文件")
+		writeMsg(c, status, "暂时下载不了这个文件")
 		return
 	}
 	file, size, digest, media, err := spoolSource(res.Body, maxSourceBytes)
 	if err != nil {
-		writeMsg(w, r, 502, "暂时下载不了这个文件")
+		writeMsg(c, 502, "暂时下载不了这个文件")
 		return
 	}
 	defer func() { file.Close(); os.Remove(file.Name()) }()
 	if size != source.SizeBytes || digest != source.SHA256 || media != source.MIMEType {
-		writeMsg(w, r, 502, "暂时下载不了这个文件")
+		writeMsg(c, 502, "暂时下载不了这个文件")
 		return
 	}
 	disposition := "attachment"
 	if preview {
 		disposition = "inline"
 	}
-	h := w.Header()
+	h := c.Writer.Header()
 	h.Set("Content-Type", media)
 	h.Set("Content-Length", strconv.FormatInt(size, 10))
 	h.Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": source.Name}))
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "sandbox")
 	h.Set("Cache-Control", "no-store")
-	_, _ = io.Copy(w, file)
+	_, _ = io.Copy(c.Writer, file)
 }
 
-func (s *Server) handleSourceCapabilities(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleSourceCapabilities(c *gin.Context, id identity) {
 	var workspace string
-	if r.PathValue("session") == "" {
-		project, ok := s.project(w, r, id)
+	if c.Param("session") == "" {
+		project, ok := s.project(c, id)
 		if !ok {
 			return
 		}
 		workspace = project.ID
 	} else {
-		_, session, ok := s.session(w, r, id)
+		_, session, ok := s.session(c, id)
 		if !ok {
 			return
 		}
 		workspace = session.WorkspaceID
 	}
-	ctx, cancel := ctxTimeout(r, 15*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 15*time.Second)
 	defer cancel()
 	var capability map[string]any
 	if err := s.api.fileRequest(ctx, id.token, http.MethodGet, "/v1/files/capabilities?"+filesQuery(workspace).Encode(), nil, &capability); err != nil {
-		writeMsg(w, r, 502, "暂时无法读取文件来源")
+		writeMsg(c, 502, "暂时无法读取文件来源")
 		return
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, capability)
+	c.Header("Cache-Control", "no-store")
+	writeJSON(c, 200, capability)
 }

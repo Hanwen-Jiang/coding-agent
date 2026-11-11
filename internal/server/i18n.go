@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"strings"
 )
@@ -82,11 +83,17 @@ func localize(lang string, err error) string {
 }
 
 // writeMsg 写出一条错误说明（JSON 的 error 字段），按请求的语言。format 必须是字符串字面量。
-func writeMsg(w http.ResponseWriter, r *http.Request, status int, format string, args ...any) {
-	writeErr(w, r, status, msg(format, args...))
+func writeMsg(c *gin.Context, status int, format string, args ...any) {
+	writeErr(c, status, msg(format, args...))
 }
 
 // writeErr 写出一个错误：*Msg、*GitError 按请求的语言，其余原样。
-func writeErr(w http.ResponseWriter, r *http.Request, status int, err error) {
-	writeJSON(w, status, map[string]string{"error": localize(requestLang(r), err)})
+func writeErr(c *gin.Context, status int, err error) {
+	writeJSON(c, status, map[string]string{"error": localize(requestLang(c.Request), err)})
+}
+
+// abortMsg 写出一条错误说明并中断中间件链。format 必须是字符串字面量（同 writeMsg）。
+func abortMsg(c *gin.Context, status int, format string, args ...any) {
+	writeErr(c, status, msg(format, args...))
+	c.Abort()
 }

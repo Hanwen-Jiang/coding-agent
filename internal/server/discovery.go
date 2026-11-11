@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"io"
 	"net"
 	"net/http"
@@ -63,18 +64,18 @@ func (e *discoveryError) Error() string { return e.code }
 func discoveryErr(status int, code, message string) error {
 	return &discoveryError{status: status, code: code, message: message}
 }
-func discoveryReplyError(w http.ResponseWriter, err error) {
+func discoveryReplyError(c *gin.Context, err error) {
 	var e *discoveryError
 	if !errors.As(err, &e) {
 		e = &discoveryError{status: 502, code: "upstream_error", message: "公开来源暂时无法访问，请稍后重试"}
 	}
 	body := map[string]any{"error": e.message, "code": e.code}
 	if e.retry > 0 {
-		w.Header().Set("Retry-After", strconv.Itoa(e.retry))
+		c.Header("Retry-After", strconv.Itoa(e.retry))
 		body["retry_after"] = e.retry
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, e.status, body)
+	c.Header("Cache-Control", "no-store")
+	writeJSON(c, e.status, body)
 }
 
 type discoveryCacheItem struct {
@@ -571,33 +572,33 @@ func discoveryArgs(r *http.Request) (string, string, error) {
 	ref, e := discoveryRef(r.URL.Query().Get("ref"))
 	return repo, ref, e
 }
-func (s *Server) handleExploreSkills(w http.ResponseWriter, r *http.Request, _ identity) {
-	repo, ref, err := discoveryArgs(r)
+func (s *Server) handleExploreSkills(c *gin.Context, _ identity) {
+	repo, ref, err := discoveryArgs(c.Request)
 	if err != nil {
-		discoveryReplyError(w, err)
+		discoveryReplyError(c, err)
 		return
 	}
-	query := strings.TrimSpace(r.URL.Query().Get("query"))
+	query := strings.TrimSpace(c.Query("query"))
 	if query == "" {
-		query = strings.TrimSpace(r.URL.Query().Get("q"))
+		query = strings.TrimSpace(c.Query("q"))
 	}
 	if len(query) > 200 {
-		discoveryReplyError(w, discoveryErr(400, "invalid_request", "搜索文字过长"))
+		discoveryReplyError(c, discoveryErr(400, "invalid_request", "搜索文字过长"))
 		return
 	}
 	offset := 0
-	if v := r.URL.Query().Get("cursor"); v != "" {
+	if v := c.Query("cursor"); v != "" {
 		offset, err = strconv.Atoi(v)
 		if err != nil || offset < 0 || offset > 10000 {
-			discoveryReplyError(w, discoveryErr(400, "invalid_request", "分页位置无效"))
+			discoveryReplyError(c, discoveryErr(400, "invalid_request", "分页位置无效"))
 			return
 		}
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
 	defer cancel()
 	snap, err := s.discovery.snapshot(ctx, repo, ref)
 	if err != nil {
-		discoveryReplyError(w, err)
+		discoveryReplyError(c, err)
 		return
 	}
 	paths := []string{}
@@ -621,7 +622,7 @@ func (s *Server) handleExploreSkills(w http.ResponseWriter, r *http.Request, _ i
 				warnings = append(warnings, p+": "+typed.message)
 				continue
 			}
-			discoveryReplyError(w, e)
+			discoveryReplyError(c, e)
 			return
 		}
 		items = append(items, item)
@@ -630,30 +631,30 @@ func (s *Server) handleExploreSkills(w http.ResponseWriter, r *http.Request, _ i
 	if end < len(paths) {
 		cursor = strconv.Itoa(end)
 	}
-	w.Header().Set("Cache-Control", "private, no-store")
-	writeJSON(w, 200, map[string]any{"items": items, "next_cursor": cursor, "sources": discoverySources, "repository": repo, "ref": snap.ref, "revision": snap.revision, "source": snap.source, "total": len(paths), "warnings": warnings, "search_scope": "path"})
+	c.Header("Cache-Control", "private, no-store")
+	writeJSON(c, 200, map[string]any{"items": items, "next_cursor": cursor, "sources": discoverySources, "repository": repo, "ref": snap.ref, "revision": snap.revision, "source": snap.source, "total": len(paths), "warnings": warnings, "search_scope": "path"})
 }
-func (s *Server) handleExploreSkillDetail(w http.ResponseWriter, r *http.Request, _ identity) {
-	repo, ref, err := discoveryArgs(r)
+func (s *Server) handleExploreSkillDetail(c *gin.Context, _ identity) {
+	repo, ref, err := discoveryArgs(c.Request)
 	if err != nil {
-		discoveryReplyError(w, err)
+		discoveryReplyError(c, err)
 		return
 	}
-	p := r.URL.Query().Get("path")
+	p := c.Query("path")
 	if !discoveryPath(p) || path.Base(p) != "SKILL.md" {
-		discoveryReplyError(w, discoveryErr(400, "invalid_request", "请选择仓库里的 SKILL.md 文档"))
+		discoveryReplyError(c, discoveryErr(400, "invalid_request", "请选择仓库里的 SKILL.md 文档"))
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
 	defer cancel()
 	snap, err := s.discovery.snapshot(ctx, repo, ref)
 	if err != nil {
-		discoveryReplyError(w, err)
+		discoveryReplyError(c, err)
 		return
 	}
 	item, raw, err := s.discovery.skill(ctx, repo, snap, p)
 	if err != nil {
-		discoveryReplyError(w, err)
+		discoveryReplyError(c, err)
 		return
 	}
 	refs := []string{}
@@ -696,8 +697,8 @@ func (s *Server) handleExploreSkillDetail(w http.ResponseWriter, r *http.Request
 	} else if !importable {
 		reason = "名称或说明不符合当前 Skill 格式，请先手动调整"
 	}
-	w.Header().Set("Cache-Control", "private, no-store")
-	writeJSON(w, 200, struct {
+	c.Header("Cache-Control", "private, no-store")
+	writeJSON(c, 200, struct {
 		discoverySkill
 		Instructions   string   `json:"instructions"`
 		ReferenceFiles []string `json:"reference_files"`
@@ -783,18 +784,18 @@ func publicMCPURL(raw string) bool {
 	}
 	return true
 }
-func (s *Server) handleExploreMCP(w http.ResponseWriter, r *http.Request, _ identity) {
-	query := strings.TrimSpace(r.URL.Query().Get("query"))
+func (s *Server) handleExploreMCP(c *gin.Context, _ identity) {
+	query := strings.TrimSpace(c.Query("query"))
 	if query == "" {
-		query = strings.TrimSpace(r.URL.Query().Get("q"))
+		query = strings.TrimSpace(c.Query("q"))
 	}
 	if (query != "" && utf8.RuneCountInString(query) < 3) || len(query) > 200 {
-		discoveryReplyError(w, discoveryErr(400, "search_too_short", "请输入至少 3 个字符搜索 MCP 名称"))
+		discoveryReplyError(c, discoveryErr(400, "search_too_short", "请输入至少 3 个字符搜索 MCP 名称"))
 		return
 	}
-	cursor := r.URL.Query().Get("cursor")
+	cursor := c.Query("cursor")
 	if len(cursor) > 1024 || strings.ContainsAny(cursor, "\r\n\x00") {
-		discoveryReplyError(w, discoveryErr(400, "invalid_request", "分页位置无效"))
+		discoveryReplyError(c, discoveryErr(400, "invalid_request", "分页位置无效"))
 		return
 	}
 	params := url.Values{"version": {"latest"}, "limit": {"20"}}
@@ -804,9 +805,9 @@ func (s *Server) handleExploreMCP(w http.ResponseWriter, r *http.Request, _ iden
 	if cursor != "" {
 		params.Set("cursor", cursor)
 	}
-	raw, err := s.discovery.get(r.Context(), "https://registry.modelcontextprotocol.io/v0.1/servers?"+params.Encode(), 2<<20)
+	raw, err := s.discovery.get(c.Request.Context(), "https://registry.modelcontextprotocol.io/v0.1/servers?"+params.Encode(), 2<<20)
 	if err != nil {
-		discoveryReplyError(w, err)
+		discoveryReplyError(c, err)
 		return
 	}
 	var list struct {
@@ -821,7 +822,7 @@ func (s *Server) handleExploreMCP(w http.ResponseWriter, r *http.Request, _ iden
 		} `json:"metadata"`
 	}
 	if json.Unmarshal(raw, &list) != nil || list.Servers == nil {
-		discoveryReplyError(w, discoveryErr(502, "invalid_metadata", "MCP 官方目录暂时无法读取"))
+		discoveryReplyError(c, discoveryErr(502, "invalid_metadata", "MCP 官方目录暂时无法读取"))
 		return
 	}
 	items := []map[string]any{}
@@ -866,6 +867,6 @@ func (s *Server) handleExploreMCP(w http.ResponseWriter, r *http.Request, _ iden
 		}
 		items = append(items, map[string]any{"id": entry.Name, "name": name, "description": entry.Description, "version": entry.Version, "repository": repository, "url": link, "remotes": remotes, "packages": packages, "connectable": connectable, "source": "official-mcp-registry"})
 	}
-	w.Header().Set("Cache-Control", "private, no-store")
-	writeJSON(w, 200, map[string]any{"items": items, "next_cursor": list.Metadata.NextCursor, "source": "official-mcp-registry", "search_scope": "name"})
+	c.Header("Cache-Control", "private, no-store")
+	writeJSON(c, 200, map[string]any{"items": items, "next_cursor": list.Metadata.NextCursor, "source": "official-mcp-registry", "search_scope": "name"})
 }

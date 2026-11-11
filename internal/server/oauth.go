@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
 	"net/url"
@@ -341,19 +342,19 @@ func errorMessage(data []byte) string {
 	return strings.Join(parts, "; ")
 }
 
-func writeGitError(w http.ResponseWriter, r *http.Request, err error) {
+func writeGitError(c *gin.Context, err error) {
 	var ge *GitError
 	if errors.As(err, &ge) {
 		status := ge.Status
 		if status == http.StatusUnauthorized {
-			writeMsg(w, r, http.StatusForbidden, "%s 授权失效，请在“账号与平台”里重新连接 %[1]s", ge.Provider)
+			writeMsg(c, http.StatusForbidden, "%s 授权失效，请在“账号与平台”里重新连接 %[1]s", ge.Provider)
 			return
 		}
 		if status < 400 || status > 599 {
 			status = http.StatusBadGateway
 		}
-		writeMsg(w, r, status, "%s：%s", ge.Provider, ge.detail(requestLang(r)))
+		writeMsg(c, status, "%s：%s", ge.Provider, ge.detail(requestLang(c.Request)))
 		return
 	}
-	writeErr(w, r, http.StatusBadGateway, err)
+	writeErr(c, http.StatusBadGateway, err)
 }

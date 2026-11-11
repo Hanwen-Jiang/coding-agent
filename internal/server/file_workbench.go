@@ -3,6 +3,7 @@ package server
 // File intelligence shares Runtime authority. The UI proxy supplies the session
 // workspace and authenticated bearer; it never accepts an upstream URL or scope.
 import (
+	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,18 +15,18 @@ import (
 var fileWorkbenchPath = regexp.MustCompile(`^(?:trash|src_[a-f0-9]{32}/(?:details|actions|publish|versions/ver_[a-f0-9]{32}/content))$`)
 var fileJobPath = regexp.MustCompile(`^fjob_[a-f0-9]{48}(?:/cancel|/artifacts/art_[a-f0-9]{32})?$`)
 
-func (s *Server) handleFileWorkbench(w http.ResponseWriter, r *http.Request, id identity) {
-	_, sess, ok := s.session(w, r, id)
+func (s *Server) handleFileWorkbench(c *gin.Context, id identity) {
+	_, sess, ok := s.session(c, id)
 	if !ok {
 		return
 	}
-	tail := r.PathValue("file_tail")
-	knowledge := r.PathValue("knowledge_action")
+	tail := strings.TrimPrefix(c.Param("file_tail"), "/") // Gin 的 *file_tail 带开头的斜杠
+	knowledge := c.Param("knowledge_action")
 	if knowledge != "" {
-		s.proxyKnowledge(w, r, id, sess.WorkspaceID, knowledge)
+		s.proxyKnowledge(c, id, sess.WorkspaceID, knowledge)
 		return
 	}
-	job := strings.Contains(r.URL.Path, "/file-jobs")
+	job := strings.Contains(c.Request.URL.Path, "/file-jobs")
 	target := "/v1/files/" + tail
 	if job {
 		target = "/v1/file-jobs"
@@ -33,42 +34,42 @@ func (s *Server) handleFileWorkbench(w http.ResponseWriter, r *http.Request, id 
 			target += "/" + tail
 		}
 		if tail != "" && !fileJobPath.MatchString(tail) {
-			http.NotFound(w, r)
+			http.NotFound(c.Writer, c.Request)
 			return
 		}
 	} else if !fileWorkbenchPath.MatchString(tail) {
-		http.NotFound(w, r)
+		http.NotFound(c.Writer, c.Request)
 		return
 	}
-	if r.Method == "POST" && !((job && (tail == "" || strings.HasSuffix(tail, "/cancel"))) || (!job && (strings.HasSuffix(tail, "/actions") || strings.HasSuffix(tail, "/publish")))) {
-		http.NotFound(w, r)
+	if c.Request.Method == "POST" && !((job && (tail == "" || strings.HasSuffix(tail, "/cancel"))) || (!job && (strings.HasSuffix(tail, "/actions") || strings.HasSuffix(tail, "/publish")))) {
+		http.NotFound(c.Writer, c.Request)
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 45*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 45*time.Second)
 	defer cancel()
-	upstream, err := http.NewRequestWithContext(ctx, r.Method, s.api.base+target+"?"+url.Values{"workspace_id": {sess.WorkspaceID}}.Encode(), http.MaxBytesReader(w, r.Body, 128<<10))
+	upstream, err := http.NewRequestWithContext(ctx, c.Request.Method, s.api.base+target+"?"+url.Values{"workspace_id": {sess.WorkspaceID}}.Encode(), http.MaxBytesReader(c.Writer, c.Request.Body, 128<<10))
 	if err != nil {
-		writeErr(w, r, 500, err)
+		writeErr(c, 500, err)
 		return
 	}
 	upstream.Header.Set("Authorization", "Bearer "+id.token)
-	if r.Method == "POST" {
+	if c.Request.Method == "POST" {
 		upstream.Header.Set("Content-Type", "application/json")
 	}
 	response, err := s.api.client.Do(upstream)
 	if err != nil {
-		writeMsg(w, r, 502, "文件服务暂时不可用")
+		writeMsg(c, 502, "文件服务暂时不可用")
 		return
 	}
 	defer response.Body.Close()
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
 	for _, header := range []string{"Content-Type", "Content-Disposition", "Content-Security-Policy", "Retry-After"} {
 		if value := response.Header.Get(header); value != "" {
-			w.Header().Set(header, value)
+			c.Header(header, value)
 		}
 	}
-	w.WriteHeader(response.StatusCode)
+	c.Status(response.StatusCode)
 	limit := int64(16 << 20)
 	if strings.Contains(tail, "/artifacts/") || strings.HasSuffix(tail, "/content") {
 		limit = maxSourceBytes
@@ -76,31 +77,31 @@ func (s *Server) handleFileWorkbench(w http.ResponseWriter, r *http.Request, id 
 	if response.StatusCode >= 400 {
 		limit = 64 << 10
 	}
-	_, _ = io.Copy(w, io.LimitReader(response.Body, limit))
+	_, _ = io.Copy(c.Writer, io.LimitReader(response.Body, limit))
 }
 
-func (s *Server) proxyKnowledge(w http.ResponseWriter, r *http.Request, id identity, workspace, action string) {
-	if !((r.Method == "GET" && action == "collection") || (r.Method == "POST" && (action == "index" || action == "search"))) {
-		http.NotFound(w, r)
+func (s *Server) proxyKnowledge(c *gin.Context, id identity, workspace, action string) {
+	if !((c.Request.Method == "GET" && action == "collection") || (c.Request.Method == "POST" && (action == "index" || action == "search"))) {
+		http.NotFound(c.Writer, c.Request)
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 5*time.Minute)
+	ctx, cancel := ctxTimeout(c.Request, 5*time.Minute)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, r.Method, s.api.base+"/v1/knowledge/"+action+"?"+filesQuery(workspace).Encode(), http.MaxBytesReader(w, r.Body, 128<<10))
+	req, err := http.NewRequestWithContext(ctx, c.Request.Method, s.api.base+"/v1/knowledge/"+action+"?"+filesQuery(workspace).Encode(), http.MaxBytesReader(c.Writer, c.Request.Body, 128<<10))
 	if err != nil {
-		writeErr(w, r, 500, err)
+		writeErr(c, 500, err)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+id.token)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := s.api.slow.Do(req)
 	if err != nil {
-		writeMsg(w, r, 502, "检索服务暂时不可用")
+		writeMsg(c, 502, "检索服务暂时不可用")
 		return
 	}
 	defer resp.Body.Close()
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, io.LimitReader(resp.Body, 16<<20))
+	c.Header("Cache-Control", "no-store")
+	c.Header("Content-Type", "application/json")
+	c.Status(resp.StatusCode)
+	_, _ = io.Copy(c.Writer, io.LimitReader(resp.Body, 16<<20))
 }
