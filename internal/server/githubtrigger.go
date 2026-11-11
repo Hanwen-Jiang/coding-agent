@@ -171,7 +171,7 @@ func (s *Server) startTrigger(ctx context.Context, t githubTrigger) error {
 		"effectCeiling":   ceiling,
 		"budgetUsdMicros": strconv.FormatInt(int64(math.Round(t.BudgetUSD*1e6)), 10),
 	}
-	if t.BudgetUSD <= 0 {
+	if t.BudgetUSD <= 0 || !s.cfg.RuntimeTaskBudget {
 		delete(submit, "budgetUsdMicros")
 	}
 	var resp submitResponse

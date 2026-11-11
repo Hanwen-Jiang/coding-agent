@@ -163,7 +163,11 @@ func (s *Server) MigrateEntryTriggers(ctx context.Context) error {
 			if s.cfg.GitHubApp != nil {
 				mention = s.cfg.GitHubApp.Slug
 			}
-			c = entry.Connection{ID: cid, Tenant: g.Tenant, User: g.User, ProjectID: g.ProjectID, Kind: "github_comment", Name: "GitHub comments (migrated)", Config: map[string]any{"mention": mention, "autonomy": "draft_pr", "language": "en"}, Sinks: []entry.Destination{{Sink: "github_comment"}}, Limits: entry.DefaultLimits(), CreatedAt: s.now().UTC(), UpdatedAt: s.now().UTC()}
+			// G-06 had only the hourly budget; keep that behaviour for migrated runs
+			// rather than silently capping each task at the new-connection default.
+			limits := entry.DefaultLimits()
+			limits.TaskUSD = limits.USDPerHour
+			c = entry.Connection{ID: cid, Tenant: g.Tenant, User: g.User, ProjectID: g.ProjectID, Kind: "github_comment", Name: "GitHub comments (migrated)", Config: map[string]any{"mention": mention, "autonomy": "draft_pr", "language": "en"}, Sinks: []entry.Destination{{Sink: "github_comment"}}, Limits: limits, CreatedAt: s.now().UTC(), UpdatedAt: s.now().UTC()}
 			err = s.cfg.EntryStore.PutConnection(ctx, c)
 		}
 		if err != nil {
@@ -221,7 +225,9 @@ func (s *Server) onIssueComment(ctx context.Context, d github.Delivery) error {
 		if err != nil {
 			return err
 		}
-		if !ok || p.Provider != "github" || p.RepoID != e.Repository.ID && !strings.EqualFold(p.Repo, e.Repository.FullName) {
+		// Match on the immutable repository ID. A name only identifies a project that
+		// predates RepoID; after a rename or transfer another repository can reuse it.
+		if !ok || p.Provider != "github" || p.RepoID != 0 && p.RepoID != e.Repository.ID || p.RepoID == 0 && !strings.EqualFold(p.Repo, e.Repository.FullName) {
 			continue
 		}
 		instruction, confirm, match := githubcomment.Command(e.Comment.Body, githubcomment.Mention(c))

@@ -513,7 +513,28 @@ func (s *MemoryStore) Stats(ctx context.Context) (Stats, error) {
 var _ Store = (*MemoryStore)(nil)
 
 // ReleaseTrigger updates scheduling without replacing state changed by a concurrent confirmation.
-func (s *MemoryStore) ReleaseTrigger(ctx context.Context, id string, token int64, next time.Time) error {
+func (s *MemoryStore) Prune(ctx context.Context, before time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int64
+	kept := map[string]bool{}
+	for id, d := range s.deliveries {
+		if d.CreatedAt.Before(before) && (d.State == "done" || d.State == "dead" || d.State == "unknown") {
+			delete(s.deliveries, id)
+			n++
+		} else {
+			kept[d.TriggerID] = true
+		}
+	}
+	for id, t := range s.triggers {
+		if t.CreatedAt.Before(before) && Terminal(t.State) && !t.NotifyPending && !kept[id] {
+			delete(s.triggers, id)
+			n++
+		}
+	}
+	return n, ctx.Err()
+}
+func (s *MemoryStore) ReleaseTrigger(ctx context.Context, id string, token int64, next time.Time, succeeded bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, ok := s.triggers[id]
@@ -522,6 +543,9 @@ func (s *MemoryStore) ReleaseTrigger(ctx context.Context, id string, token int64
 	}
 	t.LeaseUntil = time.Time{}
 	t.NextAt = next
+	if succeeded {
+		t.Attempts = 0
+	}
 	s.triggers[id] = t
 	return ctx.Err()
 }

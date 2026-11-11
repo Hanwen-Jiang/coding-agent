@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS entry_triggers (
  lease_until timestamptz, lease_token bigint NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS entry_triggers_due ON entry_triggers(state,next_at);
+CREATE INDEX IF NOT EXISTS entry_triggers_open ON entry_triggers(next_at) WHERE state NOT IN ('done','refused','failed','expired','skipped','cancelled');
 CREATE INDEX IF NOT EXISTS entry_triggers_pending_outcomes ON entry_triggers(next_at) WHERE data @> '{"private_notify_pending":true}'::jsonb;
 CREATE INDEX IF NOT EXISTS entry_triggers_scope ON entry_triggers(scope,created_at);
 CREATE INDEX IF NOT EXISTS entry_triggers_connection ON entry_triggers(connection_id,created_at);
@@ -511,7 +512,24 @@ func (s *PostgresStore) Stats(ctx context.Context) (Stats, error) {
 
 var _ Store = (*PostgresStore)(nil)
 
-func (s *PostgresStore) ReleaseTrigger(ctx context.Context, id string, token int64, next time.Time) error {
+func (s *PostgresStore) Prune(ctx context.Context, before time.Time) (int64, error) {
+	var n int64
+	err := pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `DELETE FROM entry_deliveries WHERE created_at < $1 AND state IN ('done','dead','unknown')`, before)
+		if err != nil {
+			return err
+		}
+		n += tag.RowsAffected()
+		tag, err = tx.Exec(ctx, `DELETE FROM entry_triggers t WHERE t.created_at < $1 AND t.state IN ('done','refused','failed','expired','skipped','cancelled') AND NOT t.data @> '{"private_notify_pending":true}'::jsonb AND NOT EXISTS (SELECT 1 FROM entry_deliveries d WHERE d.trigger_id = t.id)`, before)
+		if err != nil {
+			return err
+		}
+		n += tag.RowsAffected()
+		return nil
+	})
+	return n, err
+}
+func (s *PostgresStore) ReleaseTrigger(ctx context.Context, id string, token int64, next time.Time, succeeded bool) error {
 	return pgx.BeginFunc(ctx, s.db, func(tx pgx.Tx) error {
 		t, err := scanTrigger(tx.QueryRow(ctx, `SELECT data,lease_until,lease_token FROM entry_triggers WHERE id=$1 FOR UPDATE`, id))
 		if err != nil {
@@ -522,6 +540,9 @@ func (s *PostgresStore) ReleaseTrigger(ctx context.Context, id string, token int
 		}
 		t.LeaseUntil = time.Time{}
 		t.NextAt = next
+		if succeeded {
+			t.Attempts = 0
+		}
 		return updateTrigger(ctx, tx, t)
 	})
 }

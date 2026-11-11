@@ -559,9 +559,16 @@ func (s *Server) fillEntryTrigger(t *entry.Trigger, c entry.Connection, p Projec
 	}
 	t.Scope = c.Tenant + "/" + p.ID
 	if p.Provider == "github" {
-		t.Scope = fmt.Sprintf("github/%d", p.RepoID)
+		repo := fmt.Sprintf("github/%d", p.RepoID)
 		if p.RepoID == 0 {
-			t.Scope = "github/" + strings.ToLower(p.Repo)
+			repo = "github/" + strings.ToLower(p.Repo)
+		}
+		// Only repository writers can start comment runs, so they share one
+		// repository-wide budget. Schedules, alerts and email need no write access;
+		// keep them per tenant so another tenant cannot exhaust the maintainers' runs.
+		t.Scope = repo
+		if c.Kind != "github_comment" {
+			t.Scope = c.Tenant + "/" + repo
 		}
 	}
 }

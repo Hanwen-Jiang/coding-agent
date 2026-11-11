@@ -43,7 +43,10 @@ var slug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 type Config struct {
 	EntryStore entry.Store
 	EntryMail  entry.Sink
-	TaskAPI    string
+	// RuntimeTaskBudget 为真时提交 Task 带 budgetUsdMicros（要 Runtime 支持，agent-runtime PR 3）。
+	// 默认不带：旧的 Runtime 不认这个字段会拒绝提交；单任务上限仍由轮询时的 CancelTask 兜底。
+	RuntimeTaskBudget bool
+	TaskAPI           string
 	// Workspaces 是工作区在哪里（见 Workspaces）：runtime（默认，经 Runtime 的 Workspace API）或 local（本机的
 	// WorkspaceRoot 下自己跑 git，要与 Worker 共用这块盘）。WorkspaceRoot 只有 local 要。
 	Workspaces    string
@@ -98,10 +101,12 @@ type Config struct {
 type Server struct {
 	entryLeases  sync.Map
 	entryAdvance sync.Mutex
-	discovery    *discoveryService
-	cfg          Config
-	ingress      tokens
-	sessions     *sessions
+	// entryPrunedAt is guarded by entryAdvance.
+	entryPrunedAt time.Time
+	discovery     *discoveryService
+	cfg           Config
+	ingress       tokens
+	sessions      *sessions
 	// github 是 GitHub App 一侧的进程内状态（G-03，githubrepo.go）。
 	github    githubState
 	store     *Store

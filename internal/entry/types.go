@@ -205,7 +205,9 @@ type Store interface {
 	SaveTrigger(context.Context, Trigger) error
 	MutateTrigger(context.Context, string, int64, func(*Trigger) bool) (Trigger, bool, error)
 	RenewTrigger(context.Context, string, int64, time.Time) error
-	ReleaseTrigger(context.Context, string, int64, time.Time) error
+	// ReleaseTrigger drops the claim; succeeded resets the consecutive-failure count
+	// that ClaimTrigger increments, so backoff reflects failures in a row only.
+	ReleaseTrigger(ctx context.Context, id string, token int64, next time.Time, succeeded bool) error
 	QueueDelivery(context.Context, Delivery) error
 	Deliveries(context.Context, string, string, string, int) ([]Delivery, error)
 	ClaimDelivery(context.Context, time.Time, time.Duration) (Delivery, error)
@@ -213,6 +215,8 @@ type Store interface {
 	RenewDelivery(context.Context, string, int64, time.Time) error
 	ReplayDelivery(context.Context, string, string, string, time.Time) error
 	Stats(context.Context) (Stats, error)
+	// Prune deletes finished runs and settled deliveries created before the cutoff.
+	Prune(ctx context.Context, before time.Time) (int64, error)
 	Close()
 }
 

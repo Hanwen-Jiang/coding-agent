@@ -50,6 +50,13 @@ func configureEntries(ctx context.Context, cfg *server.Config, getenv func(strin
 	if smtpConfig != nil {
 		cfg.EntryMail = &entrymail.Sink{Config: *smtpConfig}
 	}
+	if value := getenv("CODING_RUNTIME_TASK_BUDGET"); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return errors.New("CODING_RUNTIME_TASK_BUDGET 必须为 true/false 或 1/0")
+		}
+		cfg.RuntimeTaskBudget = enabled
+	}
 	return nil
 }
 func entrySMTPConfig(getenv func(string) string) (*entrymail.SMTPConfig, error) {

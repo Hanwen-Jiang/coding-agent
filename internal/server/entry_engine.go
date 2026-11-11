@@ -17,6 +17,10 @@ import (
 	entrymail "github.com/agentruntime/coding-agent/internal/entry/email"
 )
 
+// entryRetention bounds how long finished runs and settled deliveries (including
+// their bodies) are kept; it is far beyond any redelivery or dedupe window.
+const entryRetention = 90 * 24 * time.Hour
+
 // RunEntries owns polling; all claims are fenced in Postgres across replicas.
 func (s *Server) RunEntries(ctx context.Context) {
 	ticker := time.NewTicker(10 * time.Second)
@@ -86,6 +90,12 @@ func (s *Server) AdvanceEntries(ctx context.Context) error {
 			return e
 		}
 		s.deliverEntry(ctx, d)
+	}
+	if now := time.Now(); now.Sub(s.entryPrunedAt) > time.Hour {
+		s.entryPrunedAt = now
+		if _, e := s.cfg.EntryStore.Prune(ctx, now.Add(-entryRetention)); e != nil && ctx.Err() == nil {
+			log.Print("entry point records could not be pruned")
+		}
 	}
 	if stats, e := s.cfg.EntryStore.Stats(ctx); e == nil {
 		for state, value := range map[string]int64{"pending": stats.Pending, "sending": stats.Running, "dead": stats.Dead, "unknown": stats.Unknown} {
@@ -168,7 +178,7 @@ func (s *Server) advanceEntryClaim(parent context.Context, t entry.Trigger, cuto
 			log.Printf("entry run %s could not advance", t.ID)
 		}
 	}
-	if e := s.cfg.EntryStore.ReleaseTrigger(ctx, t.ID, t.LeaseToken, nextAt); e != nil && ctx.Err() == nil {
+	if e := s.cfg.EntryStore.ReleaseTrigger(ctx, t.ID, t.LeaseToken, nextAt, err == nil); e != nil && ctx.Err() == nil {
 		log.Printf("entry run %s lost its claim", t.ID)
 	}
 }
@@ -265,6 +275,9 @@ func (s *Server) startGenericEntry(ctx context.Context, c entry.Connection, t en
 		return entry.ErrInvalid
 	}
 	submit := map[string]any{"workspaceId": t.WorkspaceID, "clientRequestId": "entry-" + t.ID, "message": message, "sessionAccess": "SESSION_ACCESS_READ_WRITE", "effectCeiling": input.EffectCeiling, "budgetUsdMicros": strconv.FormatInt(int64(math.Round(c.Limits.TaskUSD*1e6)), 10), "inputs": map[string]any{"constraints": map[string]any{"model_preference": defaultModel, "budget_usd": c.Limits.TaskUSD}}}
+	if !s.cfg.RuntimeTaskBudget {
+		delete(submit, "budgetUsdMicros")
+	}
 	if len(refs) > 0 {
 		submit["attachments"] = refs
 	}
@@ -525,8 +538,14 @@ func (s *Server) queueEntryOutcome(ctx context.Context, t entry.Trigger, phase e
 			msg = s.cfg.EntryMail.Render(entry.Outcome{Trigger: t, URL: url, Summary: summary}, phase, entryConfig(c, "language"))
 		}
 		deliveryID := ""
-		if t.Reason == "hourly_run_limit" || t.Reason == "hourly_budget_limit" {
+		switch {
+		case t.Reason == "hourly_run_limit" || t.Reason == "hourly_budget_limit":
 			deliveryID = entry.DeliveryKey(c.ID, fmt.Sprintf("admission/%d", t.CreatedAt.Truncate(time.Hour).Unix()), phase, out.Sink)
+		case phase == entry.Question:
+			// One run can ask several questions (a task's HUMAN_INPUT_REQUIRED, then
+			// the publish confirmation). Polling the same pending question rebuilds
+			// the same key, so it is still sent once; a different question is new.
+			deliveryID = entry.DeliveryKey(c.ID, t.ID+"/question/"+workspaceHash(summary)[:16], phase, out.Sink)
 		}
 		if err = s.cfg.EntryStore.QueueDelivery(ctx, entry.Delivery{ID: deliveryID, ConnectionID: c.ID, TriggerID: t.ID, Tenant: c.Tenant, User: c.User, Sink: out.Sink, Address: addr, Phase: phase, Message: msg, CreatedAt: s.now().UTC(), NextAt: time.Now().UTC()}); err != nil {
 			return err
