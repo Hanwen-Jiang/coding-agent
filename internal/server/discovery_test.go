@@ -61,7 +61,7 @@ func discoveryJSON(t *testing.T, h authedHandler, target string) (int, map[strin
 	r.Header.Set("Authorization", "Bearer private-token")
 	r.Header.Set("Cookie", "private-session=secret")
 	w := httptest.NewRecorder()
-	h(w, r, identity{})
+	h(testContext(w, r), identity{})
 	var data map[string]any
 	if e := json.Unmarshal(w.Body.Bytes(), &data); e != nil {
 		t.Fatal(w.Body.String())

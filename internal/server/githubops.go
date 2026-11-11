@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -181,19 +182,19 @@ func (s *Server) installationRepos(ctx context.Context, prov *Provider, jwt stri
 }
 
 // handleGitHubStatus 给“账号与平台”页：连接状态、是不是旧 OAuth 的连接、关联的安装、安装入口、各项目的远端状况。
-func (s *Server) handleGitHubStatus(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleGitHubStatus(c *gin.Context, id identity) {
 	app := s.cfg.GitHubApp
 	if app == nil {
-		writeMsg(w, r, http.StatusNotFound, "没有配置 GitHub App")
+		writeMsg(c, http.StatusNotFound, "没有配置 GitHub App")
 		return
 	}
 	a, err := s.readAccount(id.TenantID, id.UserID)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
-	c, connected := a.Connections["github"]
-	connected = connected && c.Token != ""
+	conn, connected := a.Connections["github"]
+	connected = connected && conn.Token != ""
 	type projectView struct {
 		ID            string `json:"id"`
 		Repo          string `json:"repo"`
@@ -211,9 +212,9 @@ func (s *Server) handleGitHubStatus(w http.ResponseWriter, r *http.Request, id i
 	if installations == nil {
 		installations = []int64{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	writeJSON(c, http.StatusOK, map[string]any{
 		"slug": app.Slug, "install_url": "https://github.com/apps/" + app.Slug + "/installations/new",
-		"connected": connected, "legacy": connected && !c.App, "installations": installations, "projects": projects,
+		"connected": connected, "legacy": connected && !conn.App, "installations": installations, "projects": projects,
 	})
 }
 

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"log"
 	"net/http"
 	"net/url"
@@ -422,27 +423,27 @@ func (s *Server) saveRepoRef(tenant string, p Project) {
 
 // handleGitHubSetup 是 App 的 Setup URL（安装或调整之后 GitHub 跳回这里）。installation_id 可能被伪造：用用户令牌列出他能看到的
 // 安装，在里面的才关联到这个账号。
-func (s *Server) handleGitHubSetup(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleGitHubSetup(c *gin.Context, id identity) {
 	fail := func(why *Msg) {
 		log.Printf("GitHub App 的 Setup 没有关联（%s/%s）：%s", id.TenantID, id.UserID, why)
-		http.Redirect(w, r, "/#/?error="+url.QueryEscape(why.In(requestLang(r))), http.StatusFound)
+		c.Redirect(http.StatusFound, "/#/?error="+url.QueryEscape(why.In(requestLang(c.Request))))
 	}
 	prov := s.providers["github"]
 	if s.cfg.GitHubApp == nil || prov == nil {
 		fail(msg("没有配置 GitHub App"))
 		return
 	}
-	inst, err := strconv.ParseInt(r.URL.Query().Get("installation_id"), 10, 64)
+	inst, err := strconv.ParseInt(c.Query("installation_id"), 10, 64)
 	if err != nil || inst <= 0 {
 		fail(msg("安装编号不对"))
 		return
 	}
-	_, token, err := s.connToken(r, id, prov)
+	_, token, err := s.connToken(c.Request, id, prov)
 	if err != nil {
 		fail(msg("先在“账号与平台”里连接 GitHub，再安装 App"))
 		return
 	}
-	ctx, cancel := ctxTimeout(r, 30*time.Second)
+	ctx, cancel := ctxTimeout(c.Request, 30*time.Second)
 	defer cancel()
 	found := false
 	for page := 1; page <= 10 && !found; page++ {
@@ -475,5 +476,5 @@ func (s *Server) handleGitHubSetup(w http.ResponseWriter, r *http.Request, id id
 		fail(msg("保存安装失败：%v", err))
 		return
 	}
-	http.Redirect(w, r, "/#/?github=installed", http.StatusFound)
+	c.Redirect(http.StatusFound, "/#/?github=installed")
 }

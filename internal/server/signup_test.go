@@ -39,13 +39,13 @@ func newSignupGitHub(t *testing.T, age time.Duration, emails []map[string]any) *
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/login/oauth/access_token":
-			writeJSON(w, http.StatusOK, map[string]string{"access_token": fakeToken, "scope": "repo,read:user,user:email", "token_type": "bearer"})
+			testJSON(w, http.StatusOK, map[string]string{"access_token": fakeToken, "scope": "repo,read:user,user:email", "token_type": "bearer"})
 		case r.URL.Path == "/user":
-			writeJSON(w, http.StatusOK, map[string]any{"login": f.login, "id": 42, "name": "Octo", "created_at": f.createdAt.Format(time.RFC3339)})
+			testJSON(w, http.StatusOK, map[string]any{"login": f.login, "id": 42, "name": "Octo", "created_at": f.createdAt.Format(time.RFC3339)})
 		case r.URL.Path == "/user/emails" && f.emails != nil:
-			writeJSON(w, http.StatusOK, f.emails)
+			testJSON(w, http.StatusOK, f.emails)
 		default:
-			writeJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
+			testJSON(w, http.StatusNotFound, map[string]string{"message": "Not Found"})
 		}
 	}))
 	t.Cleanup(f.server.Close)

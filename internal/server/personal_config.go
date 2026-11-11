@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"regexp"
 	"time"
@@ -50,82 +51,82 @@ func (s *Server) callPersonalConfig(r *http.Request, id identity, method string,
 	return s.api.call(ctx, s.api.client, personalConfigService+method, id.token, req, resp)
 }
 
-func (s *Server) handleGetPersonalConfig(w http.ResponseWriter, r *http.Request, id identity) {
-	w.Header().Set("Cache-Control", "no-store")
-	version := r.URL.Query().Get("version")
+func (s *Server) handleGetPersonalConfig(c *gin.Context, id identity) {
+	c.Header("Cache-Control", "no-store")
+	version := c.Query("version")
 	if version != "" && !personalVersion.MatchString(version) {
-		writeMsg(w, r, http.StatusBadRequest, "个人配置格式不合法")
+		writeMsg(c, http.StatusBadRequest, "个人配置格式不合法")
 		return
 	}
 	var response json.RawMessage
-	err := s.callPersonalConfig(r, id, "GetPersonalConfig", map[string]any{"tenantId": id.TenantID, "version": version}, &response)
+	err := s.callPersonalConfig(c.Request, id, "GetPersonalConfig", map[string]any{"tenantId": id.TenantID, "version": version}, &response)
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		if version == "" && apiErr.Reason == "personal_config_not_found" {
-			writeJSON(w, http.StatusOK, map[string]any{"config": nil, "available": true})
+			writeJSON(c, http.StatusOK, map[string]any{"config": nil, "available": true})
 			return
 		}
 		if apiErr.Code == "unimplemented" || (apiErr.Status == http.StatusNotFound && apiErr.Reason == "") {
-			writeJSON(w, http.StatusOK, map[string]any{"config": nil, "available": false})
+			writeJSON(c, http.StatusOK, map[string]any{"config": nil, "available": false})
 			return
 		}
 	}
 	if err != nil {
-		writeAPIError(w, r, err)
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(c, http.StatusOK, response)
 }
 
-func (s *Server) handlePutPersonalConfig(w http.ResponseWriter, r *http.Request, id identity) {
-	w.Header().Set("Cache-Control", "no-store")
+func (s *Server) handlePutPersonalConfig(c *gin.Context, id identity) {
+	c.Header("Cache-Control", "no-store")
 	var req struct {
 		Document        json.RawMessage `json:"document"`
 		ExpectedVersion string          `json:"expected_version"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	if req.ExpectedVersion != "" && !personalVersion.MatchString(req.ExpectedVersion) {
-		writeMsg(w, r, http.StatusBadRequest, "个人配置格式不合法")
+		writeMsg(c, http.StatusBadRequest, "个人配置格式不合法")
 		return
 	}
 	doc := &pb.PersonalConfigDocument{}
 	if err := protojson.Unmarshal(req.Document, doc); err != nil {
-		writeMsg(w, r, http.StatusBadRequest, "个人配置格式不合法")
+		writeMsg(c, http.StatusBadRequest, "个人配置格式不合法")
 		return
 	}
 	canonical, err := personalconfig.Canonical(doc)
 	if err != nil {
-		writeErr(w, r, http.StatusBadRequest, err)
+		writeErr(c, http.StatusBadRequest, err)
 		return
 	}
 	if envID := doc.GetDefaults().GetEnvironmentId(); envID != "" {
 		_, ok, err := s.environmentForUser(id.TenantID, id.UserID, envID)
 		if err != nil {
-			writeErr(w, r, http.StatusInternalServerError, err)
+			writeErr(c, http.StatusInternalServerError, err)
 			return
 		}
 		if !ok {
-			writeMsg(w, r, http.StatusBadRequest, "环境不存在或不属于当前用户")
+			writeMsg(c, http.StatusBadRequest, "环境不存在或不属于当前用户")
 			return
 		}
 	}
 	var response json.RawMessage
-	err = s.callPersonalConfig(r, id, "PutPersonalConfig", map[string]any{"tenantId": id.TenantID, "document": json.RawMessage(canonical), "expectedVersion": req.ExpectedVersion}, &response)
+	err = s.callPersonalConfig(c.Request, id, "PutPersonalConfig", map[string]any{"tenantId": id.TenantID, "document": json.RawMessage(canonical), "expectedVersion": req.ExpectedVersion}, &response)
 	if err != nil {
-		writeAPIError(w, r, err)
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(c, http.StatusOK, response)
 }
 
-func (s *Server) handleRetirePersonalConfig(w http.ResponseWriter, r *http.Request, id identity) {
-	w.Header().Set("Cache-Control", "no-store")
+func (s *Server) handleRetirePersonalConfig(c *gin.Context, id identity) {
+	c.Header("Cache-Control", "no-store")
 	var response json.RawMessage
-	if err := s.callPersonalConfig(r, id, "RetirePersonalConfig", map[string]any{"tenantId": id.TenantID}, &response); err != nil {
-		writeAPIError(w, r, err)
+	if err := s.callPersonalConfig(c.Request, id, "RetirePersonalConfig", map[string]any{"tenantId": id.TenantID}, &response); err != nil {
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(c, http.StatusOK, response)
 }

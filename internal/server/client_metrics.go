@@ -6,6 +6,7 @@ package server
 
 import (
 	"encoding/json"
+	"github.com/gin-gonic/gin"
 	"math"
 	"net/http"
 )
@@ -15,26 +16,26 @@ const (
 	maxHistoryLoadRequests = 10000
 )
 
-func (s *Server) handleHistoryLoad(w http.ResponseWriter, r *http.Request, _ identity) {
+func (s *Server) handleHistoryLoad(c *gin.Context, _ identity) {
 	var report struct {
 		Mode       string   `json:"mode"`
 		DurationMS *float64 `json:"duration_ms"`
 		Requests   *float64 `json:"requests"`
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10))
+	dec := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 1<<10))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&report); err != nil {
-		writeMsg(w, r, http.StatusBadRequest, "请求体不是合法的 JSON")
+		writeMsg(c, http.StatusBadRequest, "请求体不是合法的 JSON")
 		return
 	}
 	d, n := report.DurationMS, report.Requests
 	if (report.Mode != "snapshot" && report.Mode != "events" && report.Mode != "replay") || d == nil || n == nil ||
 		*d < 0 || *d > maxHistoryLoadMS || *n < 0 || *n > maxHistoryLoadRequests || *n != math.Trunc(*n) {
-		writeMsg(w, r, http.StatusBadRequest, "计量的取值不对")
+		writeMsg(c, http.StatusBadRequest, "计量的取值不对")
 		return
 	}
 	labels := map[string]string{"mode": report.Mode}
 	s.metrics().Observe("coding.history_load.duration_ms", *d, labels)
 	s.metrics().Observe("coding.history_load.requests", *n, labels)
-	w.WriteHeader(http.StatusNoContent)
+	c.Status(http.StatusNoContent)
 }

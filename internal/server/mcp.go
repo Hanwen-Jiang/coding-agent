@@ -8,6 +8,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"regexp"
 	"strings"
@@ -131,43 +132,43 @@ func mcpUnavailable(err error) bool {
 	return errors.As(err, &apiErr) && (apiErr.Code == "unimplemented" || apiErr.Status == http.StatusNotImplemented)
 }
 
-func (s *Server) handleListMcp(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleListMcp(c *gin.Context, id identity) {
 	var resp struct {
 		Connections []wireMcpConn `json:"connections"`
 	}
-	err := s.callMcp(r, id, "ListMcpConnections", map[string]any{"tenantId": id.TenantID}, &resp)
+	err := s.callMcp(c.Request, id, "ListMcpConnections", map[string]any{"tenantId": id.TenantID}, &resp)
 	if mcpUnavailable(err) {
-		writeJSON(w, http.StatusOK, map[string]any{"connections": []mcpConnView{}, "available": false})
+		writeJSON(c, http.StatusOK, map[string]any{"connections": []mcpConnView{}, "available": false})
 		return
 	}
 	if err != nil {
-		writeAPIError(w, r, err)
+		writeAPIError(c, err)
 		return
 	}
 	out := make([]mcpConnView, 0, len(resp.Connections))
-	for _, c := range resp.Connections {
-		out = append(out, c.view())
+	for _, conn := range resp.Connections {
+		out = append(out, conn.view())
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"connections": out, "available": true})
+	writeJSON(c, http.StatusOK, map[string]any{"connections": out, "available": true})
 }
 
-func (s *Server) handleCreateMcp(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleCreateMcp(c *gin.Context, id identity) {
 	var req struct {
 		Name       string `json:"name"`
 		URL        string `json:"url"`
 		SecretName string `json:"secret_name"`
 		Header     string `json:"header"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	req.Name, req.URL, req.SecretName, req.Header = strings.TrimSpace(req.Name), strings.TrimSpace(req.URL), strings.TrimSpace(req.SecretName), strings.TrimSpace(req.Header)
 	if !mcpConnName.MatchString(req.Name) {
-		writeMsg(w, r, http.StatusBadRequest, "连接的名字要小写字母开头，只用小写字母、数字与 _，最多 32 个字符")
+		writeMsg(c, http.StatusBadRequest, "连接的名字要小写字母开头，只用小写字母、数字与 _，最多 32 个字符")
 		return
 	}
 	if !strings.HasPrefix(req.URL, "https://") {
-		writeMsg(w, r, http.StatusBadRequest, "MCP Server 的地址要以 https:// 开头")
+		writeMsg(c, http.StatusBadRequest, "MCP Server 的地址要以 https:// 开头")
 		return
 	}
 	body := map[string]any{"tenantId": id.TenantID, "name": req.Name, "url": req.URL}
@@ -178,39 +179,39 @@ func (s *Server) handleCreateMcp(w http.ResponseWriter, r *http.Request, id iden
 		Connection wireMcpConn `json:"connection"`
 		Created    bool        `json:"created"`
 	}
-	if err := s.callMcp(r, id, "CreateMcpConnection", body, &resp); err != nil {
-		writeAPIError(w, r, err)
+	if err := s.callMcp(c.Request, id, "CreateMcpConnection", body, &resp); err != nil {
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"connection": resp.Connection.view(), "created": resp.Created})
+	writeJSON(c, http.StatusOK, map[string]any{"connection": resp.Connection.view(), "created": resp.Created})
 }
 
-func checkMcpID(w http.ResponseWriter, r *http.Request) (string, bool) {
-	cid := r.PathValue("id")
+func checkMcpID(c *gin.Context) (string, bool) {
+	cid := c.Param("id")
 	if !mcpConnID.MatchString(cid) {
-		writeMsg(w, r, http.StatusBadRequest, "MCP 连接不存在")
+		writeMsg(c, http.StatusBadRequest, "MCP 连接不存在")
 		return "", false
 	}
 	return cid, true
 }
 
-func (s *Server) handleGetMcp(w http.ResponseWriter, r *http.Request, id identity) {
-	cid, ok := checkMcpID(w, r)
+func (s *Server) handleGetMcp(c *gin.Context, id identity) {
+	cid, ok := checkMcpID(c)
 	if !ok {
 		return
 	}
 	var resp struct {
 		Connection wireMcpConn `json:"connection"`
 	}
-	if err := s.callMcp(r, id, "GetMcpConnection", map[string]any{"tenantId": id.TenantID, "connectionId": cid}, &resp); err != nil {
-		writeAPIError(w, r, err)
+	if err := s.callMcp(c.Request, id, "GetMcpConnection", map[string]any{"tenantId": id.TenantID, "connectionId": cid}, &resp); err != nil {
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"connection": resp.Connection.view()})
+	writeJSON(c, http.StatusOK, map[string]any{"connection": resp.Connection.view()})
 }
 
-func (s *Server) handleRefreshMcp(w http.ResponseWriter, r *http.Request, id identity) {
-	cid, ok := checkMcpID(w, r)
+func (s *Server) handleRefreshMcp(c *gin.Context, id identity) {
+	cid, ok := checkMcpID(c)
 	if !ok {
 		return
 	}
@@ -220,11 +221,11 @@ func (s *Server) handleRefreshMcp(w http.ResponseWriter, r *http.Request, id ide
 		Disabled   []string    `json:"disabled"`
 		Removed    []string    `json:"removed"`
 	}
-	if err := s.callMcp(r, id, "RefreshMcpTools", map[string]any{"tenantId": id.TenantID, "connectionId": cid}, &resp); err != nil {
-		writeAPIError(w, r, err)
+	if err := s.callMcp(c.Request, id, "RefreshMcpTools", map[string]any{"tenantId": id.TenantID, "connectionId": cid}, &resp); err != nil {
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"connection": resp.Connection.view(), "added": nonNil(resp.Added), "disabled": nonNil(resp.Disabled),
+	writeJSON(c, http.StatusOK, map[string]any{"connection": resp.Connection.view(), "added": nonNil(resp.Added), "disabled": nonNil(resp.Disabled),
 		"removed": nonNil(resp.Removed)})
 }
 
@@ -235,8 +236,8 @@ func nonNil(v []string) []string {
 	return v
 }
 
-func (s *Server) handleConfigureMcp(w http.ResponseWriter, r *http.Request, id identity) {
-	cid, ok := checkMcpID(w, r)
+func (s *Server) handleConfigureMcp(c *gin.Context, id identity) {
+	cid, ok := checkMcpID(c)
 	if !ok {
 		return
 	}
@@ -249,11 +250,11 @@ func (s *Server) handleConfigureMcp(w http.ResponseWriter, r *http.Request, id i
 			SchemaDigest string `json:"schema_digest"`
 		} `json:"tools"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	if len(req.Tools) == 0 {
-		writeMsg(w, r, http.StatusBadRequest, "没有要改的工具")
+		writeMsg(c, http.StatusBadRequest, "没有要改的工具")
 		return
 	}
 	tools := make([]map[string]any, 0, len(req.Tools))
@@ -266,7 +267,7 @@ func (s *Server) handleConfigureMcp(w http.ResponseWriter, r *http.Request, id i
 			case "write_irreversible":
 				setting["effect"] = "EFFECT_WRITE_IRREVERSIBLE"
 			default:
-				writeMsg(w, r, http.StatusBadRequest, "打开工具时要选只读或不可逆写")
+				writeMsg(c, http.StatusBadRequest, "打开工具时要选只读或不可逆写")
 				return
 			}
 			if t.TimeoutS != 0 {
@@ -278,24 +279,24 @@ func (s *Server) handleConfigureMcp(w http.ResponseWriter, r *http.Request, id i
 	var resp struct {
 		Connection wireMcpConn `json:"connection"`
 	}
-	if err := s.callMcp(r, id, "ConfigureMcpTools", map[string]any{"tenantId": id.TenantID, "connectionId": cid, "tools": tools}, &resp); err != nil {
-		writeAPIError(w, r, err)
+	if err := s.callMcp(c.Request, id, "ConfigureMcpTools", map[string]any{"tenantId": id.TenantID, "connectionId": cid, "tools": tools}, &resp); err != nil {
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"connection": resp.Connection.view()})
+	writeJSON(c, http.StatusOK, map[string]any{"connection": resp.Connection.view()})
 }
 
-func (s *Server) handleDeleteMcp(w http.ResponseWriter, r *http.Request, id identity) {
-	cid, ok := checkMcpID(w, r)
+func (s *Server) handleDeleteMcp(c *gin.Context, id identity) {
+	cid, ok := checkMcpID(c)
 	if !ok {
 		return
 	}
 	var resp struct {
 		Deleted bool `json:"deleted"`
 	}
-	if err := s.callMcp(r, id, "DeleteMcpConnection", map[string]any{"tenantId": id.TenantID, "connectionId": cid}, &resp); err != nil {
-		writeAPIError(w, r, err)
+	if err := s.callMcp(c.Request, id, "DeleteMcpConnection", map[string]any{"tenantId": id.TenantID, "connectionId": cid}, &resp); err != nil {
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": resp.Deleted})
+	writeJSON(c, http.StatusOK, map[string]any{"deleted": resp.Deleted})
 }

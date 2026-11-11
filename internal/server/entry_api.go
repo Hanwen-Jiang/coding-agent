@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
 	"regexp"
@@ -35,39 +36,42 @@ func (s *Server) entryKind(name string) entry.Kind {
 	return nil
 }
 func entryConfig(c entry.Connection, key string) string { v, _ := c.Config[key].(string); return v }
-func (s *Server) entryRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/entry/kinds", s.authed(s.handleEntryKinds))
-	mux.HandleFunc("GET /api/entry/connections", s.authed(s.handleEntryConnections))
-	mux.HandleFunc("POST /api/entry/connections", s.authed(s.handleEntrySave))
-	mux.HandleFunc("PUT /api/entry/connections/{connection}", s.authed(s.handleEntrySave))
-	mux.HandleFunc("DELETE /api/entry/connections/{connection}", s.authed(s.handleEntryDelete))
-	mux.HandleFunc("POST /api/entry/connections/{connection}/rotate-secret", s.authed(s.handleEntryRotate))
-	mux.HandleFunc("GET /api/entry/connections/{connection}/triggers", s.authed(s.handleEntryRuns))
-	mux.HandleFunc("GET /api/entry/runs", s.authed(s.handleEntryRuns))
-	mux.HandleFunc("POST /api/entry/deliveries/{delivery}/retry", s.authed(s.handleEntryReplay))
-	mux.HandleFunc("POST /api/entry/triggers/{trigger}/confirm", s.authed(s.handleEntryConfirm))
-	mux.HandleFunc("POST /api/webhooks/entry/{connection}", s.handleEntryWebhook)
+
+// entryRoutes 登记接入点的接口：管理接口要登录，入站 Webhook 由每个连接自己的密钥认证。
+func (s *Server) entryRoutes(pub, in gin.IRoutes) {
+	a := withIdentity
+	get(in, "/entry/kinds", a(s.handleEntryKinds))
+	get(in, "/entry/connections", a(s.handleEntryConnections))
+	in.POST("/entry/connections", a(s.handleEntrySave))
+	in.PUT("/entry/connections/:connection", a(s.handleEntrySave))
+	in.DELETE("/entry/connections/:connection", a(s.handleEntryDelete))
+	in.POST("/entry/connections/:connection/rotate-secret", a(s.handleEntryRotate))
+	get(in, "/entry/connections/:connection/triggers", a(s.handleEntryRuns))
+	get(in, "/entry/runs", a(s.handleEntryRuns))
+	in.POST("/entry/deliveries/:delivery/retry", a(s.handleEntryReplay))
+	in.POST("/entry/triggers/:trigger/confirm", a(s.handleEntryConfirm))
+	pub.POST("/webhooks/entry/:connection", s.handleEntryWebhook)
 }
-func (s *Server) entryAvailable(w http.ResponseWriter, r *http.Request) bool {
+func (s *Server) entryAvailable(c *gin.Context) bool {
 	if s.cfg.EntryStore == nil {
-		writeMsg(w, r, 503, "接入点尚未配置数据库")
+		writeMsg(c, 503, "接入点尚未配置数据库")
 		return false
 	}
 	return true
 }
-func entryError(w http.ResponseWriter, r *http.Request, err error) {
+func entryError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, entry.ErrNotFound):
-		writeMsg(w, r, 404, "接入点记录不存在")
+		writeMsg(c, 404, "接入点记录不存在")
 	case errors.Is(err, entry.ErrInvalid):
-		writeMsg(w, r, 400, "接入点配置无效，请检查字段与限制")
+		writeMsg(c, 400, "接入点配置无效，请检查字段与限制")
 	case errors.Is(err, entry.ErrConflict), errors.Is(err, entry.ErrLeaseLost):
-		writeMsg(w, r, 409, "接入点记录已变化，请刷新后重试")
+		writeMsg(c, 409, "接入点记录已变化，请刷新后重试")
 	default:
-		writeMsg(w, r, 503, "接入点服务暂时不可用")
+		writeMsg(c, 503, "接入点服务暂时不可用")
 	}
 }
-func (s *Server) handleEntryKinds(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleEntryKinds(c *gin.Context, id identity) {
 	kinds := []any{}
 	for _, k := range s.entryKinds() {
 		sc := k.Schema()
@@ -81,7 +85,7 @@ func (s *Server) handleEntryKinds(w http.ResponseWriter, r *http.Request, id ide
 		}
 		kinds = append(kinds, map[string]any{"name": k.Name(), "label": map[string]string{"zh": sc.Label, "en": sc.LabelEN}, "fields": fields, "available": s.cfg.EntryStore != nil && (k.Name() != "github_comment" || s.cfg.GitHubApp != nil)})
 	}
-	writeJSON(w, 200, map[string]any{"kinds": kinds, "available": s.cfg.EntryStore != nil, "email_delivery_available": s.cfg.EntryMail != nil})
+	writeJSON(c, 200, map[string]any{"kinds": kinds, "available": s.cfg.EntryStore != nil, "email_delivery_available": s.cfg.EntryMail != nil})
 }
 
 type entryDestinationDTO struct {
@@ -118,261 +122,261 @@ func (s *Server) entryDTO(c entry.Connection) entryConnectionDTO {
 	}
 	return d
 }
-func (s *Server) handleEntryConnections(w http.ResponseWriter, r *http.Request, id identity) {
-	if !s.entryAvailable(w, r) {
+func (s *Server) handleEntryConnections(c *gin.Context, id identity) {
+	if !s.entryAvailable(c) {
 		return
 	}
-	cs, err := s.cfg.EntryStore.Connections(r.Context(), id.TenantID, id.UserID)
+	cs, err := s.cfg.EntryStore.Connections(c.Request.Context(), id.TenantID, id.UserID)
 	if err != nil {
-		entryError(w, r, err)
+		entryError(c, err)
 		return
 	}
 	out := []entryConnectionDTO{}
-	for _, c := range cs {
-		out = append(out, s.entryDTO(c))
+	for _, conn := range cs {
+		out = append(out, s.entryDTO(conn))
 	}
-	writeJSON(w, 200, map[string]any{"connections": out})
+	writeJSON(c, 200, map[string]any{"connections": out})
 }
 
 var entryMention = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`)
 
-func (s *Server) handleEntrySave(w http.ResponseWriter, r *http.Request, id identity) {
-	if !s.entryAvailable(w, r) {
+func (s *Server) handleEntrySave(c *gin.Context, id identity) {
+	if !s.entryAvailable(c) {
 		return
 	}
 	var raw json.RawMessage
-	if !readJSON(w, r, &raw) {
+	if !readJSON(c, &raw) {
 		return
 	}
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(raw, &fields) != nil || fields == nil {
-		entryError(w, r, entry.ErrInvalid)
+		entryError(c, entry.ErrInvalid)
 		return
 	}
 	var d entryConnectionDTO
 	now := s.now().UTC()
-	c := entry.Connection{ID: entry.NewID(), Tenant: id.TenantID, User: id.UserID, CreatedAt: now, Limits: entry.DefaultLimits()}
-	if r.Method == http.MethodPut {
+	conn := entry.Connection{ID: entry.NewID(), Tenant: id.TenantID, User: id.UserID, CreatedAt: now, Limits: entry.DefaultLimits()}
+	if c.Request.Method == http.MethodPut {
 		var err error
-		c, err = s.cfg.EntryStore.Connection(r.Context(), id.TenantID, id.UserID, r.PathValue("connection"))
+		conn, err = s.cfg.EntryStore.Connection(c.Request.Context(), id.TenantID, id.UserID, c.Param("connection"))
 		if err != nil {
-			entryError(w, r, err)
+			entryError(c, err)
 			return
 		}
-		d = s.entryDTO(c)
+		d = s.entryDTO(conn)
 	}
 	if json.Unmarshal(raw, &d) != nil {
-		entryError(w, r, entry.ErrInvalid)
+		entryError(c, entry.ErrInvalid)
 		return
 	}
-	if r.Method == http.MethodPut {
-		if d.Kind != c.Kind || d.ProjectID != c.ProjectID {
-			entryError(w, r, entry.ErrInvalid)
+	if c.Request.Method == http.MethodPut {
+		if d.Kind != conn.Kind || d.ProjectID != conn.ProjectID {
+			entryError(c, entry.ErrInvalid)
 			return
 		}
 	}
-	c.Name, c.Kind, c.ProjectID, c.Config = d.Name, d.Kind, d.ProjectID, d.Config
-	c.Enabled = r.Method == http.MethodPut && d.Enabled
-	c.UpdatedAt = now
-	if c.Config == nil {
-		c.Config = map[string]any{}
+	conn.Name, conn.Kind, conn.ProjectID, conn.Config = d.Name, d.Kind, d.ProjectID, d.Config
+	conn.Enabled = c.Request.Method == http.MethodPut && d.Enabled
+	conn.UpdatedAt = now
+	if conn.Config == nil {
+		conn.Config = map[string]any{}
 	}
-	kind := s.entryKind(c.Kind)
+	kind := s.entryKind(conn.Kind)
 	if kind == nil {
-		entryError(w, r, entry.ErrInvalid)
+		entryError(c, entry.ErrInvalid)
 		return
 	}
 	for _, f := range kind.Schema().Fields {
-		if _, ok := c.Config[f.Name]; !ok && f.Default != nil {
-			c.Config[f.Name] = f.Default
+		if _, ok := conn.Config[f.Name]; !ok && f.Default != nil {
+			conn.Config[f.Name] = f.Default
 		}
 	}
 	if _, present := fields["language"]; present && d.Language != "" {
-		c.Config["language"] = d.Language
+		conn.Config["language"] = d.Language
 	}
 	if _, present := fields["autonomy"]; present && d.Autonomy != "" {
 		if d.Autonomy == "read" {
 			d.Autonomy = "analyze"
 		}
-		c.Config["autonomy"] = d.Autonomy
+		conn.Config["autonomy"] = d.Autonomy
 	}
 	if _, present := fields["runs_per_hour"]; present {
-		c.Limits.RunsPerHour = d.RunsPerHour
+		conn.Limits.RunsPerHour = d.RunsPerHour
 	}
 	if _, present := fields["budget_usd_per_hour"]; present {
-		c.Limits.USDPerHour = d.BudgetUSDPerHour
+		conn.Limits.USDPerHour = d.BudgetUSDPerHour
 	}
 	if _, present := fields["task_budget_usd"]; present {
-		c.Limits.TaskUSD = d.TaskBudgetUSD
+		conn.Limits.TaskUSD = d.TaskBudgetUSD
 	}
-	if _, explicit := fields["task_budget_usd"]; !explicit && c.Limits.TaskUSD > c.Limits.USDPerHour {
-		c.Limits.TaskUSD = c.Limits.USDPerHour
+	if _, explicit := fields["task_budget_usd"]; !explicit && conn.Limits.TaskUSD > conn.Limits.USDPerHour {
+		conn.Limits.TaskUSD = conn.Limits.USDPerHour
 	}
-	c.Sinks = nil
+	conn.Sinks = nil
 	for _, out := range d.Sinks {
 		sink := out.Kind
 		if sink == "" {
 			sink = out.Sink
 		}
-		c.Sinks = append(c.Sinks, entry.Destination{Sink: sink, Address: out.Address, Phases: out.Phases})
+		conn.Sinks = append(conn.Sinks, entry.Destination{Sink: sink, Address: out.Address, Phases: out.Phases})
 	}
-	p, ok, err := s.store.Project(id.TenantID, c.ProjectID)
+	p, ok, err := s.store.Project(id.TenantID, conn.ProjectID)
 	if err != nil {
-		entryError(w, r, err)
+		entryError(c, err)
 		return
 	}
 	if !ok || p.Layout == layoutMulti {
-		entryError(w, r, entry.ErrInvalid)
+		entryError(c, entry.ErrInvalid)
 		return
 	}
-	if entryConfig(c, "autonomy") != "analyze" && (p.Provider == "" || s.providers[p.Provider] == nil || p.Repo == "") {
-		entryError(w, r, entry.ErrInvalid)
+	if entryConfig(conn, "autonomy") != "analyze" && (p.Provider == "" || s.providers[p.Provider] == nil || p.Repo == "") {
+		entryError(c, entry.ErrInvalid)
 		return
 	}
-	if err = kind.Schema().Validate(c.Config); err == nil {
-		err = entry.ValidateConnection(c)
+	if err = kind.Schema().Validate(conn.Config); err == nil {
+		err = entry.ValidateConnection(conn)
 	}
 	if err == nil {
-		switch c.Kind {
+		switch conn.Kind {
 		case "schedule":
-			if schedule.Validate(entryConfig(c, "cron")) != nil {
+			if schedule.Validate(entryConfig(conn, "cron")) != nil {
 				err = entry.ErrInvalid
 			}
 		case "alert":
-			err = alert.Validate(c.Config)
+			err = alert.Validate(conn.Config)
 		case "email":
-			err = entrymail.Validate(c.Config)
+			err = entrymail.Validate(conn.Config)
 		}
 	}
 	if err != nil {
-		entryError(w, r, err)
+		entryError(c, err)
 		return
 	}
-	if c.Kind == "github_comment" {
-		if s.cfg.GitHubApp == nil || p.Provider != "github" || !entryMention.MatchString(entryConfig(c, "mention")) {
-			entryError(w, r, entry.ErrInvalid)
+	if conn.Kind == "github_comment" {
+		if s.cfg.GitHubApp == nil || p.Provider != "github" || !entryMention.MatchString(entryConfig(conn, "mention")) {
+			entryError(c, entry.ErrInvalid)
 			return
 		}
-		cs, e := s.cfg.EntryStore.Connections(r.Context(), id.TenantID, id.UserID)
+		cs, e := s.cfg.EntryStore.Connections(c.Request.Context(), id.TenantID, id.UserID)
 		if e != nil {
-			entryError(w, r, e)
+			entryError(c, e)
 			return
 		}
 		for _, x := range cs {
-			if x.ID != c.ID && x.Kind == c.Kind && x.ProjectID == c.ProjectID && strings.EqualFold(entryConfig(x, "mention"), entryConfig(c, "mention")) {
-				entryError(w, r, entry.ErrConflict)
+			if x.ID != conn.ID && x.Kind == conn.Kind && x.ProjectID == conn.ProjectID && strings.EqualFold(entryConfig(x, "mention"), entryConfig(conn, "mention")) {
+				entryError(c, entry.ErrConflict)
 				return
 			}
 		}
 	}
-	for i, out := range c.Sinks {
+	for i, out := range conn.Sinks {
 		switch out.Sink {
 		case "github_comment":
-			if c.Kind == "github_comment" && out.Address.Repo == "" && out.Address.Issue == 0 {
+			if conn.Kind == "github_comment" && out.Address.Repo == "" && out.Address.Issue == 0 {
 				continue
 			}
 			if p.Provider != "github" || !strings.EqualFold(out.Address.Repo, p.Repo) || out.Address.Issue < 1 {
-				entryError(w, r, entry.ErrInvalid)
+				entryError(c, entry.ErrInvalid)
 				return
 			}
-			grant, e := s.authorizeRepo(r, id, &p, repoWrite)
+			grant, e := s.authorizeRepo(c.Request, id, &p, repoWrite)
 			if e != nil {
-				writeErr(w, r, 403, e)
+				writeErr(c, 403, e)
 				return
 			}
 			grant.Done()
-			c.Sinks[i].Address.RepoID = p.RepoID
-			c.Sinks[i].Address.Installation = p.InstallationID
+			conn.Sinks[i].Address.RepoID = p.RepoID
+			conn.Sinks[i].Address.Installation = p.InstallationID
 		case "email":
-			if c.Enabled && s.cfg.EntryMail == nil {
-				entryError(w, r, entry.ErrInvalid)
+			if conn.Enabled && s.cfg.EntryMail == nil {
+				entryError(c, entry.ErrInvalid)
 				return
 			}
-			if c.Kind == "email" && out.Address.Email == "" {
+			if conn.Kind == "email" && out.Address.Email == "" {
 				continue
 			} // Reply to the independently verified original sender.
-			if !s.verifiedEntrySender(r.Context(), c, out.Address.Email) {
-				entryError(w, r, entry.ErrInvalid)
+			if !s.verifiedEntrySender(c.Request.Context(), conn, out.Address.Email) {
+				entryError(c, entry.ErrInvalid)
 				return
 			}
 		}
 	}
 	secret := ""
-	if r.Method == http.MethodPost && (c.Kind == "alert" || c.Kind == "email") {
-		secret, c.SecretHash = entry.NewSecret()
+	if c.Request.Method == http.MethodPost && (conn.Kind == "alert" || conn.Kind == "email") {
+		secret, conn.SecretHash = entry.NewSecret()
 	}
-	if err = s.cfg.EntryStore.PutConnection(r.Context(), c); err != nil {
-		entryError(w, r, err)
+	if err = s.cfg.EntryStore.PutConnection(c.Request.Context(), conn); err != nil {
+		entryError(c, err)
 		return
 	}
 	status := 200
-	if r.Method == http.MethodPost {
+	if c.Request.Method == http.MethodPost {
 		status = 201
 	}
-	out := map[string]any{"connection": s.entryDTO(c)}
+	out := map[string]any{"connection": s.entryDTO(conn)}
 	if secret != "" {
 		out["secret"] = secret
-		w.Header().Set("Cache-Control", "no-store")
+		c.Header("Cache-Control", "no-store")
 	}
-	writeJSON(w, status, out)
+	writeJSON(c, status, out)
 }
-func (s *Server) handleEntryDelete(w http.ResponseWriter, r *http.Request, id identity) {
-	if !s.entryAvailable(w, r) {
+func (s *Server) handleEntryDelete(c *gin.Context, id identity) {
+	if !s.entryAvailable(c) {
 		return
 	}
-	if err := s.cfg.EntryStore.DeleteConnection(r.Context(), id.TenantID, id.UserID, r.PathValue("connection")); err != nil {
-		entryError(w, r, err)
+	if err := s.cfg.EntryStore.DeleteConnection(c.Request.Context(), id.TenantID, id.UserID, c.Param("connection")); err != nil {
+		entryError(c, err)
 		return
 	}
-	w.WriteHeader(204)
+	c.Status(204)
 }
-func (s *Server) handleEntryRotate(w http.ResponseWriter, r *http.Request, id identity) {
-	if !s.entryAvailable(w, r) {
+func (s *Server) handleEntryRotate(c *gin.Context, id identity) {
+	if !s.entryAvailable(c) {
 		return
 	}
-	c, err := s.cfg.EntryStore.Connection(r.Context(), id.TenantID, id.UserID, r.PathValue("connection"))
+	conn, err := s.cfg.EntryStore.Connection(c.Request.Context(), id.TenantID, id.UserID, c.Param("connection"))
 	if err != nil {
-		entryError(w, r, err)
+		entryError(c, err)
 		return
 	}
-	if c.Kind != "alert" && c.Kind != "email" {
-		entryError(w, r, entry.ErrInvalid)
+	if conn.Kind != "alert" && conn.Kind != "email" {
+		entryError(c, entry.ErrInvalid)
 		return
 	}
 	secret, hash := entry.NewSecret()
-	c, err = s.cfg.EntryStore.RotateSecret(r.Context(), id.TenantID, id.UserID, c.ID, hash, s.now().UTC())
+	conn, err = s.cfg.EntryStore.RotateSecret(c.Request.Context(), id.TenantID, id.UserID, conn.ID, hash, s.now().UTC())
 	if err != nil {
-		entryError(w, r, err)
+		entryError(c, err)
 		return
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]any{"connection": s.entryDTO(c), "secret": secret})
+	c.Header("Cache-Control", "no-store")
+	writeJSON(c, 200, map[string]any{"connection": s.entryDTO(conn), "secret": secret})
 }
-func (s *Server) handleEntryRuns(w http.ResponseWriter, r *http.Request, id identity) {
-	if !s.entryAvailable(w, r) {
+func (s *Server) handleEntryRuns(c *gin.Context, id identity) {
+	if !s.entryAvailable(c) {
 		return
 	}
-	connection := r.PathValue("connection")
+	connection := c.Param("connection")
 	if connection != "" {
-		if _, err := s.cfg.EntryStore.Connection(r.Context(), id.TenantID, id.UserID, connection); err != nil {
-			entryError(w, r, err)
+		if _, err := s.cfg.EntryStore.Connection(c.Request.Context(), id.TenantID, id.UserID, connection); err != nil {
+			entryError(c, err)
 			return
 		}
 	}
 	var ts []entry.Trigger
 	var err error
-	if session := r.URL.Query().Get("session"); session != "" {
-		ts, err = s.cfg.EntryStore.SessionTriggers(r.Context(), id.TenantID, id.UserID, session)
+	if session := c.Query("session"); session != "" {
+		ts, err = s.cfg.EntryStore.SessionTriggers(c.Request.Context(), id.TenantID, id.UserID, session)
 	} else {
-		ts, err = s.cfg.EntryStore.Triggers(r.Context(), id.TenantID, id.UserID, connection, 500)
+		ts, err = s.cfg.EntryStore.Triggers(c.Request.Context(), id.TenantID, id.UserID, connection, 500)
 	}
 	if err != nil {
-		entryError(w, r, err)
+		entryError(c, err)
 		return
 	}
-	active, e := s.cfg.EntryStore.ActiveTriggers(r.Context(), id.TenantID, id.UserID)
+	active, e := s.cfg.EntryStore.ActiveTriggers(c.Request.Context(), id.TenantID, id.UserID)
 	if e != nil {
-		entryError(w, r, e)
+		entryError(c, e)
 		return
 	}
 	for _, t := range active {
@@ -383,39 +387,39 @@ func (s *Server) handleEntryRuns(w http.ResponseWriter, r *http.Request, id iden
 	ds := []entry.Delivery{}
 	out := []entry.Trigger{}
 	for _, t := range ts {
-		if sid := r.URL.Query().Get("session"); sid != "" && t.SessionID != sid {
+		if sid := c.Query("session"); sid != "" && t.SessionID != sid {
 			continue
 		}
 		out = append(out, t)
-		rows, e := s.cfg.EntryStore.Deliveries(r.Context(), id.TenantID, id.UserID, t.ID, 100)
+		rows, e := s.cfg.EntryStore.Deliveries(c.Request.Context(), id.TenantID, id.UserID, t.ID, 100)
 		if e != nil {
-			entryError(w, r, e)
+			entryError(c, e)
 			return
 		}
 		ds = append(ds, rows...)
 	}
-	writeJSON(w, 200, map[string]any{"triggers": out, "deliveries": ds})
+	writeJSON(c, 200, map[string]any{"triggers": out, "deliveries": ds})
 }
-func (s *Server) handleEntryReplay(w http.ResponseWriter, r *http.Request, id identity) {
-	if !s.entryAvailable(w, r) {
+func (s *Server) handleEntryReplay(c *gin.Context, id identity) {
+	if !s.entryAvailable(c) {
 		return
 	}
-	if err := s.cfg.EntryStore.ReplayDelivery(r.Context(), id.TenantID, id.UserID, r.PathValue("delivery"), s.now().UTC()); err != nil {
-		entryError(w, r, err)
+	if err := s.cfg.EntryStore.ReplayDelivery(c.Request.Context(), id.TenantID, id.UserID, c.Param("delivery"), s.now().UTC()); err != nil {
+		entryError(c, err)
 		return
 	}
-	writeJSON(w, 200, map[string]bool{"queued": true})
+	writeJSON(c, 200, map[string]bool{"queued": true})
 }
-func (s *Server) handleEntryConfirm(w http.ResponseWriter, r *http.Request, id identity) {
-	if !s.entryAvailable(w, r) {
+func (s *Server) handleEntryConfirm(c *gin.Context, id identity) {
+	if !s.entryAvailable(c) {
 		return
 	}
-	t, err := s.cfg.EntryStore.Trigger(r.Context(), r.PathValue("trigger"))
+	t, err := s.cfg.EntryStore.Trigger(c.Request.Context(), c.Param("trigger"))
 	if err != nil || t.Tenant != id.TenantID || t.User != id.UserID {
-		entryError(w, r, entry.ErrNotFound)
+		entryError(c, entry.ErrNotFound)
 		return
 	}
-	_, changed, err := s.cfg.EntryStore.MutateTrigger(r.Context(), t.ID, 0, func(x *entry.Trigger) bool {
+	_, changed, err := s.cfg.EntryStore.MutateTrigger(c.Request.Context(), t.ID, 0, func(x *entry.Trigger) bool {
 		asked := x.UpdatedAt
 		if x.Kind == "github_comment" {
 			g, e := decodeGitHubEntry(*x)
@@ -432,66 +436,66 @@ func (s *Server) handleEntryConfirm(w http.ResponseWriter, r *http.Request, id i
 		return true
 	})
 	if err != nil {
-		entryError(w, r, err)
+		entryError(c, err)
 		return
 	}
 	if !changed {
-		entryError(w, r, entry.ErrConflict)
+		entryError(c, entry.ErrConflict)
 		return
 	}
-	writeJSON(w, 200, map[string]bool{"confirmed": true})
+	writeJSON(c, 200, map[string]bool{"confirmed": true})
 }
-func (s *Server) handleEntryWebhook(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleEntryWebhook(c *gin.Context) {
 	if s.cfg.EntryStore == nil {
-		w.WriteHeader(503)
+		c.Status(503)
 		return
 	}
-	c, err := s.cfg.EntryStore.LookupConnection(r.Context(), r.PathValue("connection"))
-	if err != nil || c.Config["deleted"] == true || c.Kind != "alert" && c.Kind != "email" {
-		w.WriteHeader(401)
+	conn, err := s.cfg.EntryStore.LookupConnection(c.Request.Context(), c.Param("connection"))
+	if err != nil || conn.Config["deleted"] == true || conn.Kind != "alert" && conn.Kind != "email" {
+		c.Status(401)
 		return
 	}
-	header := r.Header.Get("Authorization")
+	header := c.GetHeader("Authorization")
 	token, ok := strings.CutPrefix(header, "Bearer ")
-	if !ok || !entry.VerifySecret(c.SecretHash, token) {
+	if !ok || !entry.VerifySecret(conn.SecretHash, token) {
 		s.metrics().Count("coding.entry.webhooks", 1, map[string]string{"result": "unauthorized"})
-		w.WriteHeader(401)
+		c.Status(401)
 		return
 	}
 	limit := int64(alert.MaxBody)
-	if c.Kind == "email" {
+	if conn.Kind == "email" {
 		limit = entrymail.MaxBody
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, limit))
 	if err != nil {
-		w.WriteHeader(413)
+		c.Status(413)
 		return
 	}
-	kind := s.entryKind(c.Kind)
-	ts, err := kind.Ingest(r.Context(), entry.Inbound{Body: body, Header: r.Header, Now: s.now().UTC(), Connection: c, Trusted: true})
+	kind := s.entryKind(conn.Kind)
+	ts, err := kind.Ingest(c.Request.Context(), entry.Inbound{Body: body, Header: c.Request.Header, Now: s.now().UTC(), Connection: conn, Trusted: true})
 	if err != nil {
-		w.WriteHeader(400)
+		c.Status(400)
 		return
 	}
-	p, found, err := s.store.Project(c.Tenant, c.ProjectID)
+	p, found, err := s.store.Project(conn.Tenant, conn.ProjectID)
 	if err != nil || !found {
-		w.WriteHeader(503)
+		c.Status(503)
 		return
 	}
 	for _, t := range ts {
-		a := kind.Admit(r.Context(), c, t)
-		s.fillEntryTrigger(&t, c, p)
+		a := kind.Admit(c.Request.Context(), conn, t)
+		s.fillEntryTrigger(&t, conn, p)
 		if !a.Allowed {
 			t.State, t.Reason, t.ReservedUSD = "refused", a.Reason, 0
 			t.Payload, t.Instruction, t.Materials = nil, "", ""
 		}
-		if _, err = s.cfg.EntryStore.Enqueue(r.Context(), t); err != nil {
-			w.WriteHeader(503)
+		if _, err = s.cfg.EntryStore.Enqueue(c.Request.Context(), t); err != nil {
+			c.Status(503)
 			return
 		}
 	}
-	s.metrics().Count("coding.entry.webhooks", 1, map[string]string{"kind": c.Kind, "result": "accepted"})
-	w.WriteHeader(202)
+	s.metrics().Count("coding.entry.webhooks", 1, map[string]string{"kind": conn.Kind, "result": "accepted"})
+	c.Status(202)
 }
 
 // Only provider-verified mailboxes can authorize an email task. Public profile

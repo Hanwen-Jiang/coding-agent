@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"net"
 	"net/http"
 	"regexp"
@@ -294,10 +295,10 @@ func (s *Server) environmentForUser(tenant, user, id string) (Environment, bool,
 	return env, true, nil
 }
 
-func (s *Server) handleListEnvironments(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleListEnvironments(c *gin.Context, id identity) {
 	envs, err := s.store.Environments(id.TenantID)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	envs = slices.DeleteFunc(envs, func(env Environment) bool {
@@ -308,17 +309,17 @@ func (s *Server) handleListEnvironments(w http.ResponseWriter, r *http.Request, 
 	for _, env := range envs {
 		out = append(out, environmentView(env))
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(c, http.StatusOK, out)
 }
 
-func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleCreateEnvironment(c *gin.Context, id identity) {
 	var req environmentInput
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	in, err := normalizeEnvironmentInput(req)
 	if err != nil {
-		writeMsg(w, r, http.StatusBadRequest, "环境配置不合法：%v", err)
+		writeMsg(c, http.StatusBadRequest, "环境配置不合法：%v", err)
 		return
 	}
 	now := time.Now().UTC()
@@ -329,7 +330,7 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request,
 	}
 	if in.Secrets != nil {
 		if env.Secrets, err = s.mergeSecrets(id.TenantID, id.UserID, env.ID, nil, *in.Secrets); err != nil {
-			writeMsg(w, r, http.StatusBadRequest, "环境配置不合法：%v", err)
+			writeMsg(c, http.StatusBadRequest, "环境配置不合法：%v", err)
 			return
 		}
 	}
@@ -343,45 +344,45 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "同名") {
-			writeMsg(w, r, http.StatusConflict, "你已有同名环境")
+			writeMsg(c, http.StatusConflict, "你已有同名环境")
 		} else {
-			writeErr(w, r, http.StatusInternalServerError, err)
+			writeErr(c, http.StatusInternalServerError, err)
 		}
 		return
 	}
-	writeJSON(w, http.StatusCreated, environmentView(env))
+	writeJSON(c, http.StatusCreated, environmentView(env))
 }
 
-func (s *Server) handleGetEnvironment(w http.ResponseWriter, r *http.Request, id identity) {
-	env, ok, err := s.environmentForUser(id.TenantID, id.UserID, r.PathValue("environment"))
+func (s *Server) handleGetEnvironment(c *gin.Context, id identity) {
+	env, ok, err := s.environmentForUser(id.TenantID, id.UserID, c.Param("environment"))
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	if !ok {
-		writeMsg(w, r, http.StatusNotFound, "环境不存在")
+		writeMsg(c, http.StatusNotFound, "环境不存在")
 		return
 	}
-	writeJSON(w, http.StatusOK, environmentView(env))
+	writeJSON(c, http.StatusOK, environmentView(env))
 }
 
-func (s *Server) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request, id identity) {
-	env, ok, err := s.environmentForUser(id.TenantID, id.UserID, r.PathValue("environment"))
+func (s *Server) handleUpdateEnvironment(c *gin.Context, id identity) {
+	env, ok, err := s.environmentForUser(id.TenantID, id.UserID, c.Param("environment"))
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	if !ok {
-		writeMsg(w, r, http.StatusNotFound, "环境不存在")
+		writeMsg(c, http.StatusNotFound, "环境不存在")
 		return
 	}
 	var req environmentInput
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	in, err := normalizeEnvironmentInput(req)
 	if err != nil {
-		writeMsg(w, r, http.StatusBadRequest, "环境配置不合法：%v", err)
+		writeMsg(c, http.StatusBadRequest, "环境配置不合法：%v", err)
 		return
 	}
 	err = s.store.UpdateEnvironments(id.TenantID, func(all []Environment) ([]Environment, error) {
@@ -420,36 +421,36 @@ func (s *Server) handleUpdateEnvironment(w http.ResponseWriter, r *http.Request,
 	})
 	// 密钥的校验要看原来的值，在锁里做：它的错误是 *Msg（同名、不存在是普通的 error）。
 	if bad := (*Msg)(nil); errors.As(err, &bad) {
-		writeMsg(w, r, http.StatusBadRequest, "环境配置不合法：%v", bad)
+		writeMsg(c, http.StatusBadRequest, "环境配置不合法：%v", bad)
 		return
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "同名") {
-			writeMsg(w, r, http.StatusConflict, "你已有同名环境")
+			writeMsg(c, http.StatusConflict, "你已有同名环境")
 		} else if strings.Contains(err.Error(), "不存在") {
-			writeMsg(w, r, http.StatusNotFound, "环境不存在")
+			writeMsg(c, http.StatusNotFound, "环境不存在")
 		} else {
-			writeErr(w, r, http.StatusInternalServerError, err)
+			writeErr(c, http.StatusInternalServerError, err)
 		}
 		return
 	}
 	env, _, _ = s.store.Environment(id.TenantID, env.ID)
-	writeJSON(w, http.StatusOK, environmentView(env))
+	writeJSON(c, http.StatusOK, environmentView(env))
 }
 
-func (s *Server) handleDeleteEnvironment(w http.ResponseWriter, r *http.Request, id identity) {
-	env, ok, err := s.environmentForUser(id.TenantID, id.UserID, r.PathValue("environment"))
+func (s *Server) handleDeleteEnvironment(c *gin.Context, id identity) {
+	env, ok, err := s.environmentForUser(id.TenantID, id.UserID, c.Param("environment"))
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
 	if !ok {
-		writeMsg(w, r, http.StatusNotFound, "环境不存在")
+		writeMsg(c, http.StatusNotFound, "环境不存在")
 		return
 	}
 	if err := s.store.DeleteEnvironment(id.TenantID, env.ID, time.Now().UTC()); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, err)
+		writeErr(c, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(c, http.StatusOK, map[string]bool{"ok": true})
 }

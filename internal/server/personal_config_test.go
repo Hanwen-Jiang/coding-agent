@@ -47,7 +47,7 @@ func TestPersonalConfigurationUsesAuthenticatedOwnerAndValidatesBeforeForwarding
 		{`{"document":{"network":"open"}}`, 400},
 	} {
 		w := httptest.NewRecorder()
-		s.handlePutPersonalConfig(w, httptest.NewRequest("PUT", "/api/personal-config", strings.NewReader(tc.body)), id)
+		s.handlePutPersonalConfig(testContext(w, httptest.NewRequest("PUT", "/api/personal-config", strings.NewReader(tc.body))), id)
 		if w.Code != tc.status {
 			t.Fatalf("%s: %d %s", tc.body, w.Code, w.Body)
 		}

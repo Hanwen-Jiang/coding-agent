@@ -7,6 +7,7 @@ package server
 
 import (
 	"errors"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"regexp"
 	"strings"
@@ -80,54 +81,54 @@ func skillsUnavailable(err error) bool {
 	return errors.As(err, &apiErr) && (apiErr.Reason == "skills_unavailable" || apiErr.Code == "unimplemented" || apiErr.Status == http.StatusNotImplemented)
 }
 
-func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleListSkills(c *gin.Context, id identity) {
 	var resp struct {
 		Skills []wireSkill `json:"skills"`
 	}
-	err := s.callSkills(r, id, "ListSkills", map[string]any{"tenantId": id.TenantID, "pageSize": 500}, &resp)
+	err := s.callSkills(c.Request, id, "ListSkills", map[string]any{"tenantId": id.TenantID, "pageSize": 500}, &resp)
 	if skillsUnavailable(err) {
-		writeJSON(w, http.StatusOK, map[string]any{"skills": []skillView{}, "available": false})
+		writeJSON(c, http.StatusOK, map[string]any{"skills": []skillView{}, "available": false})
 		return
 	}
 	if err != nil {
-		writeAPIError(w, r, err)
+		writeAPIError(c, err)
 		return
 	}
 	out := make([]skillView, 0, len(resp.Skills))
 	for _, x := range resp.Skills {
 		out = append(out, x.view(false))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"skills": out, "available": true})
+	writeJSON(c, http.StatusOK, map[string]any{"skills": out, "available": true})
 }
 
 // checkSkillName 不合规时写 400 并返回 false。
-func checkSkillName(w http.ResponseWriter, r *http.Request, name string) bool {
+func checkSkillName(c *gin.Context, name string) bool {
 	if !skillName.MatchString(name) {
-		writeMsg(w, r, http.StatusBadRequest, "Skill 的名字要小写字母开头，只用小写字母、数字、_ 与 -，最多 64 个字符")
+		writeMsg(c, http.StatusBadRequest, "Skill 的名字要小写字母开头，只用小写字母、数字、_ 与 -，最多 64 个字符")
 		return false
 	}
 	return true
 }
 
-func (s *Server) handleGetSkill(w http.ResponseWriter, r *http.Request, id identity) {
-	name := r.PathValue("name")
-	if !checkSkillName(w, r, name) {
+func (s *Server) handleGetSkill(c *gin.Context, id identity) {
+	name := c.Param("name")
+	if !checkSkillName(c, name) {
 		return
 	}
 	var resp struct {
 		Skill wireSkill `json:"skill"`
 	}
-	req := map[string]any{"tenantId": id.TenantID, "name": name, "version": r.URL.Query().Get("version")}
-	if err := s.callSkills(r, id, "GetSkill", req, &resp); err != nil {
-		writeAPIError(w, r, err)
+	req := map[string]any{"tenantId": id.TenantID, "name": name, "version": c.Query("version")}
+	if err := s.callSkills(c.Request, id, "GetSkill", req, &resp); err != nil {
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"skill": resp.Skill.view(true)})
+	writeJSON(c, http.StatusOK, map[string]any{"skill": resp.Skill.view(true)})
 }
 
-func (s *Server) handlePutSkill(w http.ResponseWriter, r *http.Request, id identity) {
-	name := r.PathValue("name")
-	if !checkSkillName(w, r, name) {
+func (s *Server) handlePutSkill(c *gin.Context, id identity) {
+	name := c.Param("name")
+	if !checkSkillName(c, name) {
 		return
 	}
 	var req struct {
@@ -135,11 +136,11 @@ func (s *Server) handlePutSkill(w http.ResponseWriter, r *http.Request, id ident
 		Instructions string      `json:"instructions"`
 		Files        []skillFile `json:"files"`
 	}
-	if !readJSON(w, r, &req) {
+	if !readJSON(c, &req) {
 		return
 	}
 	if strings.TrimSpace(req.Description) == "" || strings.TrimSpace(req.Instructions) == "" {
-		writeMsg(w, r, http.StatusBadRequest, "Skill 要写说明与做法")
+		writeMsg(c, http.StatusBadRequest, "Skill 要写说明与做法")
 		return
 	}
 	doc := map[string]any{"description": req.Description, "instructions": req.Instructions}
@@ -152,29 +153,29 @@ func (s *Server) handlePutSkill(w http.ResponseWriter, r *http.Request, id ident
 		NewVersion bool      `json:"newVersion"`
 	}
 	body := map[string]any{"tenantId": id.TenantID, "name": name, "document": map[string]any{"value": doc}}
-	if err := s.callSkills(r, id, "PutSkill", body, &resp); err != nil {
+	if err := s.callSkills(c.Request, id, "PutSkill", body, &resp); err != nil {
 		if skillsUnavailable(err) {
-			writeMsg(w, r, http.StatusNotImplemented, "这个部署还没有 Skill")
+			writeMsg(c, http.StatusNotImplemented, "这个部署还没有 Skill")
 			return
 		}
-		writeAPIError(w, r, err)
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"skill": resp.Skill.view(false), "created": resp.Created, "new_version": resp.NewVersion})
+	writeJSON(c, http.StatusOK, map[string]any{"skill": resp.Skill.view(false), "created": resp.Created, "new_version": resp.NewVersion})
 }
 
-func (s *Server) handleRetireSkill(w http.ResponseWriter, r *http.Request, id identity) {
-	name := r.PathValue("name")
-	if !checkSkillName(w, r, name) {
+func (s *Server) handleRetireSkill(c *gin.Context, id identity) {
+	name := c.Param("name")
+	if !checkSkillName(c, name) {
 		return
 	}
 	var resp struct {
 		Retired bool   `json:"retired"`
 		Version string `json:"version"`
 	}
-	if err := s.callSkills(r, id, "RetireSkill", map[string]any{"tenantId": id.TenantID, "name": name}, &resp); err != nil {
-		writeAPIError(w, r, err)
+	if err := s.callSkills(c.Request, id, "RetireSkill", map[string]any{"tenantId": id.TenantID, "name": name}, &resp); err != nil {
+		writeAPIError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"retired": resp.Retired, "version": resp.Version})
+	writeJSON(c, http.StatusOK, map[string]any{"retired": resp.Retired, "version": resp.Version})
 }

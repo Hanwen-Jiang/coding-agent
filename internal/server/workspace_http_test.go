@@ -139,7 +139,7 @@ func submitWorkspaceHTTP(t *testing.T, s *Server, id identity, key, body string,
 	req.Header.Set("X-Coding-Async", "1")
 	req.Header.Set("Idempotency-Key", key)
 	out := httptest.NewRecorder()
-	s.workspaceHTTP("create_project")(out, req, id)
+	s.workspaceHTTP("create_project")(testContext(out, req), id)
 	var parsed map[string]any
 	_ = json.Unmarshal(out.Body.Bytes(), &parsed)
 	return out.Code, parsed
@@ -147,9 +147,8 @@ func submitWorkspaceHTTP(t *testing.T, s *Server, id identity, key, body string,
 func workspaceStatus(t *testing.T, s *Server, id identity, op string) (int, map[string]any) {
 	t.Helper()
 	r := httptest.NewRequest("GET", "/api/workspace-operations/"+op, nil)
-	r.SetPathValue("operation", op)
 	w := httptest.NewRecorder()
-	s.handleWorkspaceHTTPStatus(w, r, id)
+	s.handleWorkspaceHTTPStatus(testContext(w, r, "operation", op), id)
 	var parsed map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &parsed)
 	return w.Code, parsed

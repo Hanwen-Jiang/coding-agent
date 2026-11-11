@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
 	"net/url"
@@ -271,50 +272,50 @@ var workspaceRequestID = regexp.MustCompile(`^[A-Za-z0-9_-]{16,128}$`)
 var workspaceOperationID = regexp.MustCompile(`^who-[a-f0-9]{64}$`)
 
 func (s *Server) workspaceHTTP(kind string) authedHandler {
-	return func(w http.ResponseWriter, r *http.Request, id identity) {
+	return func(c *gin.Context, id identity) {
 		handler := s.workspaceHTTPHandler(kind)
 		// Older clients keep the synchronous response shape. The browser opts in.
-		if r.Header.Get("X-Coding-Async") != "1" || s.cfg.Workspaces == "local" {
-			handler(w, r, id)
+		if c.GetHeader("X-Coding-Async") != "1" || s.cfg.Workspaces == "local" {
+			handler(c, id)
 			return
 		}
-		key := r.Header.Get("Idempotency-Key")
+		key := c.GetHeader("Idempotency-Key")
 		if !workspaceRequestID.MatchString(key) {
-			writeJSON(w, 400, map[string]string{"error": "invalid Idempotency-Key"})
+			writeJSON(c, 400, map[string]string{"error": "invalid Idempotency-Key"})
 			return
 		}
-		raw, err := io.ReadAll(io.LimitReader(r.Body, maxBodySize+1))
+		raw, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodySize+1))
 		if err != nil || len(raw) > maxBodySize {
-			writeJSON(w, 400, map[string]string{"error": "invalid operation body"})
+			writeJSON(c, 400, map[string]string{"error": "invalid operation body"})
 			return
 		}
 		body, err := workspaceHTTPBody(kind, raw)
 		if err != nil {
-			writeJSON(w, 400, map[string]string{"error": err.Error()})
+			writeJSON(c, 400, map[string]string{"error": err.Error()})
 			return
 		}
 		opID := "who-" + workspaceHash(id.TenantID, id.UserID, key)
-		digest := workspaceHash(r.Method, r.URL.RequestURI(), string(body))
+		digest := workspaceHash(c.Request.Method, c.Request.URL.RequestURI(), string(body))
 		s.store.mu.Lock()
 		rec, err := readJSONFile[*workspaceHTTPRecord](s.store.workspaceOperationFile(id.TenantID, opID))
 		if err == nil && rec == nil {
-			rec = &workspaceHTTPRecord{ID: opID, User: id.UserID, Kind: kind, Digest: digest, Method: r.Method, URL: r.URL.RequestURI(), Body: body, Language: requestLang(r), Created: time.Now().UTC(), Facts: map[string]json.RawMessage{}, Paths: map[string]string{}}
+			rec = &workspaceHTTPRecord{ID: opID, User: id.UserID, Kind: kind, Digest: digest, Method: c.Request.Method, URL: c.Request.URL.RequestURI(), Body: body, Language: requestLang(c.Request), Created: time.Now().UTC(), Facts: map[string]json.RawMessage{}, Paths: map[string]string{}}
 			for _, p := range []string{"project", "session", "repo"} {
-				rec.Paths[p] = r.PathValue(p)
+				rec.Paths[p] = c.Param(p)
 			}
 			err = writeWorkspaceHTTPRecord(s.store.workspaceOperationFile(id.TenantID, opID), rec)
 		}
 		s.store.mu.Unlock()
 		if err != nil {
-			writeErr(w, r, 500, err)
+			writeErr(c, 500, err)
 			return
 		}
 		if rec.User != id.UserID || rec.Digest != digest {
-			writeJSON(w, 409, map[string]string{"error": "Idempotency-Key already used with different parameters"})
+			writeJSON(c, 409, map[string]string{"error": "Idempotency-Key already used with different parameters"})
 			return
 		}
 		s.resumeWorkspaceHTTP(rec, id)
-		writeJSON(w, http.StatusAccepted, map[string]string{"operation_id": opID, "status_url": "/api/workspace-operations/" + opID})
+		writeJSON(c, http.StatusAccepted, map[string]string{"operation_id": opID, "status_url": "/api/workspace-operations/" + opID})
 	}
 }
 
@@ -364,11 +365,15 @@ func (s *Server) resumeWorkspaceHTTP(rec *workspaceHTTPRecord, id identity) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept-Language", rec.Language)
-		for p, v := range rec.Paths {
-			req.SetPathValue(p, v)
-		}
+		// 处理函数对着一个合成的请求重放：没有连接，响应写进缓冲。路径参数取记录里存的（磁盘上旧的记录也有）。
 		out := &workspaceHTTPResponse{header: make(http.Header)}
-		s.workspaceHTTPHandler(rec.Kind)(out, req, id)
+		c, _ := gin.CreateTestContext(out)
+		c.Request = req
+		for p, v := range rec.Paths {
+			c.Params = append(c.Params, gin.Param{Key: p, Value: v})
+		}
+		s.workspaceHTTPHandler(rec.Kind)(c, id)
+		c.Writer.WriteHeaderNow() // 只设了状态码、没写响应体时，Gin 还没把它写进 out
 		// The web runner's lifetime is not the Runtime operation's deadline.
 		// Leave its record resumable when this runner expires mid-poll.
 		if ctx.Err() != nil {
@@ -383,40 +388,40 @@ func (s *Server) resumeWorkspaceHTTP(rec *workspaceHTTPRecord, id identity) {
 	}()
 }
 
-func (s *Server) handleWorkspaceHTTPStatus(w http.ResponseWriter, r *http.Request, id identity) {
-	opID := r.PathValue("operation")
+func (s *Server) handleWorkspaceHTTPStatus(c *gin.Context, id identity) {
+	opID := c.Param("operation")
 	if !workspaceOperationID.MatchString(opID) {
-		writeJSON(w, 404, map[string]string{"error": "operation not found"})
+		writeJSON(c, 404, map[string]string{"error": "operation not found"})
 		return
 	}
 	s.store.mu.Lock()
 	rec, err := readJSONFile[*workspaceHTTPRecord](s.store.workspaceOperationFile(id.TenantID, opID))
 	s.store.mu.Unlock()
 	if err != nil {
-		writeErr(w, r, 500, err)
+		writeErr(c, 500, err)
 		return
 	}
 	if rec == nil || rec.User != id.UserID {
-		writeJSON(w, 404, map[string]string{"error": "operation not found"})
+		writeJSON(c, 404, map[string]string{"error": "operation not found"})
 		return
 	}
-	w.Header().Set("Cache-Control", "no-store")
+	c.Header("Cache-Control", "no-store")
 	if rec.Status == 0 {
 		s.resumeWorkspaceHTTP(rec, id)
-		writeJSON(w, 200, map[string]any{"operation_id": rec.ID, "status": "RUNNING"})
+		writeJSON(c, 200, map[string]any{"operation_id": rec.ID, "status": "RUNNING"})
 		return
 	}
 	status := "COMPLETED"
 	if rec.Status >= 400 {
 		status = "FAILED"
 	}
-	writeJSON(w, 200, map[string]any{"operation_id": rec.ID, "status": status, "http_status": rec.Status, "result": rec.Response})
+	writeJSON(c, 200, map[string]any{"operation_id": rec.ID, "status": status, "http_status": rec.Status, "result": rec.Response})
 }
 
-func (s *Server) handleWorkspaceHTTPList(w http.ResponseWriter, r *http.Request, id identity) {
+func (s *Server) handleWorkspaceHTTPList(c *gin.Context, id identity) {
 	files, err := filepath.Glob(filepath.Join(s.store.dir, id.TenantID, "workspace-operations", "who-*.json"))
 	if err != nil {
-		writeErr(w, r, 500, err)
+		writeErr(c, 500, err)
 		return
 	}
 	result := []map[string]any{}
@@ -425,14 +430,14 @@ func (s *Server) handleWorkspaceHTTPList(w http.ResponseWriter, r *http.Request,
 		rec, err := readJSONFile[*workspaceHTTPRecord](path)
 		s.store.mu.Unlock()
 		if err != nil {
-			writeErr(w, r, 500, err)
+			writeErr(c, 500, err)
 			return
 		}
 		if rec != nil && rec.User == id.UserID && (rec.Status == 0 || (rec.Status >= 400 && time.Since(rec.Created) < 24*time.Hour)) {
 			result = append(result, map[string]any{"operation_id": rec.ID, "status_url": "/api/workspace-operations/" + rec.ID})
 		}
 	}
-	writeJSON(w, 200, result)
+	writeJSON(c, 200, result)
 }
 
 func (j *workspaceHTTPJournal) runtimeToken() string {

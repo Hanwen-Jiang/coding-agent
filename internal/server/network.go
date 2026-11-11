@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
 	"time"
@@ -54,23 +55,23 @@ func (n taskNetworkRequest) wire() map[string]any {
 
 // The Runtime authenticates the forwarded token and selects the tenant.
 // No tenant, mode or permission is inferred from the workspace environment.
-func (s *Server) handleNetworkPolicy(w http.ResponseWriter, r *http.Request, id identity) {
-	ctx, cancel := ctxTimeout(r, 10*time.Second)
+func (s *Server) handleNetworkPolicy(c *gin.Context, id identity) {
+	ctx, cancel := ctxTimeout(c.Request, 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.api.base+"/v1/network-policy", nil)
 	if err != nil {
-		writeErr(w, r, http.StatusBadGateway, err)
+		writeErr(c, http.StatusBadGateway, err)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+id.token)
 	resp, err := s.api.client.Do(req)
 	if err != nil {
-		writeErr(w, r, http.StatusBadGateway, msg("暂时无法读取联网策略"))
+		writeErr(c, http.StatusBadGateway, msg("暂时无法读取联网策略"))
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		writeMsg(w, r, resp.StatusCode, "暂时无法读取联网策略")
+		writeMsg(c, resp.StatusCode, "暂时无法读取联网策略")
 		return
 	}
 	var policy struct {
@@ -82,8 +83,8 @@ func (s *Server) handleNetworkPolicy(w http.ResponseWriter, r *http.Request, id 
 		SupportsUnlimited bool     `json:"supports_unlimited"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&policy) != nil {
-		writeMsg(w, r, http.StatusBadGateway, "暂时无法读取联网策略")
+		writeMsg(c, http.StatusBadGateway, "暂时无法读取联网策略")
 		return
 	}
-	writeJSON(w, http.StatusOK, policy)
+	writeJSON(c, http.StatusOK, policy)
 }
