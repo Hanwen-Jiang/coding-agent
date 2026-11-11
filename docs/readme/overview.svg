@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="378" viewBox="0 0 760 378" role="img" aria-label="Coding Agent 的组成：浏览器与外部事件进 coding-web，coding-web 经 Task API 与 Workspace API 用 Agent Runtime" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif">
+<style>.bg{fill:#ffffff;stroke:#d0d7de}
+.t{fill:#1f2328}.m{fill:#59636e}
+.ln{stroke:#59636e;stroke-width:1.4;fill:none}.da{stroke-dasharray:5 4}.ah{fill:#59636e}
+.go{fill:#ddf4ff;stroke:#218bff}.py{fill:#dafbe1;stroke:#2da44e}.rs{fill:#fff1e5;stroke:#e16f24}
+.ext{fill:#f6f8fa;stroke:#afb8c1}.store{fill:#fbefff;stroke:#a475f9}.chip{fill:#f6f8fa;stroke:#d0d7de}
+@media (prefers-color-scheme: dark){
+.bg{fill:#0d1117;stroke:#30363d}
+.t{fill:#e6edf3}.m{fill:#b1bac4}
+.ln{stroke:#9198a1}.ah{fill:#9198a1}
+.go{fill:#0c2d6b;stroke:#388bfd}.py{fill:#0f3d1e;stroke:#2ea043}.rs{fill:#4a2409;stroke:#db6d28}
+.ext{fill:#161b22;stroke:#3d444d}.store{fill:#2e1461;stroke:#8957e5}.chip{fill:#161b22;stroke:#30363d}
+}</style>
+<defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker><marker id="a0" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M10,0 L0,5 L10,10 z" class="ah"/></marker></defs>
+<rect x="0.5" y="0.5" width="759" height="377" rx="10" class="bg"/>
+<rect x="18" y="16" width="200" height="56" rx="8" class="ext" stroke-width="1.2"/>
+<text x="118.0" y="40.0" class="t" font-size="13" text-anchor="middle" font-weight="600">浏览器</text>
+<text x="118.0" y="57.0" class="m" font-size="11.5" text-anchor="middle">网页：React 与原生 JS</text>
+<rect x="18" y="96" width="200" height="56" rx="8" class="ext" stroke-width="1.2"/>
+<text x="118.0" y="120.0" class="t" font-size="13" text-anchor="middle" font-weight="600">GitHub App 的 Webhook</text>
+<text x="118.0" y="137.0" class="m" font-size="11.5" text-anchor="middle">验签后进收件箱</text>
+<rect x="18" y="176" width="200" height="56" rx="8" class="ext" stroke-width="1.2"/>
+<text x="118.0" y="200.0" class="t" font-size="13" text-anchor="middle" font-weight="600">接入点的外部事件</text>
+<text x="118.0" y="217.0" class="m" font-size="11.5" text-anchor="middle">服务器告警 · 邮件</text>
+<rect x="278" y="16" width="220" height="216" rx="8" class="go" stroke-width="1.2"/>
+<text x="388.0" y="51.5" class="t" font-size="13" text-anchor="middle" font-weight="600">coding-web</text>
+<text x="388.0" y="73.5" class="m" font-size="11.5" text-anchor="middle">登录与账号（OAuth、JWT）</text>
+<text x="388.0" y="95.5" class="m" font-size="11.5" text-anchor="middle">工作区与会话</text>
+<text x="388.0" y="117.5" class="m" font-size="11.5" text-anchor="middle">下任务 · 代理 SSE</text>
+<text x="388.0" y="139.5" class="m" font-size="11.5" text-anchor="middle">diff · 提交 · 推送 · 开 PR</text>
+<text x="388.0" y="161.5" class="m" font-size="11.5" text-anchor="middle">GitHub 收件箱</text>
+<text x="388.0" y="183.5" class="m" font-size="11.5" text-anchor="middle">接入点：触发与投递</text>
+<text x="388.0" y="205.5" class="m" font-size="11.5" text-anchor="middle">Skills · MCP · 环境 · 文件工作台</text>
+<path d="M218,44 L278,44" class="ln" marker-end="url(#a1)" marker-start="url(#a0)"/>
+<path d="M218,124 L278,124" class="ln" marker-end="url(#a1)"/>
+<path d="M218,204 L278,204" class="ln" marker-end="url(#a1)"/>
+<rect x="590" y="16" width="152" height="136" rx="8" class="py" stroke-width="1.2"/>
+<text x="666.0" y="48.5" class="t" font-size="13" text-anchor="middle" font-weight="600">Agent Runtime</text>
+<text x="666.0" y="68.5" class="m" font-size="11.5" text-anchor="middle">另一个仓库</text>
+<text x="666.0" y="88.5" class="m" font-size="11.5" text-anchor="middle">Planner · tool_loop</text>
+<text x="666.0" y="108.5" class="m" font-size="11.5" text-anchor="middle">Reviewer · 沙箱</text>
+<text x="666.0" y="128.5" class="m" font-size="11.5" text-anchor="middle">模型 · 记忆</text>
+<path d="M498,84 L590,84" class="ln" marker-end="url(#a1)"/>
+<text x="544" y="76" class="m" font-size="11.5" text-anchor="middle">Task API</text>
+<text x="544" y="101" class="m" font-size="11.5" text-anchor="middle">Workspace API</text>
+<rect x="590" y="176" width="152" height="56" rx="8" class="ext" stroke-width="1.2"/>
+<text x="666.0" y="200.0" class="t" font-size="13" text-anchor="middle" font-weight="600">Git 平台</text>
+<text x="666.0" y="217.0" class="m" font-size="11.5" text-anchor="middle">OAuth · 推送 · 开 PR</text>
+<path d="M498,204 L590,204" class="ln" marker-end="url(#a1)"/>
+<rect x="70" y="284" width="200" height="56" rx="8" class="store" stroke-width="1.2"/>
+<text x="170.0" y="308.0" class="t" font-size="13" text-anchor="middle" font-weight="600">JSON 文件</text>
+<text x="170.0" y="325.0" class="m" font-size="11.5" text-anchor="middle">项目与会话的元数据</text>
+<rect x="288" y="284" width="200" height="56" rx="8" class="store" stroke-width="1.2"/>
+<text x="388.0" y="308.0" class="t" font-size="13" text-anchor="middle" font-weight="600">PostgreSQL</text>
+<text x="388.0" y="325.0" class="m" font-size="11.5" text-anchor="middle">GitHub 收件箱 · 接入点</text>
+<rect x="506" y="284" width="200" height="56" rx="8" class="store" stroke-width="1.2"/>
+<text x="606.0" y="308.0" class="t" font-size="13" text-anchor="middle" font-weight="600">Valkey（可选）</text>
+<text x="606.0" y="325.0" class="m" font-size="11.5" text-anchor="middle">公开目录与权限的缓存</text>
+<path d="M318,232 L318,258 L170,258 L170,284" class="ln" marker-end="url(#a1)"/>
+<path d="M388,232 L388,284" class="ln" marker-end="url(#a1)"/>
+<path d="M458,232 L458,258 L606,258 L606,284" class="ln" marker-end="url(#a1)"/>
+<rect x="18" y="355" width="11" height="11" rx="2.5" class="go" stroke-width="1.2"/>
+<text x="34" y="364" class="m" font-size="11" text-anchor="start">本仓库</text>
+<rect x="83" y="355" width="11" height="11" rx="2.5" class="py" stroke-width="1.2"/>
+<text x="99" y="364" class="m" font-size="11" text-anchor="start">Agent Runtime</text>
+<rect x="197.94" y="355" width="11" height="11" rx="2.5" class="store" stroke-width="1.2"/>
+<text x="213.94" y="364" class="m" font-size="11" text-anchor="start">存储</text>
+<rect x="251.94" y="355" width="11" height="11" rx="2.5" class="ext" stroke-width="1.2"/>
+<text x="267.94" y="364" class="m" font-size="11" text-anchor="start">外部</text>
+</svg>

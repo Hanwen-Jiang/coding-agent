@@ -78,6 +78,8 @@ CODING_GITLAB_URL = https://git.example.com
 
 接入点让任务从网页之外的地方起。不管从哪儿起，都是一个普通的会话加一个 Runtime Task：网页上照常看进度、追加指令、回答确认、审阅改动；到了要对外说话的时候（已受理、要确认、有结果、失败），再按出口投递一次。
 
+![接入点的流程：外部事件经收件与准入变成一个会话与 Task，状态变化经发件箱投递回触发的地方](docs/readme/entry-points.svg)
+
 | 类型 | 怎么触发 | 结果默认回到哪儿 |
 | --- | --- | --- |
 | GitHub @ 评论 | 在 Issue 或 PR 里用 @ 开头的评论；评论的人要有写权限并已关联账号 | 原 Issue 或 PR 下回帖 |
@@ -111,6 +113,8 @@ coding-web 全部经环境变量配置，完整的说明在 [cmd/coding-web/main
 应用缓存只放公开的 Skills / MCP 目录、目录上游的限流状态与 GitHub 的仓库权限；浏览器会话、项目与触发记录不进缓存。见 [docs/plan/coding-cache-2026-11-10.md](docs/plan/coding-cache-2026-11-10.md)。
 
 ## 组成
+
+![Coding Agent 的组成：浏览器与外部事件进 coding-web，coding-web 经 Task API 与 Workspace API 用 Agent Runtime](docs/readme/overview.svg)
 
 | 部分 | 位置 | 说明 |
 | --- | --- | --- |
