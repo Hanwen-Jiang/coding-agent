@@ -25,7 +25,6 @@ import (
 	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/jwtingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/dev/localingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/providers/ingress"
-	"github.com/agentruntime/coding-agent/internal/entry"
 	"github.com/agentruntime/coding-agent/internal/github"
 	"github.com/agentruntime/coding-agent/internal/web"
 )
@@ -64,8 +63,6 @@ type Config struct {
 	Webhook http.Handler
 	// Metrics 是 GitHub App 一侧的计数（G-05，经 libs/go-core 的 Telemetry）；nil 时不记。
 	Metrics github.Metrics
-	// Entry 是接入点的触发与投递存在哪儿（EP-01，internal/entry）：多副本时给 Postgres；nil 时用数据目录里的 entry.json（单进程）。
-	Entry entry.Store
 	// NetworkSecrets 打开网络密钥页（WEB-SEC，user_secrets.go）；D-23 第二阶段之前默认关着。
 	NetworkSecrets bool
 	// SessionIdle、SessionMaxAge 是浏览器会话的空闲与绝对有效期（AUTH-02，browser_sessions.go；默认 24 小时、7 天）。Now 只给测试换时钟。
@@ -101,18 +98,15 @@ type Server struct {
 	ingress   tokens
 	sessions  *sessions
 	// github 是 GitHub App 一侧的进程内状态（G-03，githubrepo.go）。
-	github githubState
-	// entry 是接入点的框架（EP-01，entry_host.go）；entryKinds 是登记了的类型。
-	entry      *entry.Engine
-	entryKinds map[string]entry.Kind
-	store      *Store
-	api        *TaskAPI
-	git        Git
-	ws         Workspaces
-	wsJobs     sync.Map // in-process runners for persisted HTTP workspace operations
-	wsLocks    sync.Map // 工作区 id → *sync.Mutex（workspaceLock）
-	providers  map[string]*Provider
-	allowed    map[string]bool
+	github    githubState
+	store     *Store
+	api       *TaskAPI
+	git       Git
+	ws        Workspaces
+	wsJobs    sync.Map // in-process runners for persisted HTTP workspace operations
+	wsLocks   sync.Map // 工作区 id → *sync.Mutex（workspaceLock）
+	providers map[string]*Provider
+	allowed   map[string]bool
 	// handoff 把会话选定的环境配置交给 Runtime（envhandoff.go；ENV-02 的契约定下之前不发）。
 	handoff environmentHandoff
 	// background 是请求返回后还在跑的后台工作（任务开始时补记提交）：测试收尾时等它们做完再删临时目录。
@@ -209,9 +203,6 @@ func New(cfg Config) (*Server, error) {
 			return nil, err
 		}
 		s.ws = localWorkspaces{root: cfg.WorkspaceRoot, git: &s.git}
-	}
-	if err := s.newEntryEngine(); err != nil {
-		return nil, err
 	}
 	return s, nil
 }

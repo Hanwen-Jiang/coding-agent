@@ -55,6 +55,8 @@ type githubState struct {
 	jwtExp   time.Time
 	perms    map[string]permEntry
 	refreshL sync.Map // 租户/用户/平台 → *sync.Mutex
+	// triggerMu 护着自动触发的记录文件（G-06，githubtrigger.go）。
+	triggerMu sync.Mutex
 }
 
 func (s *Server) now() time.Time {

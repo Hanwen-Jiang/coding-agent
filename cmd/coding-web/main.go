@@ -39,8 +39,7 @@
 //	CODING_GITHUB_APP_PRIVATE_KEY_FILE    私钥文件（单独的 Secret 按文件挂进来）；私钥放在环境变量里会被拒绝
 //	CODING_GITHUB_WEBHOOK_SECRET、_PREVIOUS  Webhook secret；_PREVIOUS 只在轮换期间有
 //	CODING_GITHUB_APP_CLIENT_SECRET       用户授权（G-03）要的 Client secret
-//	CODING_GITHUB_DSN                     收件箱的 Postgres（G-02，internal/github）；配了 App 而没有它时 Webhook 回 503。接入点的
-//	                                      触发与投递（EP-01，internal/entry）也放这个库；没有时放数据目录的 entry.json（单进程）
+//	CODING_GITHUB_DSN                     收件箱的 Postgres（G-02，internal/github）；配了 App 而没有它时 Webhook 回 503
 //	CODING_GITHUB_API_URL                 对账调的 API，默认 https://api.github.com
 //	OTEL_EXPORTER_OTLP_ENDPOINT           Collector 的 OTLP/HTTP 地址（G-05）：给了就经 Telemetry 发 coding.github.* 指标
 //	                                      （投递、处理、积压、死信、续期与签发失败），不给时不记
@@ -78,7 +77,6 @@ import (
 
 	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/jwtingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/oteltelemetry"
-	"github.com/agentruntime/coding-agent/internal/entry"
 	"github.com/agentruntime/coding-agent/internal/github"
 	"github.com/agentruntime/coding-agent/internal/server"
 )
@@ -154,15 +152,6 @@ func main() {
 			cfg.Webhook = inbox
 		}
 	}
-	// 接入点的触发与投递（EP-01）：有库时与收件箱放同一个库（多副本不会重复起任务、重复回帖），没有时在数据目录的文件里。
-	if dsn := os.Getenv("CODING_GITHUB_DSN"); dsn != "" {
-		entries, err := entry.NewPostgres(ctx, dsn)
-		if err != nil {
-			log.Fatalf("coding-web: %v", err)
-		}
-		defer entries.Close()
-		cfg.Entry = entries
-	}
 	srv, err := server.New(cfg)
 	if err != nil {
 		log.Fatalf("coding-web: %v", err)
@@ -180,8 +169,8 @@ func main() {
 			inbox.Handle(event, h)
 		}
 		go inbox.Run(ctx)
+		go advanceTriggers(ctx, srv)
 	}
-	go advanceEntries(ctx, srv)
 	if cfg.GitHubApp != nil {
 		go reconcileInstallations(ctx, srv)
 	}
@@ -224,9 +213,8 @@ func reconcileInstallations(ctx context.Context, srv *server.Server) {
 	}
 }
 
-// advanceEntries 每 10 秒把各接入点起的运行往前推一步（EP-01；GitHub 评论触发的是 G-06）：建会话、提交 Task、等它结束、
-// 推送或请求确认，并发出到时间的投递。
-func advanceEntries(ctx context.Context, srv *server.Server) {
+// advanceTriggers 每 10 秒把 GitHub 评论触发的自动运行往前推一步（G-06）：建会话、提交 Task、等它结束、推送或请求确认。
+func advanceTriggers(ctx context.Context, srv *server.Server) {
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
 	for {
@@ -235,8 +223,8 @@ func advanceEntries(ctx context.Context, srv *server.Server) {
 			return
 		case <-t.C:
 		}
-		if err := srv.AdvanceEntries(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("推进接入点的运行失败：%v", err)
+		if err := srv.AdvanceGitHubTriggers(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("推进 GitHub 的自动运行失败：%v", err)
 		}
 	}
 }

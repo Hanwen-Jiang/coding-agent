@@ -28,7 +28,7 @@ func (s *Server) GitHubHandlers() map[string]github.Handler {
 		"workflow_run":              s.onWorkflowRun,
 		"pull_request_review":       s.onPullRequestReview,
 		"github_app_authorization":  s.onAppAuthorization,
-		"issue_comment":             s.onIssueComment, // G-06 的自动触发（entry_github.go）
+		"issue_comment":             s.onIssueComment, // G-06 的自动触发（githubtrigger.go）
 	}
 }
 
