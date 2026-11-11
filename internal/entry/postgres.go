@@ -13,10 +13,13 @@ import (
 
 type PostgresStore struct{ db *pgxpool.Pool }
 
+// ErrInvalidDSN：连接串本身不合格，重试没有用。
+var ErrInvalidDSN = errors.New("invalid entry Postgres configuration")
+
 func NewPostgres(ctx context.Context, dsn string) (*PostgresStore, error) {
 	db, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		return nil, errors.New("invalid entry Postgres configuration")
+		return nil, ErrInvalidDSN
 	}
 	s := &PostgresStore{db: db}
 	if err = s.migrate(ctx); err != nil {

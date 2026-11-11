@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -41,7 +42,7 @@ func configureEntries(ctx context.Context, cfg *server.Config, getenv func(strin
 	} else if dsn != "" {
 		connect, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		db, err := entry.NewPostgres(connect, dsn)
+		db, err := connectEntryStore(connect, dsn)
 		if err != nil {
 			return errors.New("CODING_ENTRY_DSN（或 CODING_GITHUB_DSN）连接或初始化失败")
 		}
@@ -59,6 +60,28 @@ func configureEntries(ctx context.Context, cfg *server.Config, getenv func(strin
 	}
 	return nil
 }
+
+// connectEntryStore 在 ctx 到期前重试连接与建表：Pod 刚起来时网络可能还没好，
+// 数据库也可能正在重启。连接串不合格时不重试。日志不带原始错误，里面可能有连接串。
+func connectEntryStore(ctx context.Context, dsn string) (*entry.PostgresStore, error) {
+	wait := 500 * time.Millisecond
+	for {
+		attempt, cancel := context.WithTimeout(ctx, 5*time.Second)
+		db, err := entry.NewPostgres(attempt, dsn)
+		cancel()
+		if err == nil || errors.Is(err, entry.ErrInvalidDSN) {
+			return db, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(wait):
+		}
+		log.Printf("coding-web: 接入点的数据库还没连上，重试")
+		wait = min(2*wait, 2*time.Second)
+	}
+}
+
 func entrySMTPConfig(getenv func(string) string) (*entrymail.SMTPConfig, error) {
 	fields := []string{"ADDR", "USERNAME", "PASSWORD", "FROM", "IMPLICIT_TLS"}
 	any := false
