@@ -108,7 +108,7 @@ const state = {
 };
 
 const ui = {}; // 常驻的 DOM 节点（重画时只换内容）
-const entryUI = createEntryUI({api,h,t,lang,icon,copy,state,openSession,changed:()=>{
+const entryUI = createEntryUI({api,h,t,lang,icon,copy,state,openSession,ask:(message,danger=true)=>askConfirm({message,danger}),changed:()=>{
   renderTopbar(); if(state.view === "activity") renderActivity();
 }});
 let entryActivityFilter = "all";
@@ -869,7 +869,7 @@ async function openPersonalConfig(sessionOnly = false, container = null) {
         h("p", { class: "muted small personal-version" }, config.version ? `${config.version} · ${config.digest}` : ""),
         h("p", { class: "muted small personal-inherit-hint" }, t("personal.inheritHint"))] : []), save,
       ...(!sessionOnly && config.version ? [h("button", { class: "btn ghost personal-retire", onclick: async () => {
-        if (!confirm(t("personal.retireConfirm"))) return;
+        if (!(await askConfirm({ message: t("personal.retireConfirm") }))) return;
         try { await api("DELETE", "/api/personal-config"); state.personalConfig = null; finish(); } catch (ex) { report(ex); }
       } }, t("personal.retire"))] : []));
   } catch (ex) { body.replaceChildren(h("p", { class: "error" }, ex.message)); }
@@ -914,7 +914,7 @@ async function openSecrets() {
     } catch (ex) { report(ex); } finally { save.disabled = false; }
   }
   async function removeSecret(n) {
-    if (!confirm(t("secrets.deleteConfirm", { name: n }))) return;
+    if (!(await askConfirm({ message: t("secrets.deleteConfirm", { name: n }) }))) return;
     try {
       await api("DELETE", `/api/secrets/${encodeURIComponent(n)}`);
       toast(t("secrets.deleted", { name: n }));
@@ -1164,7 +1164,7 @@ async function openSkills(container = null) {
     } catch (ex) { report(ex); } finally { save.disabled = false; }
   }
   async function retireSkill(n) {
-    if (!confirm(t("skills.retireConfirm", { name: n }))) return;
+    if (!(await askConfirm({ message: t("skills.retireConfirm", { name: n }) }))) return;
     try {
       await api("DELETE", `/api/skills/${encodeURIComponent(n)}`);
       toast(t("skills.retired", { name: n }));
@@ -1292,7 +1292,7 @@ async function openMcp(container = null) {
   async function saveTools(c, edits) {
     if (!edits.size) return;
     const changes = [...edits.values()];
-    if (changes.some((x) => x.enabled && x.effect === "write_irreversible") && !confirm(t("mcp.writeConfirm"))) return;
+    if (changes.some((x) => x.enabled && x.effect === "write_irreversible") && !(await askConfirm({ message: t("mcp.writeConfirm"), danger: false }))) return;
     try {
       await api("PUT", `/api/mcp/${encodeURIComponent(c.connection_id)}/tools`, { tools: changes });
       toast(t("mcp.saved", { name: c.name }));
@@ -1300,7 +1300,7 @@ async function openMcp(container = null) {
     } catch (ex) { report(ex); }
   }
   async function removeConn(c) {
-    if (!confirm(t("mcp.deleteConfirm", { name: c.name }))) return;
+    if (!(await askConfirm({ message: t("mcp.deleteConfirm", { name: c.name }) }))) return;
     try {
       await api("DELETE", `/api/mcp/${encodeURIComponent(c.connection_id)}`);
       toast(t("mcp.deleted", { name: c.name }));
@@ -1349,7 +1349,7 @@ async function drawGitHubApp(slot) {
 }
 
 async function disconnect(p, draw) {
-  if (!confirm(t("account.disconnectConfirm", { name: p.name }))) return;
+  if (!(await askConfirm({ message: t("account.disconnectConfirm", { name: p.name }) }))) return;
   try {
     const r = await api("POST", `/api/account/connections/${p.id}/disconnect`);
     state.me = await api("GET", "/api/me");
@@ -2471,7 +2471,7 @@ function openEnvironmentEditor(env) {
 async function deleteEnvironment(env) {
   const n = environmentSessions(env).length;
   // 还有会话在用时说清楚：它们保留创建时的设置，但密钥立即删除（2026-11-03 人定）。
-  if (!confirm(t(n ? "envcfg.deleteConfirmUsed" : "envcfg.deleteConfirm", { name: env.name, n }))) return;
+  if (!(await askConfirm({ title: t("envcfg.delete"), message: t(n ? "envcfg.deleteConfirmUsed" : "envcfg.deleteConfirm", { name: env.name, n }) }))) return;
   try {
     await api("DELETE", `/api/environments/${env.id}`);
     state.environments = (state.environments || []).filter((x) => x.id !== env.id);
@@ -2557,14 +2557,15 @@ function openDialog(kind, request, cancelled) {
   });
 }
 
-// askConfirm：title 是这件事的名字（按钮上也用它，除非另给 action），message 是原来 confirm 里的那句话。
+// askConfirm：title 是这件事的名字（按钮上也用它，除非另给 action），message 是原来 confirm 里的那句话；没给 title 时用通用的。
+// 原生的模态 <dialog> 开着时它在顶层，body 下的浮层会被它盖住且点不到，这时仍用浏览器自带的 confirm。
 function askConfirm({ title, message, action, danger = true }) {
-  if (!proSide()) return Promise.resolve(window.confirm(message));
-  return openDialog("confirm", { title, message, confirmLabel: action || title, danger }, false);
+  if (!proSide() || document.querySelector("dialog:modal")) return Promise.resolve(window.confirm(message));
+  return openDialog("confirm", { title: title || t("common.confirmTitle"), message, confirmLabel: action || title || t("common.confirm"), danger }, false);
 }
 
 function askText({ title, label, value = "", action }) {
-  if (!proSide()) {
+  if (!proSide() || document.querySelector("dialog:modal")) {
     const text = window.prompt(label, value);
     return Promise.resolve(text && text.trim() ? text.trim() : null);
   }
@@ -3556,7 +3557,7 @@ function afterFinish(t) {
 
 // cancelTask 停止一个任务；base 是它所在会话的接口前缀，默认当前会话。
 async function cancelTask(taskId, base = sbase()) {
-  if (!base || !confirm(t("task.stopConfirm"))) return;
+  if (!base || !(await askConfirm({ title: t("common.stop"), message: t("task.stopConfirm") }))) return;
   try {
     await api("POST", `${base}/tasks/${taskId}/cancel`);
     toast(t("task.stopRequested"));
@@ -5052,7 +5053,7 @@ async function drawChanges(body, focus) {
 }
 
 async function discard() {
-  if (!confirm(t("changes.discardConfirm"))) return;
+  if (!(await askConfirm({ message: t("changes.discardConfirm") }))) return;
   try {
     await api("POST", gitURL("discard"));
     toast(t("changes.discarded"));
@@ -5240,7 +5241,7 @@ async function loadHistory(body, limit = HISTORY_STEP) {
 async function resetBranch() {
   const p = gitProject();
   const s = gitSessionState();
-  if (!confirm(t("env.resetConfirm", { base: p.base_branch, branch: s.branch }))) return;
+  if (!(await askConfirm({ message: t("env.resetConfirm", { base: p.base_branch, branch: s.branch }) }))) return;
   try {
     const r = await api("POST", gitURL("reset-branch"));
     setSession(r.session);
@@ -5329,13 +5330,13 @@ function openWorkspaceRepos(project, session) {
     attach.disabled = busy();
   }
   async function detach(repo) {
-    if (busy() || !confirm(t("repos.detachConfirm", { name: repo.name }))) return;
+    if (busy() || !(await askConfirm({ message: t("repos.detachConfirm", { name: repo.name }) }))) return;
     running = true; attach.disabled = true; error.textContent = "";
     try {
       let result;
       try { result = await api("POST", `${base}/repos/${encodeURIComponent(repo.name)}/detach`, { discard_changes: false }); }
       catch (ex) {
-        if (ex.code !== "repo_dirty" || !confirm(t("repos.discardConfirm", { name: repo.name }))) throw ex;
+        if (ex.code !== "repo_dirty" || !(await askConfirm({ message: t("repos.discardConfirm", { name: repo.name }) }))) throw ex;
         result = await api("POST", `${base}/repos/${encodeURIComponent(repo.name)}/detach`, { discard_changes: true });
       }
       toast(t("repos.detached", { files: result.discardedFiles || 0, commits: result.discardedCommits || 0 }));

@@ -1,6 +1,7 @@
 // Entry-point management shares the app's DOM helpers, authentication and design tokens.
 // Secrets live only in the one-time dialog; they never enter browser storage or cached connections.
-export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, changed}) {
+// ask(message, danger) confirms an action; the controller supplies its dialog, and the browser's confirm is the default.
+export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, changed, ask = (message) => Promise.resolve(confirm(message))}) {
   const enc = encodeURIComponent;
   let emailAvailable=true;
   let kinds = [], connections = [], runs = [], lastIndex = 0, indexPending = null, generation = 0;
@@ -68,15 +69,17 @@ export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, 
         h("div",{class:"entry-actions"},h("button",{class:"btn sm",onclick:()=>editConnection(c,host)},tr("edit")),
           h("button",{class:"btn ghost sm",onclick:()=>openHistory(c)},tr("history")),
           ["alert","email"].includes(c.kind)?h("button",{class:"btn ghost sm",onclick:async e=>{
-            if(!confirm(tr("rotateConfirm")))return;
-            const button=e.currentTarget,epoch=generation;button.disabled=true;
+            const button=e.currentTarget,epoch=generation; // read before the await: currentTarget is cleared afterwards
+            if(!(await ask(tr("rotateConfirm"),false)))return;
+            button.disabled=true;
             try{const result=await api("POST",`/api/entry/connections/${enc(c.id)}/rotate-secret`,{});if(result.secret&&epoch===generation)showSecret(result.secret,result.connection?.webhook_url||c.webhook_url);}
             catch(ex){err.textContent=ex.message;}finally{button.disabled=false;}
           }},tr("rotate")):null,
           h("button",{class:"btn ghost sm danger",onclick:async e=>{
-            if(!confirm(tr("deleteConfirm", "Delete this connection?").replace("{name}",c.name)))return;
-            e.currentTarget.disabled=true;
-            try{await api("DELETE",`/api/entry/connections/${enc(c.id)}`);await renderPage(host);}catch(ex){err.textContent=ex.message;e.target.disabled=false;}
+            const button=e.currentTarget;
+            if(!(await ask(tr("deleteConfirm", "Delete this connection?").replace("{name}",c.name))))return;
+            button.disabled=true;
+            try{await api("DELETE",`/api/entry/connections/${enc(c.id)}`);await renderPage(host);}catch(ex){err.textContent=ex.message;button.disabled=false;}
           }},tr("delete"))),err);
     }));
     host.replaceChildren(h("section",{class:"entry-page"},h("div",{class:"entry-row entry-heading"},
@@ -207,8 +210,9 @@ export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, 
       body.replaceChildren(...(data.triggers||[]).map(run=>h("div",{class:"entry-history-row"},h("div",{class:"entry-row"},h("strong",{class:"grow"},kindLabel(run.kind)),status(run.state)),
         run.source_url?safeLink(run.source_url,tr("original")):null,run.reason?h("p",{},run.reason):null,
         run.state==="awaiting_confirmation"?h("button",{class:"btn primary sm",onclick:async e=>{
-          if(!confirm(tr("confirmRunPrompt")))return;
-          const button=e.currentTarget;button.disabled=true;err.textContent="";
+          const button=e.currentTarget;
+          if(!(await ask(tr("confirmRunPrompt"),false)))return;
+          button.disabled=true;err.textContent="";
           try{await api("POST",`/api/entry/triggers/${enc(run.id)}/confirm`,{});await load();}catch(ex){err.textContent=ex.message;button.disabled=false;}
         }},tr("confirmRun")):null)),h("h3",{},tr("deliveries")),
         ...deliveries.map(item=>h("article",{class:"entry-history-row"},h("div",{class:"entry-row"},h("strong",{class:"grow"},tr(`phase.${item.phase}`,item.phase)),status(item.state)),
