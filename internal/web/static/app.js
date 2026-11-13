@@ -1361,11 +1361,13 @@ async function disconnect(p, draw) {
 
 // ---------------------------------------------------------------- 外观
 
+// HeroUI 的深色变量只认 data-theme（不看 prefers-color-scheme），所以“跟随系统”也解析成明确的 light 或 dark。
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
 function applyTheme() {
   const t = ls.get("cw_theme");
-  if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
-  else delete document.documentElement.dataset.theme;
+  document.documentElement.dataset.theme = t === "light" || t === "dark" ? t : systemDark.matches ? "dark" : "light";
 }
+systemDark.addEventListener("change", applyTheme);
 
 // ---------------------------------------------------------------- 弹出菜单
 
@@ -1442,6 +1444,7 @@ function popItem(ic, title, desc, selected, onclick, disabled = false) {
 // ---------------------------------------------------------------- 登录
 
 function renderLogin(message = "") {
+  releaseSide();
   clearUploadDrafts();
   closeStreams();
   closeDrawer();
@@ -1702,9 +1705,11 @@ function newSession() {
 }
 
 function appClass() {
+  const pro = proSide();
   return ["app",
-    state.sideCollapsed && "side-collapsed",
-    state.sideOpen && "side-open",
+    pro && "pro-side",
+    state.sideCollapsed && !pro && "side-collapsed",
+    state.sideOpen && !pro && "side-open",
     !(state.statusOpen && inSession()) && "status-closed",
   ].filter(Boolean).join(" ");
 }
@@ -1814,17 +1819,143 @@ function orderedProjects() {
   return state.projects.slice().sort((a, b) => at(b) - at(a));
 }
 
+// 左栏是 React 的 HeroUI Pro Sidebar（ui/chat/sidebar.tsx）：控制器给可序列化的数据与回调，组件只管呈现、键盘与浮层。
+// chat-ui.js 还没到时先画原生的左栏（nativeSide），到了就换上。整个登录期间只用一个 React 根：换页时把同一个宿主接回新的布局里。
+let sideIsland = null;
+
+function proSide() {
+  return !!(sideIsland && sideIsland.handle);
+}
+
+function releaseSide() {
+  if (sideIsland) sideIsland.handle?.unmount();
+  sideIsland = null;
+}
+
 function renderSide() {
   if (!ui.side || !state.me) return;
+  const live = liveSessions();
+  const entry = sideIsland ||= { element: h("div", { class: "side-island" }), handle: null, loading: false };
+  if (entry.handle) entry.handle.update(sideProps(live));
+  else {
+    entry.element.replaceChildren(...nativeSide(live).filter(Boolean));
+    if (!entry.loading) {
+      entry.loading = true;
+      chatComponentsPromise ||= import("./chat-ui.js");
+      chatComponentsPromise.then((module) => {
+        if (sideIsland !== entry || entry.handle || !entry.element.isConnected || !state.me) return;
+        entry.element.replaceChildren();
+        entry.handle = module.mountSidebar(entry.element, sideProps(liveSessions()));
+        applyLayout();
+        renderTopbar();
+      }).catch(() => { entry.element.dataset.proError = "unavailable"; }).finally(() => { entry.loading = false; });
+    }
+  }
+  if (entry.element.parentNode !== ui.side) ui.side.replaceChildren(entry.element);
+}
+
+// markOf 把工作区或平台的标志变成可以交给 React 的数据（与 projectMark、badge 画出来的一样）。
+function markOf(provider, fallbackIcon) {
+  if (!provider) return { paths: [[null, ICONS[fallbackIcon] || ICONS.box]] };
+  if (provider === "github") return { viewBox: "0 0 16 16", paths: [[null, GITHUB_PATH]], cls: "filled" };
+  const info = providerInfo(provider);
+  const key = provider === "gitea" && /codeberg/i.test(info.name) ? "codeberg" : provider === "gitea" && /forgejo/i.test(info.name) ? "forgejo" : provider;
+  const b = BRANDS[key];
+  return b ? { paths: [[b.color, b.d]], cls: "brand", title: info.name } : { text: String(provider).slice(0, 2), title: info.name };
+}
+
+const SIDE_ACTIONS = {
+  onNav: (id) => (id === "new" ? newSession() : id === "search" ? openSearch() : go(id)),
+  onOpenSession: (pid, sid) => { if (!(inSession() && state.project.id === pid && state.session.id === sid)) openSession(pid, sid); },
+  onDraft: (pid) => openDraft(pid),
+  onToggleGroup: (pid) => {
+    if (state.groupsClosed.has(pid)) state.groupsClosed.delete(pid); else state.groupsClosed.add(pid);
+    ls.set("cw_groups_closed", [...state.groupsClosed].join(","));
+    renderSide();
+  },
+  onToggleAll: (pid) => {
+    if (state.groupsAll.has(pid)) state.groupsAll.delete(pid); else state.groupsAll.add(pid);
+    renderSide();
+  },
+  onSessionAction: (action, pid, sid) => {
+    const p = findProject(pid), s = findSession(pid, sid);
+    if (!p || !s) return;
+    if (action === "rename") renameSession(p, s);
+    else if (action === "duplicate") duplicateSession(p, s);
+    else if (action === "delete") deleteSession(p, s);
+  },
+  onUserAction: (action, value) => {
+    if (action === "settings") goSettings();
+    else if (action === "account") openAccount();
+    else if (action === "theme") { ls.set("cw_theme", value); applyTheme(); renderSide(); }
+    else if (action === "language") setLang(value);
+    else if (action === "logout") logout();
+  },
+  onCollapsedChange: (collapsed) => {
+    state.sideCollapsed = collapsed;
+    ls.set("cw_side", collapsed ? "0" : "1");
+    renderSide();
+  },
+};
+
+function sideProps(live) {
   const me = state.me;
   const name = me.login || me.user;
-  const live = liveSessions();
+  const conns = me.connections || [];
+  const groups = orderedProjects().map((p) => {
+    const sessions = state.sessions.filter((s) => s.project_id === p.id);
+    const all = state.groupsAll.has(p.id);
+    return {
+      id: p.id, name: p.name, title: `${p.name} · ${sourceLabel(p)}`,
+      mark: markOf(p.git_provider, p.source && p.source.startsWith("sample:") ? "box" : "folder"),
+      closed: state.groupsClosed.has(p.id),
+      live: sessions.some((s) => live.has(`${p.id}/${s.id}`)),
+      drafting: state.view === "session" && !state.session && !!state.project && state.project.id === p.id,
+      total: sessions.length,
+      addLabel: t("ws.newIn", { name: p.name }),
+      moreLabel: sessions.length > GROUP_MAX ? (all ? t("ws.less") : t("ws.showAll", { n: sessions.length })) : "",
+      sessions: (all ? sessions : sessions.slice(0, GROUP_MAX)).map((s) => ({
+        id: s.id, title: s.title || t("session.untitled"), when: fmtShortAgo(s.updated_at),
+        live: live.has(`${p.id}/${s.id}`),
+        current: inSession() && state.project.id === p.id && state.session.id === s.id,
+        mark: s.pr_number ? markOf(p.git_provider, "chat") : null,
+      })),
+    };
+  });
+  return {
+    brand: "Coding Agent", collapsed: state.sideCollapsed, icons: ICONS, groups,
+    nav: [
+      { id: "new", icon: "compose", label: t("nav.newSession"), title: t("nav.newSessionTitle") },
+      { id: "search", icon: "search", label: t("nav.search"), kbd: "Ctrl K" },
+      { id: "workspaces", icon: "grid", label: t("nav.workspaces"), current: state.view === "workspaces", count: state.projects.length },
+      { id: "activity", icon: "activity", label: t("nav.activity"), current: state.view === "activity", count: state.active.length, live: state.active.length > 0 },
+      { id: "environments", icon: "server", label: t("nav.environments"), current: state.view === "environments", count: (state.environments || []).length },
+    ],
+    labels: {
+      navigation: t("side.open"), sessions: t("side.sessions"), noWorkspaces: t("side.noWorkspaces"), draft: t("session.new"),
+      noSessions: t("ws.noSessions"), live: t("session.live"), sessionMenu: t("session.menuTitle"), rename: t("session.rename"),
+      duplicate: t("session.duplicate"), duplicateDesc: t("session.duplicateDesc"), remove: t("session.delete"),
+      userMenu: t("menu.title"), settings: t("settings.title"), account: t("account.title"),
+      accountDesc: conns.length ? t("account.connectedList", { n: conns.length, names: conns.map((c) => providerInfo(c.provider).name).join(t("list.sep")) }) : t("account.connectHint"),
+      appearance: t("menu.appearance"), language: t("menu.language"), logout: t("menu.logout"),
+    },
+    user: { name, detail: t("side.tenant", { tenant: me.tenant }), avatarUrl: me.avatar_url || "", initials: initials(name) },
+    themes: [{ id: "system", label: t("theme.system") }, { id: "light", label: t("theme.light") }, { id: "dark", label: t("theme.dark") }],
+    theme: ls.get("cw_theme") || "system",
+    languages: LANGS.map((l) => ({ id: l.id, label: l.label })), language: lang,
+    ...SIDE_ACTIONS,
+  };
+}
+
+function nativeSide(live) {
+  const me = state.me;
+  const name = me.login || me.user;
   const nav = (ic, label, onclick, opts = {}) => h("button", { class: "nav-item" + (opts.active ? " active" : ""), title: opts.title || label, onclick },
     icon(ic, "sm"), h("span", { class: "grow" }, label),
     opts.live ? h("span", { class: "spinner" }) : null,
     opts.count ? h("span", { class: "count" }, opts.count) : null,
     opts.kbd ? h("span", { class: "kbd" }, opts.kbd) : null);
-  ui.side.replaceChildren(
+  return [
     h("div", { class: "side-head" },
       h("div", { class: "brand grow" }, h("span", { class: "mark" }, logo()), "Coding Agent"),
       h("button", { class: "btn ghost sm icon-only only-wide", title: t("side.collapse"), onclick: () => { state.sideCollapsed = true; ls.set("cw_side", "0"); applyLayout(); renderTopbar(); } }, icon("panelLeft", "sm")),
@@ -1845,7 +1976,7 @@ function renderSide() {
         h("span", { class: "avatar" }, me.avatar_url ? h("img", { src: me.avatar_url, alt: "" }) : initials(name)),
         h("span", { class: "grow who" }, h("span", { class: "n ellipsis" }, name), h("span", { class: "m ellipsis" }, t("side.tenant", { tenant: me.tenant }))),
         icon("more", "sm more"))),
-  );
+  ];
 }
 
 const GROUP_MAX = 6;
@@ -1995,12 +2126,13 @@ function renderTopbar() {
   if (!ui.topbar) return;
   const p=state.project,s=state.session;
   const navigation=[
-    h("button",{class:"btn ghost sm icon-only only-narrow",title:t("side.open"),onclick:()=>{state.sideOpen=true;applyLayout();}},icon("menu","sm")),
-    state.sideCollapsed ? h("button",{class:"btn ghost sm icon-only only-wide",title:t("side.expand"),onclick:()=>{state.sideCollapsed=false;ls.set("cw_side","1");applyLayout();renderTopbar();}},icon("panelLeft","sm")) : null,
+    h("button",{class:"btn ghost sm icon-only only-narrow",title:t("side.open"),onclick:()=>{if(proSide())sideIsland.handle.openMobile();else{state.sideOpen=true;applyLayout();}}},icon("menu","sm")),
+    // Pro 左栏收起后是一条图标栏，自己带展开按钮；只有原生左栏（整栏收起）才需要顶栏里的这一个。
+    state.sideCollapsed && !proSide() ? h("button",{class:"btn ghost sm icon-only only-wide",title:t("side.expand"),onclick:()=>{state.sideCollapsed=false;ls.set("cw_side","1");applyLayout();renderTopbar();}},icon("panelLeft","sm")) : null,
   ];
   // Page views already have an h1 in their content; keep only the navigation affordance.
   if (state.view !== "session" || !p) {
-    ui.topbar.className="topbar topbar-utility"+(state.sideCollapsed?" has-toggle":"");
+    ui.topbar.className="topbar topbar-utility"+(state.sideCollapsed&&!proSide()?" has-toggle":"");
     ui.topbar.replaceChildren(...navigation.filter(Boolean));return;
   }
   ui.topbar.className="topbar topbar-chat";

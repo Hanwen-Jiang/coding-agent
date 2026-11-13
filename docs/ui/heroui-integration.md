@@ -35,7 +35,26 @@ npm ci --prefix ui --ignore-scripts --legacy-peer-deps
 node ui/build.mjs /path/to/node_modules
 ```
 
+`@heroui-pro/react` is licensed and is not fetched by this build. Keep the other pinned packages in a directory of their own (`@heroui/react` and `@heroui/styles` 3.2.7, `react` and `react-dom` 19.3.1, `shiki` 4.6.0, `tailwind-variants` 4.x for its `dist/config-entry.js`, plus the Pro package's peer dependencies) and copy the installed Pro package into its `node_modules/@heroui-pro/react`. `npm install` in that directory prunes the copy, so copy it again afterwards. A project that merely has the Pro package installed (for example a HeroUI Next.js template) usually carries other versions of `@heroui/react` and `react`, and the version check rejects it.
+
 The build verifies the package versions, bundles all runtime dependencies into same-origin `chat-ui.js`, writes scoped `chat-ui.css`, and records component/version/size metadata in `ui/build-meta.json`. Production still runs the Go service with checked-in embedded assets; it does not need Node. The existing public API interfaces are unchanged.
+
+## Application sidebar
+
+The left sidebar is the real `Sidebar` from `@heroui-pro/react` (`ui/chat/sidebar.tsx`), with `Dropdown`, `Avatar` and `Kbd` from `@heroui/react`. `app.js` still owns state, routing and every action: `sideProps()` builds serializable data (navigation, workspaces with their sessions, the account, theme and language choices) and `SIDE_ACTIONS` holds the callbacks. The component owns presentation, keyboard behaviour and overlays.
+
+- One React root lives for the whole signed-in session. `renderApp()` rebuilds the layout on every route change and re-attaches the same host element, so the tree keeps its focus and scroll position. `renderLogin()` releases it.
+- Until `chat-ui.js` has loaded, the column shows the previous native sidebar (`nativeSide()`); the React sidebar replaces it when the module arrives. A failed load leaves the native one in place.
+- Collapsing turns the sidebar into a 56px icon rail (`collapsible="icon"`, `Sidebar.Rail`, Ctrl/⌘ B) instead of hiding it; the grid column follows the sidebar's width. Below 48rem the Pro sidebar becomes a sheet, opened from the top bar's menu button through the handle's `openMobile()`.
+- Workspaces are expandable tree items with their sessions as children (arrow keys expand and collapse). Session actions (rename, duplicate, delete) and the account menu (settings, account, appearance, language, sign out) are `Dropdown` menus.
+- Sheets, menus and tooltips render in portals under `<body>`, so the upstream `sidebar.css` is included unscoped in `chat-ui.css` (`shellComponents` in `ui/build.mjs`); application glue is `ui/chat/sidebar.css`.
+
+Two application rules had to change for upstream components to work as designed:
+
+- `applyTheme()` always sets `data-theme` to `light` or `dark`, resolving "system" with `prefers-color-scheme`. The upstream dark variables are keyed on `data-theme` only, so without this every unmapped token stayed light under a dark system theme.
+- The universal `box-sizing: border-box` rule in `style.css` moved into `@layer base`. Unlayered rules override every layered upstream rule; `.sheet__content` needs `content-box`, and with the override the mobile sheet rendered entirely off-screen.
+
+The application also sets `--radius: 16px`, which upstream multiplies for menu radii; the sidebar's popovers set their radii explicitly.
 
 ## Main conversation surface
 

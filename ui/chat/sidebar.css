@@ -1,0 +1,68 @@
+/* Application sidebar: HeroUI Pro Sidebar inside the existing three-column grid.
+   The grid column follows the sidebar's own width, so collapsing to the icon rail animates the layout. */
+.app.pro-side { grid-template-columns: auto minmax(0, 1fr) var(--status-w); }
+.app.pro-side.status-closed { grid-template-columns: auto minmax(0, 1fr) 0; }
+/* min-height: 0 keeps a long session list from stretching the grid row (and the composer) past the viewport. */
+.app.pro-side > .side { width: auto; min-height: 0; overflow: visible; border-right: 0; background: none; visibility: visible; }
+.side-island { height: 100%; min-height: 0; display: flex; flex-direction: column; flex: 1; }
+.side-island[data-pro-mounted] { display: block; }
+.side-pro-provider.sidebar__provider { width: auto; height: 100%; min-height: 0; }
+.side-pro.sidebar, .sidebar__mobile { --radius: .5rem; --spacing: .25rem; }
+.side-pro.sidebar {
+  --sidebar-width: 256px; --sidebar-width-collapsed: 56px; --sidebar-edge-outline: var(--line);
+  height: 100%; background: var(--bg-side); color: var(--text);
+}
+.side-pro-head.sidebar__header { padding: 14px 10px 6px; gap: 8px; }
+.side-pro-brand { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 6px 0 8px; font-size: 16px; font-weight: 650; letter-spacing: -.025em; }
+.side-pro-brand .mark { color: var(--accent); display: inline-flex; flex: none; }
+.side-pro-brand-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-pro-trigger { flex: none; color: var(--muted); }
+.side-pro[data-state="collapsed"] .side-pro-brand { justify-content: center; padding: 0; }
+.side-pro-nav .sidebar__menu-label, .side-pro-tree .sidebar__menu-label { font-size: 13px; }
+.side-pro-content.sidebar__content { padding-inline: 10px; padding-bottom: 8px; }
+.side-pro .sidebar__menu-chip { gap: 6px; }
+.side-pro .sidebar__menu-actions, .sidebar__mobile .sidebar__menu-actions { margin-left: auto; }
+.side-pro-count { min-width: 18px; padding: 1px 5px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 10.5px; line-height: 1.5; text-align: center; }
+.side-pro-kbd { font-size: 10.5px; }
+.side-pro-when { color: var(--faint); font-size: 10.5px; }
+.side-pro-tree .sidebar__menu-item-content { min-height: 32px; gap: 8px; padding-block: 4px; }
+.side-pro-session:is(:hover, [data-hovered="true"], [data-current="true"]) .side-pro-when { display: none; }
+.side-pro-draft .sidebar__menu-label { font-style: italic; }
+.side-pro-more .sidebar__menu-label { color: var(--muted); font-size: 12px; }
+.side-mark-text { background: #76736b; }
+.side-pro-empty { margin: 0; padding: 6px 8px; color: var(--faint); font-size: 12.5px; }
+.side-pro-foot.sidebar__footer { padding: 8px 10px 12px; }
+.side-pro-profile {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border: 0; border-radius: 12px;
+  background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; outline: none;
+  transition: background-color .12s cubic-bezier(.2, .7, .2, 1);
+}
+.side-pro-profile:hover, .side-pro-profile[data-pressed="true"], .side-pro-profile[aria-expanded="true"] { background: var(--surface-2); }
+.side-pro-profile[data-focus-visible="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* style.css has its own .avatar; give the HeroUI Avatar its intended box back inside the sidebar. */
+.side-pro-avatar.avatar { display: inline-flex; flex: none; background: none; color: inherit; }
+.side-pro-avatar .avatar__fallback { flex: 1; height: 100%; align-items: center; justify-content: center; border-radius: inherit; }
+.side-pro-who { display: flex; flex-direction: column; flex: 1; min-width: 0; line-height: 1.3; }
+.side-pro-who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.side-pro-who-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; }
+.side-pro-profile-more { display: inline-flex; flex: none; color: var(--faint); }
+.side-pro[data-state="collapsed"] .side-pro-profile { justify-content: center; padding: 6px 0; }
+.side-pro[data-state="collapsed"] .side-pro-who, .side-pro[data-state="collapsed"] .side-pro-profile-more { display: none; }
+/* The application sets --radius to 16px, which doubles the upstream menu radii; restore the library's proportions. */
+.side-pro-popover.dropdown__popover { border-radius: 16px; }
+.side-pro-popover .menu-item { border-radius: 10px; font-size: 13px; }
+.side-pro-user-menu { min-width: 236px; }
+.side-pro-item-icon { flex: none; color: var(--muted); }
+.side-pro-item-icon.danger { color: var(--danger, var(--err)); }
+.side-pro-item-text { display: flex; flex-direction: column; min-width: 0; }
+@media (max-width: 1180px) {
+  .app.pro-side, .app.pro-side.status-closed { grid-template-columns: auto minmax(0, 1fr) 0; }
+}
+/* The Pro sidebar turns into a sheet below 48rem; the narrow-screen controls follow the same breakpoint. */
+@media (max-width: 767.98px) {
+  .app.pro-side, .app.pro-side.status-closed { grid-template-columns: 0 minmax(0, 1fr) 0; }
+  .app.pro-side > .side { display: block; position: static; width: 0; box-shadow: none; }
+  .app.pro-side .only-narrow { display: inline-flex !important; }
+  .app.pro-side .only-wide { display: none !important; }
+}
+@media (prefers-reduced-motion: reduce) { .side-pro-profile { transition: none; } }

@@ -134,7 +134,9 @@
 
 /* ------------------------------------------------------------------ 基础 */
 
-* { box-sizing: border-box; }
+/* 放进 base 层（heroui.css 的预设也在这一层）：不分层的规则会压过 HeroUI 分层的组件样式，
+   例如 Sheet 的 .sheet__content 要 content-box，被压掉后抽屉的内容整个在屏幕外。 */
+@layer base { * { box-sizing: border-box; } }
 html, body { height: 100%; }
 body {
   margin: 0;

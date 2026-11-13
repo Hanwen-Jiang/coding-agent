@@ -34,6 +34,7 @@
 | 本机拉起整套 | `python scripts/dev.py up --sandbox docker`（离线加 `--provider mock --decisions stub`；Runtime 不在旁边时加 `--runtime <目录>`） |
 | 改了代码后重启 coding-web | `python scripts/dev.py kill`，再 `python scripts/dev.py start`（会重新编译） |
 | 状态、停掉 | `python scripts/dev.py status`、`python scripts/dev.py down` |
+| 重建网页里的 React 部分（`ui/`：对话、输入框、文件工作台、左栏） | `npm ci --prefix ui --ignore-scripts --legacy-peer-deps`，再 `node ui/build.mjs <固定版本的 node_modules>`；产物 `internal/web/static/chat-ui.js`、`chat-ui.css` 提交进仓库，线上不需要 Node。依赖目录怎么备、版本是哪些见 `docs/ui/heroui-integration.md` |
 
 本机环境（Windows、仓库在网络共享盘上、工具装在 `%USERPROFILE%\.local`、`UV_PROJECT_ENVIRONMENT` 要指到本地盘）同 Runtime 的 CLAUDE.md。`scripts/dev.py` 调 Runtime 的 `dev_stack.py` 时用 `uv run --no-sync`，所以 `UV_PROJECT_ENVIRONMENT` 要先设好。
 

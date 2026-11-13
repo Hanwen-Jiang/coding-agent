@@ -91,5 +91,15 @@ export const mountRunDetails=(container:HTMLElement,props:RunDetailsProps)=>moun
 import {ContextPanel,type ContextPanelProps} from "./context-panel";
 export const mountContextPanel=(container:HTMLElement,props:ContextPanelProps)=>mountComponent(container,ContextPanel,props);
 
+import {AppSidebar,type SidebarProps,type SidebarHandle} from './sidebar';
+// The sidebar keeps one React root for the whole signed-in session; the controller re-attaches its host on every route change.
+export function mountSidebar(container:HTMLElement,initial:SidebarProps):SidebarHandle {
+ const root=createRoot(container);let disposed=false;const api:{current:any}={current:null};
+ container.dataset.proMounted='true';
+ const update=(props:SidebarProps)=>{if(!disposed)root.render(<AppSidebar {...props} api={api}/>);};
+ update(initial);
+ return {update,unmount:()=>{if(!disposed){disposed=true;root.unmount();delete container.dataset.proMounted;}},openMobile:()=>api.current?.setMobileOpen(true)};
+}
+
 import {FileWorkbench,type FileWorkbenchProps} from './file-workbench';
 export const mountFileWorkbench=(container:HTMLElement,props:FileWorkbenchProps)=>mountComponent(container,FileWorkbench,props);

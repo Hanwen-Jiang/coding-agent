@@ -148,7 +148,7 @@ try{
  check($$('.execution-raw').length===1,'raw data repeated on individual events');
  $('.execution-raw > summary').click();check($('.execution-raw pre').textContent.includes('task_accepted'),'raw event payload lost');
  check($('#composer')===input&&input.value==='Keep focused draft','details replaced input node');
- check($('.dock').getBoundingClientRect().bottom<=innerHeight+1&&$('.c-tools').getBoundingClientRect().height===32,'conversation dock geometry');
+ check($('.dock').getBoundingClientRect().bottom<=innerHeight+1&&$('.c-tools').getBoundingClientRect().height===32,'conversation dock geometry '+JSON.stringify({dockBottom:$('.dock').getBoundingClientRect().bottom,innerHeight,tools:$('.c-tools').getBoundingClientRect().height}));
  location.hash='#/w/p/s/edit';await wait(()=>$('.answer')?.textContent.includes('Updated stock.py'),'real edit answer');await wait(()=>$$('.next-step').length===2,'actual edit actions retained');
  check($('.next-steps').textContent.includes('Review changes')&&$('.next-steps').textContent.includes('Commit'),'missing actual current-task diff actions');
  location.hash='#/w/p/s/s';await wait(()=>$('.answer')?.textContent.includes('networking is authorized'),'question again');await wait(()=>!$$('.next-step').length,'prior edited task leaked action suggestions');

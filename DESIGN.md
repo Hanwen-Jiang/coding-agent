@@ -37,8 +37,9 @@ Use actual `@heroui-pro/react` components, not names copied onto native controls
 - `ChatAttachment`: delivered files.
 - `PromptInput.TextArea`, `PromptInput.Send`, `PromptInput.Action`: React-owned editor and actions.
 - `Button`: additional disclosure actions.
+- `Sidebar` (with `Dropdown`, `Avatar`, `Kbd`): application navigation, the workspace and session tree, session actions and the account menu.
 
-`ui/chat/conversation.tsx` owns the complete activity stream and expansion state under one React root per task. The application controller supplies serializable data. It must not replace individual React tool rows on SSE updates. The composer uses a subscription model and retains the same textarea while the task phase changes. Approval/status controls currently bridge into the React composer; application routing, settings and navigation remain in the existing controller.
+`ui/chat/conversation.tsx` owns the complete activity stream and expansion state under one React root per task. The application controller supplies serializable data. It must not replace individual React tool rows on SSE updates. The composer uses a subscription model and retains the same textarea while the task phase changes. Approval/status controls currently bridge into the React composer; application routing and settings remain in the existing controller. `ui/chat/sidebar.tsx` owns the sidebar's presentation under one React root per signed-in session; the controller supplies its data and performs every action.
 
 Use pinned official components and their precompiled Tailwind v4 CSS. Keep app-specific styles limited to the visual hierarchy above. Preserve same-origin assets and the existing CSP.
 
