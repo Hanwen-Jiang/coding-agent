@@ -14,8 +14,8 @@ const components=['chat-message','markdown','code-block','chain-of-thought','cha
 const proCss=name=>readFile(resolve(modules,'@heroui-pro/react/dist/css/components',name+'.css'),'utf8');
 const css=await Promise.all(components.map(proCss));
 // Shell components open sheets, menus and tooltips in portals under <body>, outside any island, so their upstream CSS is not scoped.
-const shellComponents=['sidebar'];
+const shellComponents=['sidebar','command'];
 const shellCss=await Promise.all(shellComponents.map(proCss));
-await writeFile(resolve(here,'../internal/web/static/chat-ui.css'),'/* HeroUI Pro 1.0.0-beta.11: upstream component CSS scoped to React islands. */\n/* Preload React Aria pressable behavior without injecting an inline style under CSP. */\n@layer { [data-react-aria-pressable] { touch-action: pan-x pan-y pinch-zoom; } }\n@scope (.pro-chat) {\n'+css.join('\n')+'\n}\n/* HeroUI Pro shell components (global). */\n'+shellCss.join('\n')+'\n'+(await Promise.all(['sidebar.css','file-workbench.css','file-preview.css','file-actions.css'].map(name=>readFile(resolve(here,'chat',name),'utf8')))).join('\n'));
+await writeFile(resolve(here,'../internal/web/static/chat-ui.css'),'/* HeroUI Pro 1.0.0-beta.11: upstream component CSS scoped to React islands. */\n/* Preload React Aria pressable behavior without injecting an inline style under CSP. */\n@layer { [data-react-aria-pressable] { touch-action: pan-x pan-y pinch-zoom; } }\n@scope (.pro-chat) {\n'+css.join('\n')+'\n}\n/* HeroUI Pro shell components (global). */\n'+shellCss.join('\n')+'\n'+(await Promise.all(['sidebar.css','command.css','file-workbench.css','file-preview.css','file-actions.css'].map(name=>readFile(resolve(here,'chat',name),'utf8')))).join('\n'));
 await writeFile(resolve(here,'build-meta.json'),JSON.stringify({packages:{'@heroui-pro/react':'1.0.0-beta.11',react:'19.3.1',shiki:'4.6.0'},output_bytes:result.metafile.outputs[out]?.bytes || (await readFile(out)).length,components,shell_components:shellComponents},null,2)+'\n');
 console.log(`Built ${out}: ${(await readFile(out)).length} bytes`);

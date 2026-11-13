@@ -56,6 +56,18 @@ Two application rules had to change for upstream components to work as designed:
 
 The application also sets `--radius: 16px`, which upstream multiplies for menu radii; the sidebar's popovers set their radii explicitly.
 
+## Search and dialogs
+
+Search (Ctrl/⌘ K, or the sidebar's Search item) is the Pro `Command` palette (`ui/chat/command.tsx`). `commandProps()` in `app.js` lists sessions, workspaces and a short "Go to" group (new session, new workspace, the three pages, settings); the component filters on each entry's `text`, and `COMMAND_RUN` performs the pick after the palette closes. The previous native palette remains as the fallback while `chat-ui.js` is loading.
+
+Confirmations and single-value prompts go through `askConfirm()` and `askText()` in `app.js`, which return promises and render `AlertDialog` and `Modal` from `@heroui/react` (`ui/chat/dialogs.tsx`). They fall back to the browser's `confirm` and `prompt` before the module has loaded. A confirmation's title names the action and is reused as the confirm button's label; focus starts on Cancel. Renaming a session, deleting a session and deleting a workspace use them; the remaining `confirm()` call sites in `app.js` and `entry-ui.js` have not been converted yet.
+
+Both render in modal portals, so the upstream `command.css` is global like `sidebar.css`; glue for both is `ui/chat/command.css`. The palette, dialogs and sidebar each get their own React root, created the first time they are needed and released by `renderLogin()`.
+
+`code-ui.css` maps `--danger`, `--success` and `--warning` to the application's `--err`, `--ok` and `--warn`; upstream derives the soft and hover shades from them, so status colours in upstream components follow the application palette in both themes.
+
+`style.css` also resets `button { color: inherit }` outside any layer, which overrides the layered upstream `.button` foreground. The dialogs restore `color: var(--button-fg)` for their own buttons; an upstream `Button` rendered elsewhere needs the same until that reset moves into a layer.
+
 ## Main conversation surface
 
 See [Conversation design and migration](conversation-design.md) and the root `DESIGN.md` for the current architecture and visual rules. The task activity stream uses one React root with keyed public messages and compact tool groups. Plans and sub-agent summaries are React-rendered data, not native DOM slots. Groups keep expansion state across event updates, share one border, and progressively disclose large histories without an inner scroll viewport.

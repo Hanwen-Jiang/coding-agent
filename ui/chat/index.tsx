@@ -101,5 +101,11 @@ export function mountSidebar(container:HTMLElement,initial:SidebarProps):Sidebar
  return {update,unmount:()=>{if(!disposed){disposed=true;root.unmount();delete container.dataset.proMounted;}},openMobile:()=>api.current?.setMobileOpen(true)};
 }
 
+import {CommandPalette,type CommandProps} from './command';
+export const mountCommand=(container:HTMLElement,props:CommandProps)=>mountComponent(container,CommandPalette,props);
+
+import {Dialogs,type DialogsProps} from './dialogs';
+export const mountDialogs=(container:HTMLElement,props:DialogsProps)=>mountComponent(container,Dialogs,props);
+
 import {FileWorkbench,type FileWorkbenchProps} from './file-workbench';
 export const mountFileWorkbench=(container:HTMLElement,props:FileWorkbenchProps)=>mountComponent(container,FileWorkbench,props);

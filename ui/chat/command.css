@@ -1,0 +1,19 @@
+/* Search and quick actions: HeroUI Pro Command. The upstream command.css is global (the palette is a modal portal);
+   these rules fit its rows to the application's density and restore radii that --radius: 16px would double. */
+.command__dialog.pro-command { border-radius: 16px; }
+.pro-command .command__item { gap: 10px; border-radius: 10px; font-size: 13px; }
+.pro-command-mark { display: inline-flex; flex: none; color: var(--muted); }
+.pro-command-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pro-command-sub { flex: none; max-width: 45%; margin-left: auto; padding-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.pro-command-empty { display: flex; align-items: center; justify-content: center; height: 64px; color: var(--muted); font-size: 13px; }
+.pro-command-kbd { font-size: 11px; }
+/* The application's input focus ring belongs to form fields; the palette's input group already shows focus. */
+.command__input-group input:focus, .command__input-group input:focus-visible { outline: none; box-shadow: none; }
+
+/* Confirmation and input dialogs (ui/chat/dialogs.tsx): AlertDialog and Modal from @heroui/react. */
+.app-dialog { --dialog-radius: 20px; border-radius: var(--dialog-radius); }
+/* style.css resets `button { color: inherit }` outside any layer, which beats the layered upstream `.button` colour. */
+.app-dialog .button { border-radius: var(--radius-sm); color: var(--button-fg); }
+.app-dialog-message { margin: 0; color: var(--text-2); font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.app-dialog-form { display: flex; flex-direction: column; gap: 12px; }
+.app-dialog-field { width: 100%; }

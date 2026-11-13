@@ -4,7 +4,7 @@
     "react": "19.3.1",
     "shiki": "4.6.0"
   },
-  "output_bytes": 2831796,
+  "output_bytes": 2856288,
   "components": [
     "chat-message",
     "markdown",
@@ -17,6 +17,7 @@
     "text-shimmer"
   ],
   "shell_components": [
-    "sidebar"
+    "sidebar",
+    "command"
   ]
 }

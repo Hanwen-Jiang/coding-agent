@@ -11,6 +11,8 @@
   --accent-foreground: var(--accent-ink); --accent-soft-foreground: var(--accent-2);
   --overlay: var(--surface); --field-background: var(--surface); --field-foreground: var(--text);
   --field-border: var(--line-2); --focus: var(--accent); --cursor-interactive: pointer;
+  /* Status colours follow the application palette; upstream derives the soft and hover shades from these. */
+  --danger: var(--err); --danger-foreground: #ffffff; --success: var(--ok); --warning: var(--warn);
   --side-w: 256px; --thread-w: 840px; --radius: 16px; --radius-sm: 10px;
   --font-serif: var(--font-sans); --shadow-sm: 0 1px 3px #18181b08;
   --shadow: 0 2px 6px #18181b08; --shadow-lg: 0 20px 70px #18181b25;

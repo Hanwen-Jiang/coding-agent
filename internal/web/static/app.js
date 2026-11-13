@@ -1828,6 +1828,8 @@ function proSide() {
 }
 
 function releaseSide() {
+  releaseDialogs();
+  if (commandIsland) { commandIsland.handle.unmount(); commandIsland.host.remove(); commandIsland = null; }
   if (sideIsland) sideIsland.handle?.unmount();
   sideIsland = null;
 }
@@ -1845,6 +1847,7 @@ function renderSide() {
       chatComponentsPromise.then((module) => {
         if (sideIsland !== entry || entry.handle || !entry.element.isConnected || !state.me) return;
         entry.element.replaceChildren();
+        entry.module = module;
         entry.handle = module.mountSidebar(entry.element, sideProps(liveSessions()));
         applyLayout();
         renderTopbar();
@@ -2039,8 +2042,8 @@ function setSession(s) {
 }
 
 async function renameSession(p, s) {
-  const title = prompt(t("session.titlePrompt"), s.title || "");
-  if (!title || !title.trim()) return;
+  const title = await askText({ title: t("session.rename"), label: t("session.titlePrompt"), value: s.title || "" });
+  if (!title) return;
   try {
     setSession(await api("POST", `${sessionURL(p.id, s.id)}/rename`, { title }));
     renderSide();
@@ -2062,7 +2065,7 @@ async function duplicateSession(p, s) {
 
 async function deleteSession(p, s) {
   const title = s.title || t("session.untitled");
-  if (!confirm(t(s.workspace_id !== p.id ? "session.deleteConfirmCopy" : "session.deleteConfirm", { title }))) return;
+  if (!(await askConfirm({ title: t("session.delete"), message: t(s.workspace_id !== p.id ? "session.deleteConfirmCopy" : "session.deleteConfirm", { title }) }))) return;
   try {
     await api("DELETE", sessionURL(p.id, s.id));
     state.sessions = state.sessions.filter((x) => !(x.project_id === p.id && x.id === s.id));
@@ -2517,9 +2520,110 @@ function environmentKey() {
   return [id, bound, (state.environments || []).map((e) => `${e.id}:${e.name}`).join(",")].join("/");
 }
 
-// openSearch 是搜索面板（Ctrl/⌘ K）：按标题与工作区名找会话，按名字与来源找工作区。
+// 确认与输入一个值的对话框是 HeroUI 的 AlertDialog 与 Modal（ui/chat/dialogs.tsx）：askConfirm、askText 返回 Promise。
+// chat-ui.js 还没到时退回浏览器自带的 confirm、prompt。同一种对话框同时只开一个，新的来了旧的按取消算。
+let dialogIsland = null;
+let dialogSeq = 0;
+const dialogs = { confirm: null, prompt: null, waiting: new Map() };
+
+function renderDialogs() {
+  const props = {
+    confirm: dialogs.confirm, prompt: dialogs.prompt,
+    onConfirm: (id, ok) => settleDialog("confirm", id, ok),
+    onPrompt: (id, value) => settleDialog("prompt", id, value),
+  };
+  if (dialogIsland) return dialogIsland.handle.update(props);
+  const host = h("div", { class: "dialog-island" });
+  document.body.append(host);
+  dialogIsland = { host, handle: sideIsland.module.mountDialogs(host, props) };
+}
+
+function settleDialog(kind, id, result) {
+  const resolve = dialogs.waiting.get(id);
+  if (!resolve) return;
+  dialogs.waiting.delete(id);
+  if (dialogs[kind] && dialogs[kind].id === id) dialogs[kind] = null;
+  if (dialogIsland) renderDialogs();
+  resolve(result);
+}
+
+function openDialog(kind, request, cancelled) {
+  return new Promise((resolve) => {
+    if (dialogs[kind]) settleDialog(kind, dialogs[kind].id, cancelled);
+    const id = ++dialogSeq;
+    dialogs.waiting.set(id, resolve);
+    dialogs[kind] = { id, cancelLabel: t("common.cancel"), ...request };
+    renderDialogs();
+  });
+}
+
+// askConfirm：title 是这件事的名字（按钮上也用它，除非另给 action），message 是原来 confirm 里的那句话。
+function askConfirm({ title, message, action, danger = true }) {
+  if (!proSide()) return Promise.resolve(window.confirm(message));
+  return openDialog("confirm", { title, message, confirmLabel: action || title, danger }, false);
+}
+
+function askText({ title, label, value = "", action }) {
+  if (!proSide()) {
+    const text = window.prompt(label, value);
+    return Promise.resolve(text && text.trim() ? text.trim() : null);
+  }
+  return openDialog("prompt", { title, label, value, confirmLabel: action || title }, null);
+}
+
+function releaseDialogs() {
+  for (const kind of ["confirm", "prompt"]) if (dialogs[kind]) settleDialog(kind, dialogs[kind].id, kind === "confirm" ? false : null);
+  if (dialogIsland) { dialogIsland.handle.unmount(); dialogIsland.host.remove(); dialogIsland = null; }
+}
+
+// 搜索面板（Ctrl/⌘ K）是 HeroUI Pro 的 Command（ui/chat/command.tsx）：会话、工作区，再加几个常用的去处。
+// 过滤、上下键与焦点由组件管；这里给条目，选中后关掉面板再执行。chat-ui.js 还没到时用下面原生的面板。
+let commandIsland = null;
+
+function setCommand(open) {
+  if (!commandIsland) {
+    if (!open) return;
+    const host = h("div", { class: "command-island" });
+    document.body.append(host);
+    commandIsland = { host, handle: sideIsland.module.mountCommand(host, commandProps(true)) };
+  } else commandIsland.handle.update(commandProps(open));
+}
+
+const COMMAND_RUN = {
+  session: (id) => { const cut = id.indexOf("/"); openSession(id.slice(0, cut), id.slice(cut + 1)); },
+  workspace: (id) => openDraft(id),
+  go: (id) => (id === "new" ? newSession() : id === "workspace" ? openNewProject() : id === "settings" ? goSettings() : go(id)),
+};
+
+function commandProps(open) {
+  const nameOf = (pid) => (findProject(pid) || {}).name || "";
+  const entry = (id, icon, title) => ({ id, icon, title, text: title });
+  return {
+    open, icons: ICONS,
+    labels: { title: t("nav.search"), placeholder: t("search.placeholder"), none: t("search.none") },
+    groups: !open ? [] : [
+      { id: "session", heading: t("side.sessions"), items: state.sessions.slice(0, 200).map((s) => {
+        const title = s.title || t("session.untitled");
+        return { id: `${s.project_id}/${s.id}`, icon: "chat", title, sub: `${nameOf(s.project_id)} · ${fmtAgo(s.updated_at)}`, text: `${title} ${nameOf(s.project_id)}` };
+      }) },
+      { id: "workspace", heading: t("nav.workspaces"), items: state.projects.map((p) => ({
+        id: p.id, title: p.name, sub: t("search.newIn", { source: sourceLabel(p) }), text: `${p.name} ${sourceLabel(p)}`,
+        mark: markOf(p.git_provider, p.source && p.source.startsWith("sample:") ? "box" : "folder"),
+      })) },
+      { id: "go", heading: t("search.actions"), items: [
+        entry("new", "compose", t("nav.newSession")), entry("workspace", "plus", t("ws.create")),
+        entry("workspaces", "grid", t("nav.workspaces")), entry("activity", "activity", t("nav.activity")),
+        entry("environments", "server", t("nav.environments")), entry("settings", "box", t("settings.title")),
+      ] },
+    ],
+    onOpenChange: (next) => { if (!next) setCommand(false); },
+    onPick: (group, id) => { setCommand(false); COMMAND_RUN[group]?.(id); },
+  };
+}
+
 function openSearch() {
   closePop();
+  if (proSide()) return setCommand(true);
   if (document.querySelector("dialog.palette")) return;
   const input = h("input", { class: "pal-input", placeholder: t("search.placeholder"), "aria-label": t("nav.search") });
   const list = h("div", { class: "pal-list" });
@@ -5428,7 +5532,7 @@ function openNewProject(initial) {
 
 async function deleteProject(p) {
   const n = state.sessions.filter((s) => s.project_id === p.id).length;
-  if (!confirm(t(n ? "ws.deleteConfirmSessions" : "ws.deleteConfirm", { name: p.name, n }))) return;
+  if (!(await askConfirm({ title: t("ws.delete"), message: t(n ? "ws.deleteConfirmSessions" : "ws.deleteConfirm", { name: p.name, n }) }))) return;
   try {
     await api("DELETE", `/api/projects/${p.id}`);
     state.projects = state.projects.filter((x) => x.id !== p.id);

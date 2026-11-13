@@ -557,6 +557,7 @@ const ZH = {
   "search.placeholder": "搜索会话与工作区…",
   "search.newIn": "新会话 · {source}",
   "search.none": "没有找到",
+  "search.actions": "前往",
 
   "welcome.title": "从一个工作区开始",
   "welcome.sample": "试试示例仓库",
@@ -1644,6 +1645,7 @@ const EN = {
   "search.placeholder": "Search sessions and workspaces…",
   "search.newIn": "New session · {source}",
   "search.none": "No results",
+  "search.actions": "Go to",
 
   "welcome.title": "Start with a workspace",
   "welcome.sample": "Try a sample repository",
