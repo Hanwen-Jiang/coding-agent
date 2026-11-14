@@ -315,9 +315,23 @@ func TestRunsPerRepositoryPerHourAreLimited(t *testing.T) {
 		f.comment(int64(3001+i), "octo-cat", 42, "@coding-agent-link task")
 	}
 	f.comment(3004, "octo-cat", 42, "@coding-agent-link one more")
+	// 准入在登记时按评论到达的顺序判定，拒的总是第四条。四条记录的 NextAt 都取自冻结的假时钟，同一轮里推进与回复的
+	// 先后不固定，所以不看最后一条回复，而是看第四条的记录与回复的条数。
+	if g, _, err := f.srv.findTrigger(3004); err != nil || g.State != "refused" || g.Reason != "hourly_run_limit" {
+		t.Fatalf("第四条超了次数：%+v %v", g, err)
+	}
 	f.advance()
-	if !strings.Contains(f.lastReply(), "per hour") {
-		t.Fatalf("超了次数：%q", f.lastReply())
+	limited, started := 0, 0
+	for _, r := range f.replies() {
+		switch {
+		case strings.Contains(r.Body, "per hour"):
+			limited++
+		case strings.Contains(r.Body, "Started a Coding Agent task"):
+			started++
+		}
+	}
+	if limited != 1 || started != 3 {
+		t.Fatalf("超了次数说明一次，前三次各回复一次：%+v", f.replies())
 	}
 	f.advance()
 	if n := len(f.submitted()); n != 3 {
