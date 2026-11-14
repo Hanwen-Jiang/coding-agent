@@ -94,9 +94,35 @@ Items keep the attributes other code and tests rely on (`data-topbar-menu` on th
 
 A menu opened with the pointer focuses its container, and the application's generic `:focus-visible` outline would frame the whole list; `sidebar.css` turns that off for these menus, since the items draw their own focus state.
 
+## Status panel
+
+The right-hand status panel's sections (environment, context, output, changes, background) are one `Accordion` from `@heroui/react` (`ui/chat/status-panel.tsx`), on a single surface below the subagents and sources panel. `STATUS_SECTIONS` in `app.js` lists each section's icon, title, summary and body. Summaries are data (`{text, tone, busy, added, deleted}`), so the same functions feed the component and the native fallback (`summaryNodes()`).
+
+- Section bodies are still drawn by the controller, as in Settings: the component hands one host element per section to `onPanel`, and `fillStatus()` redraws the expanded sections on every event. A collapsed section keeps its last content, so the closing animation never shows an empty panel. Expanded sections are stored in `cw_sections` as before.
+- The hosts keep the old class names (`.sp`, `.sp-body`), so existing probes and controller code that look for them still work.
+- Before `chat-ui.js` has loaded, `nativeStatus()` draws the previous collapsible sections.
+
+## Changes, files and history drawer
+
+The drawer is the `Drawer` from `@heroui/react` placed on the right (`ui/chat/workspace-drawer.tsx`), with `Tabs` (secondary) for Changes, Files and History. `openDrawer()`, `renderDrawer()` and `closeDrawer()` keep their signatures. The selected view is drawn by `drawChanges()`, `loadFiles()` or `loadHistory()` into the host the component passes to `onPanel`. A new view gets a new host; redrawing the same view (after a commit, push or sync) draws into the existing host.
+
+- Closing by button, Escape or backdrop only reports `onClose`; the controller clears its state. The application's global Escape handler ignores events a component has already handled (`defaultPrevented`), so Escape that closes the drawer, a menu or a dialog never also cancels the running task.
+- The upstream CSS ships the drawer's slide without animation, so `ui/chat/status.css` animates it (`ws-drawer-in`/`ws-drawer-out`, off under reduced motion). React Aria waits for these animations before unmounting.
+- Before `chat-ui.js` has loaded, the native drawer (`.drawer`, `.dtab`) is used.
+
+## Icons
+
+Application icons come from Gravity UI (`@gravity-ui/icons` 2.23.0, MIT), the set HeroUI uses inside its own components, so the icons we draw match the components' chevrons and indicators. `ui/icons.mjs` maps the application's icon names to Gravity icons and writes `internal/web/static/icons.js`, which is checked in with the licence. Regenerate it after changing the mapping:
+
+```sh
+node ui/icons.mjs /path/to/node_modules
+```
+
+Each icon is one path on a 16×16 grid, filled with `currentColor` (`.icon.gi`; 16px, 14px for `xs`). `icon()` in `app.js` and `Icon` in `ui/chat/icon.tsx` draw from the same table; React components that take an `icons` prop receive it too. The GitHub mark and provider brand marks stay separate. The logo keeps its own stroked drawing.
+
 ## Testing against the components
 
-Browser tests drive the components with `element.click()`, which React Aria handles as a virtual press. Before `chat-ui.js` has loaded the native fallbacks are on screen, and while an island mounts there can be a frame with neither, so probes wait for whichever is present: `.side-pro-profile` or the native `.profile` for the account menu, `.topbar-menu [role="menuitem"]` or `.pop-item` for the header menu, and the AlertDialog (`[data-pro-component="AlertDialog"]`, buttons `[data-dialog-confirm]` and `[data-dialog-cancel]`) or a stubbed `window.confirm` for confirmations.
+Browser tests drive the components with `element.click()`, which React Aria handles as a virtual press. Before `chat-ui.js` has loaded the native fallbacks are on screen, and while an island mounts there can be a frame with neither, so probes wait for whichever is present: `.side-pro-profile` or the native `.profile` for the account menu, `.topbar-menu [role="menuitem"]` or `.pop-item` for the header menu, and the AlertDialog (`[data-pro-component="AlertDialog"]`, buttons `[data-dialog-confirm]` and `[data-dialog-cancel]`) or a stubbed `window.confirm` for confirmations. In the drawer, the selected tab is `.dtab[aria-selected="true"]` (native: `.dtab.active`) and the close button is `[data-drawer-close]` (HeroUI's `Button` drops `title`). Wait for `[data-pro-component="Drawer"]` to disappear after closing before driving other menus.
 
 ## Main conversation surface
 

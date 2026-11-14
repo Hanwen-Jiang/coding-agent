@@ -43,6 +43,10 @@ Use actual `@heroui-pro/react` components, not names copied onto native controls
 - `Card`, `Chip`, `ItemCard`, `EmptyState`: the Workspaces, Active and Environments pages.
 - `Tabs` (secondary, underline): the Settings sections. Settings forms are grouped with the title and note on the left and controls on the right, and end in an action bar that stays in view.
 - `Dropdown`: the session header's "More actions" menu, matching the sidebar's session menu.
+- `Accordion`: the status panel's sections, on one surface with thin separators. Each heading has an icon tile, which is tinted with the accent while the section is open, and a muted summary on the right.
+- `Drawer` (right) with `Tabs` (secondary): changes, files and history.
+
+Icons are Gravity UI (the set HeroUI's components use), filled on a 16px grid, generated into `internal/web/static/icons.js` by `ui/icons.mjs`. Do not hand-draw new stroked icons. Add a mapping instead.
 
 `ui/chat/conversation.tsx` owns the complete activity stream and expansion state under one React root per task. The application controller supplies serializable data. It must not replace individual React tool rows on SSE updates. The composer uses a subscription model and retains the same textarea while the task phase changes. Approval/status controls currently bridge into the React composer; application routing and settings remain in the existing controller. `ui/chat/sidebar.tsx` owns the sidebar's presentation under one React root per signed-in session; the controller supplies its data and performs every action.
 

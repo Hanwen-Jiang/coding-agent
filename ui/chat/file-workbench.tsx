@@ -4,13 +4,15 @@ import {CodeBlock} from '@heroui-pro/react/code-block';
 import {PreviewPanel,StructurePanel,EvidenceList,anchorSelector} from './file-preview';
 import {QueryPanel,EditPanel,ChangeReviewPanel} from './file-actions';
 import {anchorLabel,byteLabel,fileKind,normalizeJob,operationLabel,sourceID,selectionLabel,statusLabel,succeededJob,terminalJob,timeLabel,unpackResult,versionID as vid,type FileApi,type FileChange,type FileDetails,type FileEvidence,type FileJob,type FilePanelProps,type FileResult,type FileSource,type FileVersion,type RunRequest,type SourceAnchor} from './file-types';
+import {Icon} from './icon';
 import './file-workbench.css';
 
 export interface FileWorkbenchProps{base:string;sources:FileSource[];initialSourceID?:string;initialVersionID?:string;onClose:()=>void;onUse:(source:FileSource)=>void;onChanged:()=>void;onUseCollection?:(collection:{id:string;roots?:unknown[]})=>void;language?:string}
 type LibraryView='files'|'collection'|'trash';
 type UploadState={id:string;name:string;status:'uploading'|'failed'|'done';error?:string;file:File};
 const INITIAL_SELECTOR:SourceAnchor={};
-function Glyph({name}:{name:'close'|'file'|'upload'|'search'|'refresh'}){const paths={close:'M6 6l12 12M18 6 6 18',file:'M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h6',upload:'M12 16V3M7 8l5-5 5 5M4 15v5h16v-5',search:'M20 20l-5-5M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0',refresh:'M20 8a8 8 0 1 0 0 8M20 3v5h-5'};return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]}/></svg>}
+const GLYPHS={close:'x',file:'fileText',upload:'upload',search:'search',refresh:'refresh'} as const;
+function Glyph({name}:{name:keyof typeof GLYPHS}){return <Icon name={GLYPHS[name]} size="" className="fw-glyph"/>}
 function PrintJSON({value,label}:{value:unknown;label:string}){return <CodeBlock className="fw-json"><CodeBlock.Header>{label}</CodeBlock.Header><pre tabIndex={0}>{JSON.stringify(value,null,2)}</pre></CodeBlock>}
 const normalDetails=(raw:any):FileDetails=>({...raw,versions:raw.versions||[],grants:raw.grants||[],jobs:(raw.jobs||[]).map(normalizeJob),changesets:raw.changesets||[]});
 const matchesVersion=(job:FileJob,file:string,version:string)=>job.inputs?.some(root=>root.file_id===file&&root.version_id===version)??false;

@@ -1,6 +1,7 @@
 import React, {useEffect, useMemo} from 'react';
 import {Sidebar, useSidebar} from '@heroui-pro/react/sidebar';
 import {Avatar, Description, Dropdown, Header, Kbd, Label, Separator} from '@heroui/react';
+import {Icon} from './icon';
 
 // The application controller (app.js) owns state, routing and transport. It passes serializable
 // data plus callbacks; this component owns only presentation, keyboard behaviour and overlays.
@@ -29,9 +30,7 @@ export interface SidebarProps {
 }
 export interface SidebarHandle {update(props: SidebarProps): void; unmount(): void; openMobile(): void}
 
-export function Icon({d, size = 'sm', className = ''}: {d?: string; size?: string; className?: string}) {
- return <svg viewBox="0 0 24 24" className={`icon ${size} ${className}`} aria-hidden="true"><path d={d || ''}/></svg>;
-}
+export {Icon};
 export function Mark({mark, size = 'sm'}: {mark?: SideMark | null; size?: string}) {
  if (!mark) return null;
  if (mark.text) return <span className={`pv-badge ${size} side-mark-text`} title={mark.title}>{mark.text}</span>;

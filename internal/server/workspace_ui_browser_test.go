@@ -191,7 +191,9 @@ try {
   const viewDiff = await wait(() => $('[data-action="file-diff"]'), 'view diff button');
   check(viewDiff.innerText.includes(t('files.viewDiff')), 'view diff label');
   viewDiff.click();
-  await wait(() => $('.dtab.active') && $('.dtab.active').innerText.includes(t('sp.changes')) && $('.diff-file[data-path="notes.txt"]'), 'back on the diff');
+  // The drawer is the HeroUI Drawer once chat-ui.js has loaded (selected tab: aria-selected), the native one before that.
+  const activeTab = () => $('.dtab.active, .dtab[aria-selected="true"]');
+  await wait(() => activeTab() && activeTab().innerText.includes(t('sp.changes')) && $('.diff-file[data-path="notes.txt"]'), 'back on the diff');
 
   // 提交之后，提交记录里是“本会话”的提交，下面是“会话起点”。
   const committed = await fetch('/api/projects/' + C.pid + '/sessions/' + C.sid + '/commit', { method: 'POST', headers: { 'X-Coding-Web': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ message: 'notes' }) });
@@ -204,7 +206,8 @@ try {
   check(!$('[data-action="history-more"]'), 'no more button for a short history');
 
   // Runtime 说读不到：blocked_external，不沿用刚才的记录。
-  document.querySelector('.drawer-head button[title="' + t('drawer.close') + '"]').click();
+  document.querySelector('[data-drawer-close], .drawer-head button[title="' + t('drawer.close') + '"]').click();
+  await wait(() => !$('[data-pro-component="Drawer"]') && !$('.drawer'), 'drawer closed');
   await fetch('/__env_blocked');
   [...$$('.sp-actions button')].find((b) => b.title === t('common.reload')).click();
   const blocked = await wait(() => $('[data-env-status="blocked_external"]'), 'blocked_external');

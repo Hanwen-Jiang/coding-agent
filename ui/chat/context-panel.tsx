@@ -1,6 +1,7 @@
 import React, {useState} from 'react';
 import {Button, Disclosure} from '@heroui/react';
 import {ChatAttachment} from '@heroui-pro/react/chat-attachment';
+import {Icon} from './icon';
 
 export type ContextAgent = {id:string;name:string;state:string;detail?:string};
 export type ContextSource = {id:string;name:string;size_bytes?:number;mime_type?:string;url?:string;preview_url?:string};
@@ -24,10 +25,10 @@ export interface ContextPanelProps {
 }
 
 function PlusIcon() {
- return <svg viewBox="0 0 20 20" width="16" height="16" fill="none" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>;
+ return <Icon name="plus" size=""/>;
 }
 function AgentIcon() {
- return <svg viewBox="0 0 20 20" width="17" height="17" fill="none" aria-hidden="true"><circle cx="10" cy="5" r="2" stroke="currentColor" strokeWidth="1.3"/><circle cx="5" cy="14" r="2" stroke="currentColor" strokeWidth="1.3"/><circle cx="15" cy="14" r="2" stroke="currentColor" strokeWidth="1.3"/><path d="M10 7v3M5 12v-2h10v2" stroke="currentColor" strokeWidth="1.3"/></svg>;
+ return <Icon name="agents" size=""/>;
 }
 
 function agentState(state:string):'running'|'completed'|'failed'|'cancelled'|'unknown' {

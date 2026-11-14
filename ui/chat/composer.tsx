@@ -2,6 +2,7 @@ import React, {useLayoutEffect, useRef, useState, useSyncExternalStore} from 're
 import {PromptInput} from '@heroui-pro/react/prompt-input';
 import {Button} from '@heroui/react';
 import {ChatAttachment} from '@heroui-pro/react/chat-attachment';
+import {Icon} from './icon';
 
 type Upload = {id:string;name:string;size_bytes:number;mime_type:string;preview_url?:string;status:string;error?:string;version_label?:string};
 interface ComposerSnapshot {
@@ -106,14 +107,14 @@ function ComposerView(props: ComposerProps) {
     <ControlSlot node={props.slots.options}/>
     <PromptInput.Toolbar className="composer-toolbar">
      <PromptInput.ToolbarStart className="composer-toolbar-controls"><PromptInput.Action className="composer-attach" variant="ghost" isIconOnly isDisabled={!state.canAttach} tooltip={state.canAttach?state.uploadLabels?.add:state.uploadLabels?.unavailable} aria-label={state.uploadLabels?.add} onPress={()=>fileInput.current?.click()}>
-      <svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+      <Icon name="plus" size=""/>
      </PromptInput.Action><ControlSlot node={props.slots.tools} className="composer-tools-slot"/></PromptInput.ToolbarStart>
      <PromptInput.ToolbarEnd><div ref={right} className="c-right">
       {state.mode!=='waiting'?<div className="send-group">
        {state.mode==='running'?<PromptInput.Action ref={menu} className="btn ghost xs send-menu-toggle"
         variant="ghost" aria-label={state.menuLabel} title={state.menuLabel}
         onPress={()=>{if(menu.current)props.onMenu(menu.current);}}>
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        <Icon name="chevDown" size="xs"/>
        </PromptInput.Action>:null}
        <PromptInput.Send ref={send} className="send" aria-label={state.sendLabel}
         title={state.shortcuts||state.sendLabel} isDisabled={state.disabled} onPress={props.onSend}/>

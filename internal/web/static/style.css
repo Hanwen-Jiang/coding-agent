@@ -173,6 +173,10 @@ code, pre, .mono { font-family: var(--font-mono); }
 .icon.xs { width: 13px; height: 13px; }
 .icon.lg { width: 26px; height: 26px; }
 .icon.bold { stroke-width: 2.3; }
+/* 界面图标（icons.js，Gravity UI，与 HeroUI 组件里的图标同一套）：16 格的填充路径，16px 时像素对齐。 */
+.icon.gi { width: 16px; height: 16px; fill: currentColor; fill-rule: evenodd; clip-rule: evenodd; stroke: none; }
+.icon.gi.xs { width: 14px; height: 14px; }
+.icon.gi.lg, .icon.gi.md { width: 28px; height: 28px; }
 .chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
 
 .grow { flex: 1 1 auto; min-width: 0; }

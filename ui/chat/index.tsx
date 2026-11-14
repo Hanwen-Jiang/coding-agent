@@ -116,6 +116,10 @@ export {mountTopbarMenu} from './topbar-menu';
 
 import {SettingsTabs,type SettingsProps} from './settings';
 export const mountSettings=(container:HTMLElement,props:SettingsProps)=>mountComponent(container,SettingsTabs,props);
+import {StatusPanel,type StatusPanelProps} from './status-panel';
+export const mountStatusPanel=(container:HTMLElement,props:StatusPanelProps)=>mountComponent(container,StatusPanel,props);
+import {WorkspaceDrawer,type WorkspaceDrawerProps} from './workspace-drawer';
+export const mountWorkspaceDrawer=(container:HTMLElement,props:WorkspaceDrawerProps)=>mountComponent(container,WorkspaceDrawer,props);
 
 import {FileWorkbench,type FileWorkbenchProps} from './file-workbench';
 export const mountFileWorkbench=(container:HTMLElement,props:FileWorkbenchProps)=>mountComponent(container,FileWorkbench,props);

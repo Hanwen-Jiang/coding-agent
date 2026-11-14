@@ -141,7 +141,9 @@ try {
  commit=await wait(()=>{const b=$('[data-git-commit]');return b&&!b.disabled&&b;},'writable commit');
  commit.click();
  await wait(()=>document.body.innerText.includes(t('commit.done',{hash:'abc'})),'scoped commit');
- document.querySelector('.drawer-head button[title="'+t('drawer.close')+'"]').click();
+ // The HeroUI drawer (data-drawer-close) or, before chat-ui.js loads, the native one; wait for its closing animation.
+ document.querySelector('[data-drawer-close], .drawer-head button[title="'+t('drawer.close')+'"]').click();
+ await wait(()=>!$('[data-pro-component="Drawer"]')&&!$('.drawer'),'drawer closed');
  $('[data-topbar-menu]').click();(await wait(()=>$('[data-repo-manage]'),'manage repositories')).click();await wait(()=>$('dialog [data-repo-name="docs"]'),'repo manager');
  let confirmations=0;window.confirm=()=>{confirmations++;return true;};
  $('dialog [data-repo-name="docs"] button').click();

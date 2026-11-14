@@ -1,0 +1,73 @@
+/* Session status panel (ui/chat/status-panel.tsx): one HeroUI Accordion on one surface, matching the subagents and
+   sources panel above it. Section bodies are drawn by the controller into .sp-body. */
+.status-island { display: block; flex: none; }
+.status-accordion { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 4px; contain: none; }
+.status-accordion .sp { border: 0; border-radius: 0; background: transparent; flex: none; }
+.status-accordion .sp + .sp { border-top: 1px solid var(--line); }
+.status-accordion .sp-head { gap: 10px; min-height: 46px; padding: 8px 10px; border: 0; border-radius: 12px; background: transparent; color: var(--text); font: inherit; text-align: left; }
+.status-accordion .sp-head:hover:not([aria-expanded=true]) { background: var(--surface-2); }
+.status-accordion .sp-head:focus-visible:not([data-focus-visible=true]) { outline: none; }
+.status-accordion .sp-icon { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 8px; background: var(--surface-2); color: var(--muted); transition: color var(--motion-fast, .12s), background-color var(--motion-fast, .12s); }
+.status-accordion .sp-head[aria-expanded=true] .sp-icon { background: var(--accent-soft); color: var(--accent); }
+.status-accordion .sp-head .t { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.status-accordion .sum { margin-left: auto; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; font-size: 12px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+.status-accordion .sum-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-accordion .sp-indicator { margin-inline-start: 0; width: 14px; height: 14px; color: var(--faint); transition: rotate .22s cubic-bezier(.2,.7,.2,1); }
+.status-accordion .sp-head[aria-expanded=true] .sp-indicator { rotate: -180deg; }
+.status-accordion .sp-panel { transition: height .22s cubic-bezier(.2,.7,.2,1), opacity .18s cubic-bezier(.2,.7,.2,1); }
+.status-accordion .accordion__body-inner { padding: 2px 10px 14px; color: var(--text); }
+.status-accordion .sp-body { display: block; padding: 0; font-size: 13px; }
+.status-accordion .sp-body > :first-child { margin-top: 0; }
+.status-accordion .kv { gap: 8px 14px; }
+.status-accordion .sp-sub { margin-top: 14px; }
+.status-accordion .sp-actions { margin-top: 12px; }
+
+/* Changes, files and history (ui/chat/workspace-drawer.tsx): a HeroUI Drawer from the right. */
+.drawer-island { display: contents; }
+.ws-drawer-backdrop.drawer__backdrop { background: rgba(20, 19, 18, .3); }
+.ws-drawer .ws-drawer-dialog { width: min(980px, 94vw); max-width: none; padding: 0; gap: 0; background: var(--bg); color: var(--text); border-left: 1px solid var(--line); box-shadow: var(--shadow-lg); }
+.ws-drawer .drawer-head { flex-direction: row; align-items: flex-start; gap: 12px; height: auto; padding: 18px 16px 6px 24px; border: 0; }
+.ws-drawer-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.ws-drawer-title .h { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.35; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-drawer-subtitle { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-drawer-close { flex: none; color: var(--muted); }
+.ws-drawer-tabs { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 0; }
+.ws-drawer-tab-bar { flex: none; padding: 0 24px; border-bottom: 1px solid var(--line); }
+.ws-drawer-tab-bar .tabs__list { gap: 4px; }
+.ws-drawer .dtab { width: auto; min-width: 0; height: 40px; padding-inline: 10px; gap: 7px; border-radius: 0; background: transparent; box-shadow: none; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.ws-drawer .dtab:hover { background: transparent; color: var(--text); }
+.ws-drawer .dtab[data-selected=true] { color: var(--text); }
+.ws-drawer .dtab:focus-visible:not([data-focus-visible=true]) { outline: none; }
+.ws-drawer .dtab .n { min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.ws-drawer .drawer-body { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 20px 24px 32px; display: block; }
+.ws-drawer .drawer-body:focus-visible { outline: none; }
+.drawer-view { display: flex; flex-direction: column; gap: 14px; }
+.ws-drawer .card { border-radius: 14px; padding: 16px; }
+.ws-drawer .card-title { font-size: 13.5px; }
+.ws-drawer .diff-file { border-radius: 12px; }
+.ws-drawer .diff-head { padding: 9px 14px; gap: 9px; }
+.ws-drawer .diff-head:hover { background: var(--sunken); }
+.ws-drawer .crumbs { margin-bottom: 10px; }
+.ws-drawer .tree-item { min-height: 34px; border-radius: 8px; }
+.ws-drawer .commit-row { padding: 10px 2px; }
+.ws-drawer .code-view { border-radius: 12px; }
+
+@keyframes ws-drawer-in { from { translate: min(980px, 94vw) 0; } to { translate: 0 0; } }
+@keyframes ws-drawer-out { from { translate: 0 0; } to { translate: min(980px, 94vw) 0; } }
+@keyframes ws-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ws-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+.ws-drawer[data-entering=true] { animation: ws-drawer-in .24s cubic-bezier(.2,.7,.2,1); }
+.ws-drawer[data-exiting=true] { animation: ws-drawer-out .18s cubic-bezier(.4,0,1,1) forwards; }
+.ws-drawer-backdrop[data-entering=true] { animation: ws-backdrop-in .18s ease-out; }
+.ws-drawer-backdrop[data-exiting=true] { animation: ws-backdrop-out .18s ease-in forwards; }
+
+@media (prefers-reduced-motion: reduce) {
+ .status-accordion .sp-panel, .status-accordion .sp-icon, .status-accordion .sp-indicator { transition: none; }
+ .ws-drawer[data-entering=true], .ws-drawer[data-exiting=true], .ws-drawer-backdrop[data-entering=true], .ws-drawer-backdrop[data-exiting=true] { animation: none; }
+}
+@media (max-width: 700px) {
+ .ws-drawer .ws-drawer-dialog { width: 100vw; border-left: 0; }
+ .ws-drawer .drawer-head { padding: 14px 10px 4px 16px; }
+ .ws-drawer-tab-bar { padding: 0 12px; }
+ .ws-drawer .drawer-body { padding: 16px 16px 28px; }
+}

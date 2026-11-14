@@ -7,6 +7,7 @@
 import { abortMarkdown, doneWhenText, errorText, exitWhenText, goalText, networkPermission, questionText, reasonText, retryDetail, retryTitle } from "./codes.js";
 import { LANGS, lang, locale, setLang, t } from "./i18n.js";
 import { installScrollbars } from "./scrollbars.js";
+import { ICONS, iconPath } from "./icons.js";
 import { conversationFlow, toolGroupCounts } from "./conversation-flow.js";
 import { createEntryUI } from "./entry-ui.js";
 
@@ -181,72 +182,20 @@ function append(el, children) {
   return el;
 }
 
-const ICONS = {
-  plus: "M12 5v14M5 12h14",
-  settings: "M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M10 15v6",
-  send: "M12 19V5M5 12l7-7 7 7",
-  folder: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
-  branch: "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9",
-  check: "M20 6 9 17l-5-5",
-  x: "M18 6 6 18M6 6l12 12",
-  alert: "M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
-  chevron: "M9 18l6-6-6-6",
-  chevDown: "M6 9l6 6 6-6",
-  panelRight: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM15 3v18",
-  panelLeft: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM9 3v18",
-  file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6",
-  fileText: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5",
-  trash: "M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6",
-  download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
-  commit: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 12h6M15 12h6",
-  external: "M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
-  sparkles: "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z",
-  layers: "M12 2 2 7l10 5 10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
-  play: "M6 4l13 8-13 8z",
-  shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
-  terminal: "M4 17l6-6-6-6M12 19h8",
-  refresh: "M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5",
-  logout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
-  user: "M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10z",
-  link: "M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7",
-  menu: "M3 6h18M3 12h18M3 18h18",
-  stop: "M7 7h10v10H7z",
-  clock: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2",
-  code: "M16 18l6-6-6-6M8 6l-6 6 6 6",
-  box: "M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8",
-  copy: "M9 9h11v11H9zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1",
-  history: "M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2",
-  diff: "M12 3v14M5 10h14M5 21h14",
-  eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
-  edit: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
-  globe: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20",
-  gauge: "M12 14l4-4M3.3 17a9 9 0 1 1 17.4 0",
-  leaf: "M11 20A7 7 0 0 1 4 13c0-6 7-9 16-9 0 9-3 16-9 16zM4 20l8-8",
-  zap: "M13 2 3 14h9l-1 8 10-12h-9z",
-  server: "M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01",
-  activity: "M22 12h-4l-3 9L9 3l-3 9H2",
-  sun: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4",
-  moon: "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z",
-  monitor: "M3 4h18v12H3zM8 20h8M12 16v4",
-  more: "M5 12h.01M12 12h.01M19 12h.01",
-  queue: "M3 6h13M3 12h13M3 18h8M18 15v6M15 18h6",
-  list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
-  search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3",
-  compose: "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z",
-  grid: "M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z",
-  chat: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
-};
+// 界面图标在 icons.js（由 ui/icons.mjs 从 Gravity UI 生成）。
 const GITHUB_PATH = "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z";
 
 function icon(name, cls = "") {
   const ns = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(ns, "svg");
   const github = name === "github";
-  svg.setAttribute("viewBox", github ? "0 0 16 16" : "0 0 24 24");
-  svg.setAttribute("class", `icon ${github ? "filled" : ""} ${cls}`);
+  const glyph = iconPath(ICONS[name] || ICONS.box);
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("class", `icon ${github ? "filled" : "gi"} ${cls}`);
   svg.setAttribute("aria-hidden", "true");
   const path = document.createElementNS(ns, "path");
-  path.setAttribute("d", github ? GITHUB_PATH : ICONS[name] || ICONS.box);
+  path.setAttribute("d", github ? GITHUB_PATH : glyph.d);
+  if (!github) path.setAttribute("fill-rule", glyph.rule);
   svg.append(path);
   return svg;
 }
@@ -1903,7 +1852,7 @@ function renderSide() {
 
 // markOf 把工作区或平台的标志变成可以交给 React 的数据（与 projectMark、badge 画出来的一样）。
 function markOf(provider, fallbackIcon) {
-  if (!provider) return { paths: [[null, ICONS[fallbackIcon] || ICONS.box]] };
+  if (!provider) return { viewBox: "0 0 16 16", paths: [[null, iconPath(ICONS[fallbackIcon] || ICONS.box).d]], cls: "gi" };
   if (provider === "github") return { viewBox: "0 0 16 16", paths: [[null, GITHUB_PATH]], cls: "filled" };
   const info = providerInfo(provider);
   const key = provider === "gitea" && /codeberg/i.test(info.name) ? "codeberg" : provider === "gitea" && /forgejo/i.test(info.name) ? "forgejo" : provider;
@@ -4741,17 +4690,63 @@ function setComposer(text) {
 
 // ---------------------------------------------------------------- 右栏
 
+// 右栏各节是 HeroUI 的 Accordion（ui/chat/status-panel.tsx）：标题与摘要交给组件，节的内容仍由这里画，
+// 组件给每节一个宿主元素（onPanel），每来一个事件重画展开着的节。chat-ui.js 还没到时用原生的节。
+const STATUS_SECTIONS = [
+  ["env", "server", "sp.env", envSummary, envBody],
+  ["context", "layers", "sp.context", contextSummary, contextBody],
+  ["output", "fileText", "sp.output", outputSummary, outputBody],
+  ["changes", "diff", "sp.changes", changesSummary, changesBody],
+  ["background", "activity", "sp.background", backgroundSummary, backgroundBody],
+];
+const statusHosts = new Map();
+
 function renderStatus() {
   if (!ui.statusBody || !inSession() || !state.statusOpen) return;
+  const sections = STATUS_SECTIONS.map(([id, ic, key, summary]) => ({ id, icon: ic, title: t(key), summary: summary() }));
+  const ready = presentationIslands.get("status")?.handle || (sideIsland && sideIsland.module);
   // 右栏随事件整块重画：保住滚动位置，不再每来一个事件就跳回顶上。
-  keepScroll(ui.statusBody, () => ui.statusBody.replaceChildren(
-    sessionContextPanel(),
-    section("env", "server", t("sp.env"), envSummary(), envBody),
-    section("context", "layers", t("sp.context"), contextSummary(), contextBody),
-    section("output", "fileText", t("sp.output"), outputSummary(), outputBody),
-    section("changes", "diff", t("sp.changes"), changesSummary(), changesBody),
-    section("background", "activity", t("sp.background"), backgroundSummary(), backgroundBody),
-  ));
+  keepScroll(ui.statusBody, () => {
+    const island = proPresentation("status", "status-island", "mountStatusPanel", statusProps(sections), ready ? null : nativeStatus(sections));
+    ui.statusBody.replaceChildren(sessionContextPanel(), island);
+    if (presentationIslands.get("status")?.handle) fillStatus();
+  });
+}
+
+function statusProps(sections) {
+  return {
+    label: t("status.panel"), sections, expanded: sections.map((s) => s.id).filter((id) => state.sections.has(id)),
+    onExpandedChange: (ids) => { state.sections = new Set(ids); ls.set("cw_sections", ids.join(",")); renderStatus(); },
+    onPanel: (element, id) => { statusHosts.set(id, element); if (state.sections.has(id)) fillSection(element, id); },
+  };
+}
+
+// 展开着的节重画内容；收起的保留原样（面板收起的动画里不闪空）。
+function fillStatus() {
+  for (const [id] of STATUS_SECTIONS) {
+    const host = statusHosts.get(id);
+    if (host && host.isConnected && state.sections.has(id)) fillSection(host, id);
+  }
+}
+
+function fillSection(host, id) {
+  const entry = STATUS_SECTIONS.find(([key]) => key === id);
+  if (entry) host.replaceChildren(...h("div", {}, entry[4]()).childNodes);
+}
+
+function nativeStatus(sections) {
+  return h("div", { class: "status-native" }, sections.map((s) => section(s.id, s.icon, s.title, summaryNodes(s.summary), STATUS_SECTIONS.find(([id]) => id === s.id)[4])));
+}
+
+// 节的摘要是可以交给 React 的数据：文字、状态点、转圈、增删行数。
+function summaryNodes(s) {
+  return [
+    s.busy ? h("span", { class: "spinner" }) : null,
+    s.tone ? h("span", { class: "dot " + s.tone }) : null,
+    s.added != null ? h("span", { class: "stat-add" }, `+${s.added}`) : null,
+    s.deleted != null ? h("span", { class: "stat-del" }, `−${s.deleted}`) : null,
+    s.text || null,
+  ];
 }
 
 function sessionContextPanel() {
@@ -4791,8 +4786,8 @@ function kv(rows) {
 
 function envSummary() {
   const e = state.env;
-  if (!e) return h("span", { class: "spinner" });
-  return e.runtime && e.runtime.ok ? [h("span", { class: "dot ok" }), t("env.connected")] : [h("span", { class: "dot err" }), t("env.down")];
+  if (!e) return { busy: true };
+  return e.runtime && e.runtime.ok ? { tone: "ok", text: t("env.connected") } : { tone: "err", text: t("env.down") };
 }
 
 function envBody() {
@@ -4914,12 +4909,12 @@ function runtimeEnvBlock(re) {
 
 function contextSummary() {
   const task = focusTask();
-  if (!task) return "—";
+  if (!task) return { text: "—" };
   const d = state.detail.get(task.id);
   const rounds = d && d.state && Array.isArray(d.state.rounds) ? d.state.rounds.length : task.rounds || 0;
   const cost = taskCost(task);
   const usage = latestUsage(task);
-  return [usage ? ctxPercent(num(usage.total_tokens), ctxUsable(usage)) : null, rounds ? t("rounds", { n: rounds }) : null, cost ? fmtUSD(cost) : null].filter(Boolean).join(" · ") || "—";
+  return { text: [usage ? ctxPercent(num(usage.total_tokens), ctxUsable(usage)) : null, rounds ? t("rounds", { n: rounds }) : null, cost ? fmtUSD(cost) : null].filter(Boolean).join(" · ") || "—" };
 }
 
 // 上下文占比（Runtime 的 docs/plan/running-task-interaction.md 第 3 节，参考 Claude Code 的 /context）：这次模型调用的上下文里各类内容占多少。
@@ -5077,7 +5072,7 @@ function askDetails() {
 
 function outputSummary() {
   const n = outputRounds().length;
-  return n ? t("rounds", { n }) : "—";
+  return { text: n ? t("rounds", { n }) : "—" };
 }
 
 function outputBody() {
@@ -5101,10 +5096,10 @@ function changeStats() {
 }
 
 function changesSummary() {
-  if (!state.changes) return h("span", { class: "spinner" });
+  if (!state.changes) return { busy: true };
   const { files, added, deleted } = changeStats();
-  if (!files.length) return t("env.clean");
-  return [h("span", { class: "stat-add" }, `+${added}`), h("span", { class: "stat-del" }, `−${deleted}`), t("files.count", { n: files.length })];
+  if (!files.length) return { text: t("env.clean") };
+  return { added, deleted, text: t("files.count", { n: files.length }) };
 }
 
 function changesBody() {
@@ -5131,7 +5126,7 @@ function changesBody() {
 
 function backgroundSummary() {
   const n = state.active.length;
-  return n ? [h("span", { class: "spinner" }), t("bg.count", { n })] : t("bg.idle");
+  return n ? { busy: true, text: t("bg.count", { n }) } : { text: t("bg.idle") };
 }
 
 function backgroundBody() {
@@ -5151,11 +5146,22 @@ async function jumpTo(projectId, sessionId, taskId) {
 
 // ---------------------------------------------------------------- 详情抽屉
 
+// 抽屉是 HeroUI 的 Drawer（ui/chat/workspace-drawer.tsx），三个视图用 Tabs 切换；视图的内容仍由这里画：
+// 组件给每个视图一个宿主元素（onPanel）。chat-ui.js 还没到时用原生的抽屉。
+let drawerIsland = null;
+let drawerView = null;
+
 function openDrawer(tab, opts = {}) {
   if (!sbase()) return;
-  closeDrawer();
   closePop();
+  const island = !!sideIsland?.module?.mountWorkspaceDrawer;
+  if (ui.drawer && !ui.drawer.island) closeDrawer();
   state.drawer = { tab, focus: opts.focus || null };
+  if (island) {
+    ui.drawer = { island: true };
+    renderDrawer();
+    return;
+  }
   const scrim = h("div", { class: "scrim", onclick: closeDrawer });
   const el = h("div", { class: "drawer", role: "dialog", "aria-label": t("drawer.title") });
   ui.drawer = { scrim, el };
@@ -5165,15 +5171,52 @@ function openDrawer(tab, opts = {}) {
 
 function closeDrawer() {
   if (!ui.drawer) return;
-  ui.drawer.scrim.remove();
-  ui.drawer.el.remove();
+  const island = ui.drawer.island;
+  if (!island) { ui.drawer.scrim.remove(); ui.drawer.el.remove(); }
   ui.drawer = null;
   state.drawer = null;
+  if (island && drawerIsland) drawerIsland.handle.update(drawerProps());
+}
+
+function drawerProps() {
+  const d = state.drawer;
+  const n = state.changes ? state.changes.files.length : 0;
+  return {
+    open: !!d, label: t("drawer.title"), title: state.session?.title || t("session.untitled"), subtitle: state.project?.name || "",
+    closeLabel: t("drawer.close"), tab: d ? d.tab : drawerView?.tab || "changes",
+    tabs: [
+      { id: "changes", icon: "diff", label: t("sp.changes"), count: n },
+      { id: "files", icon: "folder", label: t("drawer.files") },
+      { id: "history", icon: "history", label: t("drawer.history") },
+    ],
+    onTab: (id) => { if (!state.drawer) return; state.drawer.tab = id; state.drawer.focus = null; renderDrawer(); },
+    onClose: closeDrawer,
+    onPanel: (element, id) => { drawerView = { element, tab: id }; if (state.drawer && state.drawer.tab === id) drawView(element); },
+  };
+}
+
+function drawView(body) {
+  const d = state.drawer;
+  if (d.tab === "changes") drawChanges(body, d.focus);
+  else if (d.tab === "files") loadFiles(body, state.filesPath);
+  else loadHistory(body);
 }
 
 function renderDrawer() {
   const d = state.drawer;
   if (!d || !ui.drawer) return;
+  if (ui.drawer.island) {
+    const props = drawerProps();
+    if (drawerIsland) drawerIsland.handle.update(props);
+    else {
+      const host = h("div", { class: "drawer-island" });
+      document.body.append(host);
+      drawerIsland = { host, handle: sideIsland.module.mountWorkspaceDrawer(host, props) };
+    }
+    // 同一个视图重画（提交、推送之后）：宿主还在，直接重画；换了视图的由 onPanel 画。
+    if (drawerView && drawerView.tab === d.tab && drawerView.element.isConnected) drawView(drawerView.element);
+    return;
+  }
   const n = state.changes ? state.changes.files.length : 0;
   const tab = (key, ic, label, extra) => h("button", { class: "dtab" + (d.tab === key ? " active" : ""), onclick: () => { d.tab = key; d.focus = null; renderDrawer(); } }, icon(ic, "sm"), label, extra);
   const body = h("div", { class: "drawer-body" });
@@ -5774,6 +5817,8 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "Escape") {
+    // 组件自己处理掉的 Escape（关菜单、关抽屉、关对话框）不再往下算，免得顺手取消了任务。
+    if (e.defaultPrevented) return;
     if (pop) { closePop(); return; }
     if (ui.drawer) { closeDrawer(); return; }
     if (document.querySelector("dialog[open]") || !state.me || !inSession()) return;
