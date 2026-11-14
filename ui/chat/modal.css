@@ -1,0 +1,32 @@
+/* Application dialogs hosted in HeroUI Modals (ui/chat/modal-host.tsx). The <dialog> element is opened non-modally
+   inside .app-modal and keeps its own width rules; the Modal is a transparent frame around it. Some dialogs wrap
+   their parts in a <form>, so the part rules cover both shapes. */
+.modal-host-island { display: contents; }
+.app-modal-backdrop.modal__backdrop { background: rgba(9, 9, 11, .42); }
+.app-modal-container.modal__container { width: 100%; max-width: 100%; padding: 24px 16px; align-items: center; }
+.app-modal.modal__dialog { width: auto; max-width: 100%; padding: 0; gap: 0; background: transparent; box-shadow: none; border-radius: 0; }
+.app-modal-host { display: contents; }
+.app-modal-host > dialog {
+ position: relative; inset: auto; margin: 0; max-width: calc(100vw - 32px); max-height: calc(var(--visual-viewport-height, 100dvh) - 48px);
+ display: flex; flex-direction: column; overflow: hidden;
+ border: 1px solid var(--line); border-radius: 24px; background: var(--overlay, var(--surface)); color: var(--text);
+ box-shadow: var(--overlay-shadow, var(--shadow-lg)); animation: none;
+}
+.app-modal-host > dialog:not([open]) { display: none; }
+.app-modal-host > dialog:focus-visible { outline: none; }
+.app-modal-host > dialog > form { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.app-modal-host > dialog > .d-head, .app-modal-host > dialog > form > .d-head,
+.app-modal-host > dialog > .d-foot, .app-modal-host > dialog > form > .d-foot { flex: none; }
+.app-modal-host > dialog > .d-body, .app-modal-host > dialog > form > .d-body, .app-modal-host > dialog > .discovery-body { flex: 1 1 auto; min-height: 0; }
+.app-modal-host > dialog > .d-head, .app-modal-host > dialog > form > .d-head { padding: 24px 24px 6px; border-bottom: 0; }
+.app-modal-host > dialog > .d-head h2, .app-modal-host > dialog > form > .d-head h2 { font-family: inherit; font-size: 18px; font-weight: 600; line-height: 1.35; letter-spacing: -.01em; }
+.app-modal-host > dialog > .d-head :is(p, .muted), .app-modal-host > dialog > form > .d-head :is(p, .muted) { font-size: 13px; }
+.app-modal-host > dialog > .d-body, .app-modal-host > dialog > form > .d-body { padding: 14px 24px 22px; }
+.app-modal-host > dialog > .d-foot, .app-modal-host > dialog > form > .d-foot { padding: 14px 24px 18px; border-top: 1px solid var(--line); }
+@media (max-width: 700px) {
+ .app-modal-container.modal__container { padding: 12px; }
+ .app-modal-host > dialog { max-width: calc(100vw - 24px); max-height: calc(var(--visual-viewport-height, 100dvh) - 24px); border-radius: 20px; }
+ .app-modal-host > dialog > .d-head, .app-modal-host > dialog > form > .d-head { padding: 20px 20px 4px; }
+ .app-modal-host > dialog > .d-body, .app-modal-host > dialog > form > .d-body { padding: 12px 20px 18px; }
+ .app-modal-host > dialog > .d-foot, .app-modal-host > dialog > form > .d-foot { padding: 12px 20px 16px; }
+}

@@ -1,7 +1,8 @@
 // Entry-point management shares the app's DOM helpers, authentication and design tokens.
 // Secrets live only in the one-time dialog; they never enter browser storage or cached connections.
 // ask(message, danger) confirms an action; the controller supplies its dialog, and the browser's confirm is the default.
-export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, changed, ask = (message) => Promise.resolve(confirm(message))}) {
+// show(dialog) opens a built <dialog>; the controller hosts it in its Modal, and showModal() is the default.
+export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, changed, ask = (message) => Promise.resolve(confirm(message)), show = (d) => { document.body.append(d); d.showModal(); }}) {
   const enc = encodeURIComponent;
   let emailAvailable=true;
   let kinds = [], connections = [], runs = [], lastIndex = 0, indexPending = null, generation = 0;
@@ -20,7 +21,7 @@ export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, 
     const d = h("dialog", {class:"entry-dialog", "aria-label":title},
       h("div", {class:"d-head"}, h("h2", {}, title)), body,
       h("div", {class:"d-foot"}, h("button", {type:"button", class:"btn ghost", onclick:()=>d.close()}, t("common.close")), ...actions));
-    d.addEventListener("close", ()=>d.remove()); document.body.append(d); d.showModal(); return d;
+    d.addEventListener("close", ()=>d.remove()); show(d); return d;
   }
   function reset() { generation++; document.querySelectorAll("dialog.entry-dialog").forEach(d=>{d.textContent="";d.close();d.remove();}); kinds=[]; connections=[]; runs=[]; lastIndex=0; indexPending=null; }
   async function refreshIndex(force = false) {

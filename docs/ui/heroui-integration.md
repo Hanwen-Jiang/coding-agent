@@ -60,7 +60,7 @@ The application also sets `--radius: 16px`, which upstream multiplies for menu r
 
 Search (Ctrl/⌘ K, or the sidebar's Search item) is the Pro `Command` palette (`ui/chat/command.tsx`). `commandProps()` in `app.js` lists sessions, workspaces and a short "Go to" group (new session, new workspace, the three pages, settings); the component filters on each entry's `text`, and `COMMAND_RUN` performs the pick after the palette closes. The previous native palette remains as the fallback while `chat-ui.js` is loading.
 
-Confirmations and single-value prompts go through `askConfirm()` and `askText()` in `app.js`, which return promises and render `AlertDialog` and `Modal` from `@heroui/react` (`ui/chat/dialogs.tsx`). They fall back to the browser's `confirm` and `prompt` before the module has loaded. A confirmation's title names the action and is reused as the confirm button's label (a call without a title gets a generic "Please confirm" and "Confirm"); focus starts on Cancel. Every confirmation in `app.js` goes through `askConfirm()`, and `entry-ui.js` receives it as `ask`. While a native modal `<dialog>` is open (account, repository manager and the other `showModal()` dialogs) it sits in the top layer above any portal under `<body>`, so both helpers use the browser's `confirm` and `prompt` in that case.
+Confirmations and single-value prompts go through `askConfirm()` and `askText()` in `app.js`, which return promises and render `AlertDialog` and `Modal` from `@heroui/react` (`ui/chat/dialogs.tsx`). They fall back to the browser's `confirm` and `prompt` before the module has loaded. A confirmation's title names the action and is reused as the confirm button's label (a call without a title gets a generic "Please confirm" and "Confirm"); focus starts on Cancel. Every confirmation in `app.js` goes through `askConfirm()`, and `entry-ui.js` receives it as `ask`. The application's own dialogs are hosted in HeroUI Modals (see "Application dialogs"), so a confirmation from inside one stacks above it. Only a native modal `<dialog>` (opened before `chat-ui.js` has loaded) sits in the top layer above every portal; while one is open, both helpers use the browser's `confirm` and `prompt`.
 
 A handler that awaits a confirmation must read `event.currentTarget` before the `await`; the browser clears it once the handler yields.
 
@@ -109,6 +109,16 @@ The drawer is the `Drawer` from `@heroui/react` placed on the right (`ui/chat/wo
 - Closing by button, Escape or backdrop only reports `onClose`; the controller clears its state. The application's global Escape handler ignores events a component has already handled (`defaultPrevented`), so Escape that closes the drawer, a menu or a dialog never also cancels the running task.
 - The upstream CSS ships the drawer's slide without animation, so `ui/chat/status.css` animates it (`ws-drawer-in`/`ws-drawer-out`, off under reduced motion). React Aria waits for these animations before unmounting.
 - Before `chat-ui.js` has loaded, the native drawer (`.drawer`, `.dtab`) is used.
+
+## Application dialogs
+
+The application's own dialogs are HeroUI `Modal`s: account, personal configuration, Skills, MCP connections, network secrets, discovery previews, the environment editor, the repository manager, new workspace and the entry-point dialogs. They are still built in `app.js` (and `entry-ui.js`) as `<dialog>` elements with their own handlers. `showDialog(dialog)` replaces `showModal()`: it sets the `open` attribute, so the element is open but not modal and stays in the page's layer, and hands it to the Modal host (`ui/chat/modal-host.tsx`).
+
+- The Modal provides the backdrop, focus containment and restoration, scroll lock and Escape. Several dialogs stack in the order they were opened, and `askConfirm()` and `askText()` stack above them.
+- `dialog.close()` works as before: the `close` event removes the dialog from the host. Escape first dispatches a cancelable `cancel` event on the dialog, as a native modal would, so `preventDefault()` keeps it open (new workspace does this while it is creating). Clicking the backdrop does nothing, as with the native dialogs.
+- As `showModal()` would, the host focuses the element marked `autofocus`, else the first focusable one. The host renders synchronously, so code after `showDialog()` can focus or measure inside the dialog.
+- Selectors and checks on `dialog`, `dialog[open]` and the dialogs' classes keep working. `modal.css` turns the element into the Modal's surface: one surface, sans-serif heading, no rule under the header.
+- Before `chat-ui.js` has loaded, `showDialog()` falls back to `showModal()`. The native search palette (the fallback for `Command`) and the file workspace stay native modal dialogs.
 
 ## Icons
 

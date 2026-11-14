@@ -45,6 +45,7 @@ Use actual `@heroui-pro/react` components, not names copied onto native controls
 - `Dropdown`: the session header's "More actions" menu, matching the sidebar's session menu.
 - `Accordion`: the status panel's sections, on one surface with thin separators. Each heading has an icon tile, which is tinted with the accent while the section is open, and a muted summary on the right.
 - `Drawer` (right) with `Tabs` (secondary): changes, files and history.
+- `Modal`: every application dialog (account, settings dialogs, environment editor, repositories, new workspace, entry points). One 24px-radius surface, sans-serif heading, footer actions on the right, Escape to close. Confirmations stack above it.
 
 Icons are Gravity UI (the set HeroUI's components use), filled on a 16px grid, generated into `internal/web/static/icons.js` by `ui/icons.mjs`. Do not hand-draw new stroked icons. Add a mapping instead.
 

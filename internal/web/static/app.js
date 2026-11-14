@@ -109,7 +109,7 @@ const state = {
 };
 
 const ui = {}; // 常驻的 DOM 节点（重画时只换内容）
-const entryUI = createEntryUI({api,h,t,lang,icon,copy,state,openSession,ask:(message,danger=true)=>askConfirm({message,danger}),changed:()=>{
+const entryUI = createEntryUI({api,h,t,lang,icon,copy,state,openSession,ask:(message,danger=true)=>askConfirm({message,danger}),show:(d)=>showDialog(d),changed:()=>{
   renderTopbar(); if(state.view === "activity") renderActivity();
 }});
 let entryActivityFilter = "all";
@@ -642,8 +642,7 @@ async function openAccount() {
     body.replaceChildren(...[h("div", { class: "conn-list" }, rows), github, secrets, skills, mcp, personal].filter(Boolean));
   };
   dialog.addEventListener("close", () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
+  showDialog(dialog);
   try { draw(await api("GET", "/api/account")); } catch (ex) { report(ex); }
   if (github) drawGitHubApp(github);
 }
@@ -699,7 +698,7 @@ async function viewSkill(name) {
     h("div", { class: "d-head" }, h("h2", {}, name)), content,
     h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))));
   dialog.addEventListener("close", () => dialog.remove());
-  document.body.append(dialog); dialog.showModal();
+  showDialog(dialog);
   try {
     const { skill } = await api("GET", `/api/skills/${encodeURIComponent(name)}`);
     if (!dialog.isConnected) return;
@@ -774,7 +773,7 @@ async function openPersonalConfig(sessionOnly = false, container = null) {
     container ? null : h("div", { class: "d-foot" }, h("button", { class: "btn ghost", onclick: () => dialog.close() }, t("common.close"))));
   dialog.addEventListener("close", () => dialog.remove());
   const finish = () => { if (container) renderSettings(); else dialog.close(); };
-  if (container) container.replaceChildren(dialog); else { document.body.append(dialog); dialog.showModal(); }
+  if (container) container.replaceChildren(dialog); else showDialog(dialog);
   try {
     const [response, skills, mcp, environments] = await Promise.all([
       api("GET", "/api/personal-config"), api("GET", "/api/skills"), api("GET", "/api/mcp"), api("GET", "/api/environments"),
@@ -887,8 +886,7 @@ async function openSecrets() {
     } catch (ex) { report(ex); }
   }
   dialog.addEventListener("close", () => { value.value = ""; dialog.remove(); });
-  document.body.append(dialog);
-  dialog.showModal();
+  showDialog(dialog);
   await reload();
 }
 
@@ -1009,7 +1007,7 @@ function renderDiscovery(root, kind, onChoose) {
     const actions = h("div", { class: "d-foot" }, close);
     const dialog = h("dialog", { class: "discovery-preview" }, h("div", { class: "d-head" }, h("h2", {}, item.name)), content, actions);
     dialog.addEventListener("close", () => dialog.remove());
-    document.body.append(dialog); dialog.showModal();
+    showDialog(dialog);
     try {
       if (isSkill) {
         const params = new URLSearchParams({ repo: item.repository, path: item.path, ref: item.ref || "HEAD" });
@@ -1147,7 +1145,7 @@ async function openSkills(container = null) {
   resetForm();
   dialog.addEventListener("close", () => dialog.remove());
   if (container) container.replaceChildren(dialog);
-  else { document.body.append(dialog); dialog.showModal(); }
+  else showDialog(dialog);
   await reload();
 }
 
@@ -1283,7 +1281,7 @@ async function openMcp(container = null) {
   });
   dialog.addEventListener("close", () => dialog.remove());
   if (container) container.replaceChildren(dialog);
-  else { document.body.append(dialog); dialog.showModal(); }
+  else showDialog(dialog);
   await Promise.all([reload(), loadSecrets()]);
 }
 
@@ -2609,8 +2607,7 @@ function openEnvironmentEditor(env) {
   });
   cancel.addEventListener("click", () => dialog.close());
   dialog.addEventListener("close", () => dialog.remove());
-  document.body.append(dialog);
-  dialog.showModal();
+  showDialog(dialog);
   fields.name.focus();
 }
 
@@ -2684,6 +2681,47 @@ function renderDialogs() {
   dialogIsland = { host, handle: sideIsland.module.mountDialogs(host, props) };
 }
 
+// 应用自己的对话框（账户、新建工作区、仓库、环境配置、入口等）放进 HeroUI 的 Modal（ui/chat/modal-host.tsx）：
+// 对话框照旧由这里建成 <dialog>、照旧挂处理函数，showDialog() 把它以非模态（open 属性）放进 Modal；遮罩、焦点、
+// 滚动锁定、Esc 与和确认框的层叠交给 Modal。dialog.close() 照旧触发 close 事件，Modal 随之收起。
+// Esc 先发 cancel 事件（可以 preventDefault 拦下，和原生的一样）。chat-ui.js 还没到时用原生的 showModal()。
+let modalHostIsland = null;
+let hostedSeq = 0;
+const hostedDialogs = [];
+
+function showDialog(dialog) {
+  const mount = sideIsland?.module?.mountModalHost;
+  if (!mount) { if (!dialog.isConnected) document.body.append(dialog); dialog.showModal(); return; }
+  if (hostedDialogs.some((entry) => entry.content === dialog)) return;
+  const label = dialog.getAttribute("aria-label") || dialog.querySelector("h2, h3")?.textContent || "";
+  const entry = { id: ++hostedSeq, content: dialog, label };
+  hostedDialogs.push(entry);
+  dialog.setAttribute("open", "");
+  dialog.addEventListener("close", () => releaseDialog(entry), { once: true });
+  renderModalHost();
+}
+
+function releaseDialog(entry) {
+  const at = hostedDialogs.indexOf(entry);
+  if (at < 0) return;
+  hostedDialogs.splice(at, 1);
+  renderModalHost();
+}
+
+function renderModalHost() {
+  const props = {
+    dialogs: hostedDialogs.map(({ id, content, label }) => ({ id, content, label })),
+    onDismiss: (id) => {
+      const entry = hostedDialogs.find((x) => x.id === id);
+      if (entry && entry.content.dispatchEvent(new Event("cancel", { cancelable: true }))) entry.content.close();
+    },
+  };
+  if (modalHostIsland) return modalHostIsland.handle.update(props);
+  const host = h("div", { class: "modal-host-island" });
+  document.body.append(host);
+  modalHostIsland = { host, handle: sideIsland.module.mountModalHost(host, props) };
+}
+
 function settleDialog(kind, id, result) {
   const resolve = dialogs.waiting.get(id);
   if (!resolve) return;
@@ -2704,7 +2742,8 @@ function openDialog(kind, request, cancelled) {
 }
 
 // askConfirm：title 是这件事的名字（按钮上也用它，除非另给 action），message 是原来 confirm 里的那句话；没给 title 时用通用的。
-// 原生的模态 <dialog> 开着时它在顶层，body 下的浮层会被它盖住且点不到，这时仍用浏览器自带的 confirm。
+// 原生的模态 <dialog>（chat-ui.js 还没到时才有）开着时它在顶层，body 下的浮层会被它盖住且点不到，这时仍用浏览器自带的 confirm。
+// showDialog() 放进 Modal 的对话框不在顶层，确认框叠在它上面。
 function askConfirm({ title, message, action, danger = true }) {
   if (!proSide() || document.querySelector("dialog:modal")) return Promise.resolve(window.confirm(message));
   return openDialog("confirm", { title: title || t("common.confirmTitle"), message, confirmLabel: action || title || t("common.confirm"), danger }, false);
@@ -2720,6 +2759,8 @@ function askText({ title, label, value = "", action }) {
 
 function releaseDialogs() {
   for (const kind of ["confirm", "prompt"]) if (dialogs[kind]) settleDialog(kind, dialogs[kind].id, kind === "confirm" ? false : null);
+  for (const entry of hostedDialogs.splice(0)) { entry.content.close(); entry.content.remove(); }
+  if (modalHostIsland) { modalHostIsland.handle.unmount(); modalHostIsland.host.remove(); modalHostIsland = null; }
   if (dialogIsland) { dialogIsland.handle.unmount(); dialogIsland.host.remove(); dialogIsland = null; }
 }
 
@@ -2807,6 +2848,7 @@ function openSearch() {
   });
   dialog.addEventListener("close", () => dialog.remove());
   dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+  // 原生的命令面板只在 chat-ui.js 还没到时用（之后是 Pro 的 Command），照旧是原生的模态对话框。
   document.body.append(dialog);
   dialog.showModal();
   draw();
@@ -5592,7 +5634,7 @@ function openWorkspaceRepos(project, session) {
     } catch (ex) { error.textContent = ex.message; }
     finally { running = false; attach.textContent = t("repos.attach"); await refresh().catch((ex) => { error.textContent = ex.message; }); }
   };
-  document.body.append(dialog); dialog.showModal();
+  showDialog(dialog);
   refresh().catch((ex) => { error.textContent = ex.message; });
 }
 
@@ -5768,7 +5810,7 @@ function openNewProject(initial) {
       if (dialog.isConnected) draw();
     }
   });
-  document.body.append(dialog); dialog.showModal();
+  showDialog(dialog);
 }
 
 async function deleteProject(p) {

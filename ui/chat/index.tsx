@@ -118,6 +118,7 @@ import {SettingsTabs,type SettingsProps} from './settings';
 export const mountSettings=(container:HTMLElement,props:SettingsProps)=>mountComponent(container,SettingsTabs,props);
 import {StatusPanel,type StatusPanelProps} from './status-panel';
 export const mountStatusPanel=(container:HTMLElement,props:StatusPanelProps)=>mountComponent(container,StatusPanel,props);
+export {mountModalHost} from './modal-host';
 import {WorkspaceDrawer,type WorkspaceDrawerProps} from './workspace-drawer';
 export const mountWorkspaceDrawer=(container:HTMLElement,props:WorkspaceDrawerProps)=>mountComponent(container,WorkspaceDrawer,props);
 

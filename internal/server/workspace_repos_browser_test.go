@@ -145,9 +145,15 @@ try {
  document.querySelector('[data-drawer-close], .drawer-head button[title="'+t('drawer.close')+'"]').click();
  await wait(()=>!$('[data-pro-component="Drawer"]')&&!$('.drawer'),'drawer closed');
  $('[data-topbar-menu]').click();(await wait(()=>$('[data-repo-manage]'),'manage repositories')).click();await wait(()=>$('dialog [data-repo-name="docs"]'),'repo manager');
+ // Confirmations are the HeroUI AlertDialog, stacked over the repository manager's Modal, once chat-ui.js has
+ // loaded, and window.confirm before that. The two confirmations ask different questions.
  let confirmations=0;window.confirm=()=>{confirmations++;return true;};
+ const answered=new Set();let watching=true;
+ (async()=>{while(watching){const box=$('[data-pro-component="AlertDialog"]');const ok=box&&box.querySelector('[data-dialog-confirm]');
+  if(ok&&!answered.has(box.innerText)){answered.add(box.innerText);confirmations++;ok.click();}await new Promise(r=>setTimeout(r,25));}})();
  $('dialog [data-repo-name="docs"] button').click();
  await wait(()=>!$('dialog [data-repo-name="docs"]')&&!$('dialog [data-repo-attach]').disabled,'confirmed detach');
+ watching=false;
  check(confirmations===2,'dirty detach requires a second explicit confirmation');
  check($$('dialog [data-repo-name]').length===1,'detach preserved other repository');
  await fetch('/__result',{method:'POST',body:'ok'});
