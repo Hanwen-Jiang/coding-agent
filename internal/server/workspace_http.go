@@ -74,7 +74,9 @@ func writeWorkspaceHTTPRecord(path string, record *workspaceHTTPRecord) error {
 		return err
 	}
 	// Admission and step evidence must survive a host restart, not only a process exit.
-	f, err := os.Open(path)
+	// Open for writing: Windows' FlushFileBuffers rejects a read-only handle with
+	// "Access is denied"; on Linux fsync works on either.
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
@@ -83,12 +85,8 @@ func writeWorkspaceHTTPRecord(path string, record *workspaceHTTPRecord) error {
 	if err != nil {
 		return err
 	}
-	d, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
+	// Persist the rename's directory entry (a no-op on Windows, see syncDir).
+	return syncDir(filepath.Dir(path))
 }
 func (j *workspaceHTTPJournal) put(key string, value any) error {
 	b, err := json.Marshal(value)
