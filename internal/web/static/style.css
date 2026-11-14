@@ -342,7 +342,7 @@ textarea.field { height: auto; padding: 8px 11px; resize: vertical; line-height:
 dialog.secrets .d-body { display: flex; flex-direction: column; gap: 12px; }
 dialog.secrets .secrets-note { font-size: 12.5px; color: var(--warn); }
 dialog.secrets .secret-form { display: flex; gap: 8px; flex-wrap: wrap; }
-dialog.secrets .secret-form input { flex: 1; min-width: 160px; }
+dialog.secrets .secret-form > :is(input, .hero-text) { flex: 1; min-width: 160px; }
 .skills-entry { margin-top: 8px; }
 dialog.skills .d-body { display: flex; flex-direction: column; gap: 12px; }
 dialog.skills .skills-note { font-size: 12.5px; color: var(--muted); }

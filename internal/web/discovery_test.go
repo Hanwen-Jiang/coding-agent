@@ -162,13 +162,13 @@ try {
  check(!$('section.skills .d-body').hidden,'import returns to library');
  location.hash='#/settings/mcp';(await wait(()=>$('section.mcp [data-discovery-tab="explore"]'),'MCP Explore')).click();
  await wait(()=>$('[data-discovery-id="local"]'),'MCP results');
- let query=$('.discovery-query');query.value='ab';query.form.requestSubmit();check($('.discovery-notice').textContent===t('explore.minQuery'),'short query feedback');
+ let query=$('.discovery-query');query.value='ab';query.closest('form').requestSubmit();check($('.discovery-notice').textContent===t('explore.minQuery'),'short query feedback');
  $('[data-discovery-id="local"] [data-discovery-preview]').click();await wait(()=>$('.discovery-package'),'local package details');
  check(!$('[data-discovery-connect]') && $('.discovery-package').textContent.includes('local-package'),'stdio must not show Connect');$('dialog.discovery-preview .d-foot button').click();
  $('[data-discovery-id="remote"] [data-discovery-preview]').click();(await wait(()=>$('[data-discovery-connect]'),'remote endpoint')).click();
  await wait(()=>!$('dialog.discovery-preview')&&!$('section.mcp .d-body').hidden,'remote form');
  check($('.mcp-url').value==='https://example.com/remote' && $('.mcp-name').value==='remote_server','remote endpoint must prefill only');
- $('section.mcp [data-discovery-tab="explore"]').click();query=$('.discovery-query');query.value='failure';query.form.requestSubmit();
+ $('section.mcp [data-discovery-tab="explore"]').click();query=$('.discovery-query');query.value='failure';query.closest('form').requestSubmit();
  await wait(()=>$('.discovery-notice').textContent.includes('Registry temporarily unavailable'),'upstream error');
  check(!!$('.discovery-notice button'),'upstream error has retry');
  check(document.documentElement.scrollWidth<=innerWidth,'settings overflow');

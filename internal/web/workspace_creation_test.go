@@ -108,7 +108,7 @@ try{
  check(row.querySelector('.repo-path').value==='app-2','duplicate repository names need unique directories');
  row.querySelector('.repo-ref').value='release';row.querySelector('.repo-ref').dispatchEvent(new Event('input'));
  row.querySelector('.repo-path').value='api';row.querySelector('.repo-path').dispatchEvent(new Event('input'));
- const search=$('.new-workspace input[type="search"]'); search.value='owner';search.dispatchEvent(new Event('input'));
+ const search=$('.new-workspace .repo-search'); search.value='owner';search.dispatchEvent(new Event('input'));
  check($$('[data-repository]').length===1 && $$('[data-selected-repo]').length===2,'search must preserve hidden selections');
  $('[data-workspace-create]').click();
  check($('.new-workspace .d-body > .col').inert && $('[data-repository]').disabled,'creation freezes editable controls');

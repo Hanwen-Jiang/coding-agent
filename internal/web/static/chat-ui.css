@@ -302,7 +302,7 @@
  .app-modal-host > dialog > .d-foot, .app-modal-host > dialog > form > .d-foot { padding: 12px 20px 16px; }
 }
 
-/* HeroUI Select and Checkbox and the Pro Segment, hosted in controller-drawn forms (ui/chat/fields.tsx). The
+/* HeroUI Select, Checkbox, Input, TextArea and SearchField and the Pro Segment, hosted in controller-drawn forms (ui/chat/fields.tsx). The
    application sets --radius to 16px, which upstream multiplies for field and control radii; the hosts restore the
    library's proportions, as the sidebar does. The upstream button reset in style.css makes the trigger inherit its
    font, so the trigger sets the form size itself. */
@@ -330,6 +330,17 @@
 .hero-check .hero-check-text { font-size: 13px; color: var(--text); }
 .hero-check .checkbox__control { --radius: .5rem; }
 .hero-check-native { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+
+/* Text fields (textField() in app.js): HeroUI Input or TextArea, SearchField for searches. The application's reset
+   makes inputs inherit their font, so the host sets the size and the field follows it (rules that size a host, such as
+   a 12px search, carry through). The application's generic input rules skip these fields. */
+.hero-text { display: block; min-width: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
+.hero-text :is(.input, .textarea, .hero-search-field) { width: 100%; min-width: 0; }
+.hero-text .search-field__group { width: 100%; font-size: inherit; line-height: inherit; }
+.hero-text .textarea { display: block; resize: vertical; }
+.hero-text.mono { font-family: var(--font-mono); font-size: 12.5px; }
+.hero-text :is(.input, .textarea, .search-field__input)::placeholder { color: var(--muted); opacity: 1; }
+.hero-text :is(.input, .textarea, .search-field__input):focus-visible { outline: none; }
 
 .hero-segment-host { display: flex; min-width: 0; max-width: 100%; }
 .hero-segment-host .hero-segment { --radius: .5rem; max-width: 100%; }

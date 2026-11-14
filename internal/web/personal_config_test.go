@@ -35,8 +35,8 @@ try {
  instructions.value = "Use pytest";
  document.querySelector(".personal-add").click();
  const rows = document.querySelectorAll(".personal-file");
- rows[rows.length-1].querySelector("input").value = ".config/ruff.toml";
- rows[rows.length-1].querySelector("textarea").value = "line-length=100";
+ rows[rows.length-1].querySelector(".personal-path").value = ".config/ruff.toml";
+ rows[rows.length-1].querySelector(".personal-content").value = "line-length=100";
  document.querySelector(".personal-save").click();
  await wait(() => !document.querySelector("dialog.personal-config"));
  out.saved = true;

@@ -5,7 +5,7 @@ package web
 //   - 账号页总有一个“我的 Skill”按钮（.skills-open），打开对话框 dialog.skills。
 //   - 列出看得到的 Skill：每个一行 .skill-row（data-name、data-scope），写着说明；平台与团队的只读，我的有“编辑”（.skill-edit）与
 //     “收回”（.skill-retire）；被遮住的我的（shadowed）写明不会被用到。
-//   - 新建：名字 input.skill-name、说明 input.skill-description、做法 textarea.skill-instructions，保存 .skill-save 调
+//   - 新建：名字 .skill-name、说明 .skill-description、做法 .skill-instructions（HeroUI 的文本框宿主，读写 value 同原生），保存 .skill-save 调
 //     PUT /api/skills/<名字>，之后重新列出。编辑：先 GET /api/skills/<名字> 填进表单（名字不能改），保存时原有的文件照旧带上。
 //   - /api/skills 回 available false 时只写明这个部署还没有 Skill（.skills-unavailable），没有表单。
 //   - 新的文字两种语言都有。
@@ -52,7 +52,7 @@ const read = (d) => ({
     name: r.dataset.name, scope: r.dataset.scope, edit: !!r.querySelector(".skill-edit"), retire: !!r.querySelector(".skill-retire"),
     shadowed: !!r.querySelector(".skill-shadowed"), text: r.textContent,
   })),
-  form: !!d.querySelector("textarea.skill-instructions"),
+  form: !!d.querySelector(".skill-instructions"),
   text: d.textContent,
 });
 try {
@@ -70,17 +70,17 @@ try {
       const mine = d.querySelector('.skill-row[data-name="weekly-report"] .skill-edit');
       if (mine) {
         mine.click();
-        await wait(() => d.querySelector("textarea.skill-instructions").value.includes("按模块"), 3000);
-        out.editing = { name: d.querySelector("input.skill-name").value, readOnly: d.querySelector("input.skill-name").readOnly,
-          instructions: d.querySelector("textarea.skill-instructions").value, description: d.querySelector("input.skill-description").value };
-        d.querySelector("textarea.skill-instructions").value = "改过的做法";
+        await wait(() => d.querySelector(".skill-instructions").value.includes("按模块"), 3000);
+        out.editing = { name: d.querySelector(".skill-name").value, readOnly: d.querySelector(".skill-name").readOnly,
+          instructions: d.querySelector(".skill-instructions").value, description: d.querySelector(".skill-description").value };
+        d.querySelector(".skill-instructions").value = "改过的做法";
         d.querySelector(".skill-save").click();
-        await wait(() => d.querySelector(".skill-save") && !d.querySelector("input.skill-name").readOnly, 3000);
+        await wait(() => d.querySelector(".skill-save") && !d.querySelector(".skill-name").readOnly, 3000);
       }
-      const name = d.querySelector("input.skill-name");
+      const name = d.querySelector(".skill-name");
       name.value = "new-skill"; name.dispatchEvent(new Event("input", { bubbles: true }));
-      d.querySelector("input.skill-description").value = "新的说明";
-      d.querySelector("textarea.skill-instructions").value = "新的做法";
+      d.querySelector(".skill-description").value = "新的说明";
+      d.querySelector(".skill-instructions").value = "新的做法";
       d.querySelector(".skill-save").click();
       await wait(() => d.querySelector('.skill-row[data-name="new-skill"]'), 4000);
       out.after = read(d);

@@ -2,8 +2,9 @@
 // Secrets live only in the one-time dialog; they never enter browser storage or cached connections.
 // ask(message, danger) confirms an action; the controller supplies its dialog, and the browser's confirm is the default.
 // show(dialog) opens a built <dialog>; the controller hosts it in its Modal, and showModal() is the default.
-// selectField and checkField are the controller's HeroUI Select and Checkbox; they behave like <select> and checkbox inputs.
-export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, changed, selectField, checkField, ask = (message) => Promise.resolve(confirm(message)), show = (d) => { document.body.append(d); d.showModal(); }}) {
+// selectField, checkField and textField are the controller's HeroUI Select, Checkbox and TextField; they behave like
+// <select>, checkbox inputs and <input> (textField(attrs, true): <textarea>).
+export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, changed, selectField, checkField, textField, ask = (message) => Promise.resolve(confirm(message)), show = (d) => { document.body.append(d); d.showModal(); }}) {
   const enc = encodeURIComponent;
   let emailAvailable=true;
   let kinds = [], connections = [], runs = [], lastIndex = 0, indexPending = null, generation = 0;
@@ -100,7 +101,7 @@ export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, 
   }
   function editConnection(existing, host) {
     const c=existing?connectionBody(existing):{name:"",kind:kinds.find(k=>k.available!==false)?.name,project_id:state.projects[0]?.id,enabled:false,config:{},sinks:[{kind:"web",address:{}}],language:lang,autonomy:"analyze",runs_per_hour:3,budget_usd_per_hour:5};
-    const text=(name,value,attrs={})=>h("input",{class:"field",name,value,...attrs});
+    const text=(name,value,attrs={})=>textField({class:"field",name,value,...attrs});
     const select=(name,options,value,title)=>selectField({options,value,label:title,attrs:{name}});
     const fields={name:text("name",c.name,{required:true,maxlength:80}),kind:select("kind",kinds.map(k=>({value:k.name,label:kindLabel(k.name),disabled:k.available===false})),c.kind,tr("kind")),
       project_id:select("project_id",state.projects.map(p=>({value:p.id,label:p.name})),c.project_id,tr("workspace")),
@@ -123,7 +124,7 @@ export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, 
         let input;
         if(opts.length) input=select(`config.${f.name}`,opts.map(o=>({value:typeof o==="object"?o.value:o,label:label(o.label)||String(o.value??o)})),value,fieldLabel(f));
         else if(f.type==="boolean") input=checkField({checked:!!value,label:fieldLabel(f),attrs:{name:`config.${f.name}`}});
-        else if(["textarea","multiline","array","string_array","string[]","object"].includes(f.type)||f.name==="instruction"||f.name==="instruction_template") input=h("textarea",{class:"field",name:`config.${f.name}`,rows:3,value:Array.isArray(value)?value.join("\n"):typeof value==="object"?JSON.stringify(value,null,2):value});
+        else if(["textarea","multiline","array","string_array","string[]","object"].includes(f.type)||f.name==="instruction"||f.name==="instruction_template") input=textField({class:"field",name:`config.${f.name}`,rows:3,value:Array.isArray(value)?value.join("\n"):typeof value==="object"?JSON.stringify(value,null,2):value},true);
         else input=text(`config.${f.name}`,value,{type:["integer","number"].includes(f.type)?"number":f.type==="email"?"email":"text",step:f.type==="integer"?1:"any",min:f.min,max:f.max});
         input.required=!!f.required; if(f.max_length)input.maxLength=f.max_length;
         const row=h("label",{class:"lbl"},fieldLabel(f),input,label(f.description)?h("span",{class:"muted small"},label(f.description)):null);

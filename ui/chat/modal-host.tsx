@@ -11,7 +11,9 @@ import {Modal} from '@heroui/react';
 export interface HostedDialog {id: number; content: HTMLElement; label: string}
 export interface ModalHostProps {dialogs: HostedDialog[]; onDismiss(id: number): void}
 
-const FOCUSABLE = 'input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),button:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])';
+// A text field host (textField() in app.js) counts too: its input renders a microtask later, and the host's focus()
+// waits for it.
+const FOCUSABLE = 'input:not([type=hidden]):not([disabled]),select:not([disabled]),textarea:not([disabled]),button:not([disabled]),a[href],[tabindex]:not([tabindex="-1"]),.hero-text:not([data-disabled])';
 
 function Hosted({entry, onDismiss}: {entry: HostedDialog; onDismiss(id: number): void}) {
  const ref = useRef<HTMLDivElement>(null);

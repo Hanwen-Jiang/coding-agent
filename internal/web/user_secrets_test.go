@@ -4,7 +4,7 @@ package web
 //
 //   - /api/config 有 network_secrets 时，账号页里多一个“网络密钥”按钮（.secrets-open），打开对话框 dialog.secrets；没有时不显示。
 //   - 列出自己的密钥：每个一行 .secret-row（data-name 是名字），只有名字与更新时间，旁边一个删除按钮。
-//   - 写入：名字输入 input.secret-name、值输入 input.secret-value（type=password、不自动填充），保存按钮 .secret-save 调
+//   - 写入：名字输入 .secret-name、值输入 .secret-value（HeroUI 文本框的宿主；里面的 input 是 type=password、不自动填充），保存按钮 .secret-save 调
 //     PUT /api/secrets/<名字>，之后清空值的输入框、重新列出；值不留在页面上（对话框的 HTML 里没有它）。
 //   - .secrets-note 写明：值只进不出、编辑不回显旧值；环境现在还不能引用（D-23 第二阶段之前不算已支持）。
 //   - 新的文字两种语言都有。
@@ -55,9 +55,10 @@ const wait = async (fn, ms) => { const end = Date.now() + ms; for (;;) { const v
 const read = (d) => ({
   names: [...d.querySelectorAll(".secret-row")].map((r) => r.dataset.name),
   note: !!d.querySelector(".secrets-note") && d.querySelector(".secrets-note").textContent.length > 10,
-  valueType: (d.querySelector("input.secret-value") || {}).type || "",
-  autocomplete: (d.querySelector("input.secret-value") || { getAttribute: () => "" }).getAttribute("autocomplete") || "",
-  value: (d.querySelector("input.secret-value") || {}).value,
+  // The HeroUI field's input, or the native input when the dialog opened before chat-ui.js arrived.
+  valueType: (d.querySelector("input.secret-value, .secret-value input") || {}).type || "",
+  autocomplete: (d.querySelector("input.secret-value, .secret-value input") || { getAttribute: () => "" }).getAttribute("autocomplete") || "",
+  value: (d.querySelector(".secret-value") || {}).value,
   html: d.innerHTML.includes(SECRET),
   text: d.textContent,
 });
@@ -71,7 +72,7 @@ try {
     const d = await wait(() => document.querySelector("dialog.secrets .secret-row") && document.querySelector("dialog.secrets"), 4000);
     if (d) {
       out.first = read(d);
-      const name = d.querySelector("input.secret-name"), value = d.querySelector("input.secret-value");
+      const name = d.querySelector(".secret-name"), value = d.querySelector(".secret-value");
       name.value = "npm-token"; name.dispatchEvent(new Event("input", { bubbles: true }));
       value.value = SECRET; value.dispatchEvent(new Event("input", { bubbles: true }));
       d.querySelector(".secret-save").click();

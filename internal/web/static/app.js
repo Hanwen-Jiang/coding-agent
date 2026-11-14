@@ -109,7 +109,7 @@ const state = {
 };
 
 const ui = {}; // 常驻的 DOM 节点（重画时只换内容）
-const entryUI = createEntryUI({api,h,t,lang,icon,copy,state,openSession,ask:(message,danger=true)=>askConfirm({message,danger}),show:(d)=>showDialog(d),selectField:(o)=>selectField(o),checkField:(o)=>checkField(o),changed:()=>{
+const entryUI = createEntryUI({api,h,t,lang,icon,copy,state,openSession,ask:(message,danger=true)=>askConfirm({message,danger}),show:(d)=>showDialog(d),selectField:(o)=>selectField(o),checkField:(o)=>checkField(o),textField:(a,multiline)=>textField(a,multiline),changed:()=>{
   renderTopbar(); if(state.view === "activity") renderActivity();
 }});
 let entryActivityFilter = "all";
@@ -716,7 +716,7 @@ function toolChoices(items, selected, key, label, inheritEmpty = false) {
   const options = [...items];
   for (const id of selected || []) if (!present.has(id)) options.push({ id, name: id, description: "", source: t("personal.missing"), missing: true });
   const checked = new Set(selected || options.map((item) => item.id));
-  const search = h("input", { type: "search", class: "field tool-choice-search", placeholder: t("personal.searchTools"), "aria-label": `${label} · ${t("personal.searchTools")}` });
+  const search = textField({ type: "search", class: "field tool-choice-search", placeholder: t("personal.searchTools"), "aria-label": `${label} · ${t("personal.searchTools")}` });
   const count = h("span", { class: "tool-choice-count", "aria-live": "polite" });
   const list = h("div", { class: "tool-choice-list" });
   const updateCount = () => {
@@ -782,13 +782,13 @@ async function openPersonalConfig(sessionOnly = false, container = null) {
     let config = response.config || {};
     const doc = config.document || {}, defaults = doc.defaults || {};
     const chosen = sessionOnly ? personalSelection() : null;
-    const instructions = h("textarea", { class: "personal-instructions", rows: 5, value: doc.instructions || "", "aria-label": t("personal.instructions") });
+    const instructions = textField({ class: "personal-instructions", rows: 5, value: doc.instructions || "", "aria-label": t("personal.instructions") }, true);
     const fileList = h("div", { class: "personal-files", "data-empty": t("personal.noFiles") });
     const fileRows = [];
     const addFile = (file = {}) => {
       if (fileRows.length >= 10) return;
-      const path = h("input", { class: "personal-path", value: file.path || "", placeholder: ".config/ruff.toml", "aria-label": t("personal.path") });
-      const content = h("textarea", { class: "personal-content", value: file.content || "", rows: 3, "aria-label": t("personal.content"), spellcheck: "false" });
+      const path = textField({ class: "personal-path", value: file.path || "", placeholder: ".config/ruff.toml", "aria-label": t("personal.path") });
+      const content = textField({ class: "personal-content", value: file.content || "", rows: 3, "aria-label": t("personal.content"), spellcheck: "false" }, true);
       const item = { path, content };
       const row = h("div", { class: "personal-file" },
         h("div", { class: "personal-file-head" }, icon("file", "sm"), path,
@@ -844,8 +844,8 @@ async function openPersonalConfig(sessionOnly = false, container = null) {
 async function openSecrets() {
   if (document.querySelector("dialog.secrets")) return;
   const list = h("div", { class: "secret-list" }, h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading")));
-  const name = h("input", { class: "secret-name", placeholder: t("secrets.name"), maxlength: 128, autocomplete: "off", spellcheck: "false" });
-  const value = h("input", { class: "secret-value", type: "password", placeholder: t("secrets.value"), autocomplete: "new-password", spellcheck: "false" });
+  const name = textField({ class: "secret-name", placeholder: t("secrets.name"), "aria-label": t("secrets.name"), maxlength: 128, autocomplete: "off", spellcheck: "false" });
+  const value = textField({ class: "secret-value", type: "password", placeholder: t("secrets.value"), "aria-label": t("secrets.value"), autocomplete: "new-password", spellcheck: "false" });
   const save = h("button", { class: "btn sm primary secret-save", onclick: () => saveSecret() }, t("secrets.save"));
   const dialog = h("dialog", { class: "secrets" },
     h("div", { class: "d-head" }, h("h2", {}, t("secrets.title"))),
@@ -919,9 +919,9 @@ function discoveryTabs(dialog, kind, onChoose) {
 
 function renderDiscovery(root, kind, onChoose) {
   const isSkill = kind === "skills";
-  const query = h("input", { type: "search", class: "field discovery-query", placeholder: t(isSkill ? "explore.skillSearch" : "explore.mcpSearch"), "aria-label": t("explore.search") });
+  const query = textField({ type: "search", class: "field discovery-query", placeholder: t(isSkill ? "explore.skillSearch" : "explore.mcpSearch"), "aria-label": t("explore.search") });
   const search = h("button", { class: "btn", type: "submit" }, t("explore.search"));
-  const repository = h("input", { class: "field discovery-repo", value: "anthropics/skills", placeholder: "owner/repository", "aria-label": t("explore.repository") });
+  const repository = textField({ class: "field discovery-repo", value: "anthropics/skills", placeholder: "owner/repository", "aria-label": t("explore.repository") });
   const sources = selectField({ options: [{ value: "anthropics/skills", label: "Anthropic" }, { value: "custom", label: t("explore.customRepo") }], label: t("explore.source"), className: "discovery-sources" });
   const sourceRow = h("div", { class: "discovery-source-row" }, sources, repository);
   const results = h("div", { class: "discovery-results" });
@@ -967,8 +967,8 @@ function renderDiscovery(root, kind, onChoose) {
       if (request !== sequence || !root.isConnected) return;
       if (isSkill && data.sources?.length) {
         const selected = sources.value;
-        sources.replaceChildren(...data.sources.map((source) => h("option", { value: source.repository }, source.name)), h("option", { value: "custom" }, t("explore.customRepo")));
-        sources.value = [...sources.options].some((option) => option.value === selected) ? selected : "custom";
+        sources.setOptions([...data.sources.map((source) => ({ value: source.repository, label: source.name })), { value: "custom", label: t("explore.customRepo") }]);
+        sources.value = sources.options.some((option) => option.value === selected) ? selected : "custom";
       }
       const seen = new Set(pageItems.map((item) => item.id || `${item.name}:${item.version || ""}`));
       pageItems.push(...(data.items || []).filter((item) => !seen.has(item.id || `${item.name}:${item.version || ""}`)));
@@ -1020,7 +1020,7 @@ function renderDiscovery(root, kind, onChoose) {
             h("ul", {}, (detail.reference_files || []).slice(0, 30).map((path) => h("li", { class: "mono" }, path)))) : null,
           h("details", { class: "discovery-document", open: true }, h("summary", {}, "SKILL.md"), h("pre", {}, detail.instructions || "")));
         if (detail.importable === true) {
-          const importName = h("input", { class: "field discovery-import-name", value: String(detail.name || item.name).toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^[^a-z]+/, "").slice(0, 64), maxlength: 64, "aria-label": t("explore.importName") });
+          const importName = textField({ class: "field discovery-import-name", value: String(detail.name || item.name).toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^[^a-z]+/, "").slice(0, 64), maxlength: 64, "aria-label": t("explore.importName") });
           const error = h("div", { class: "err-text", role: "alert" });
           const add = h("button", { class: "btn primary", type: "button", "data-discovery-add": "", onclick: async () => {
             if (!/^[a-z][a-z0-9_-]{0,63}$/.test(importName.value.trim())) { error.textContent = t("explore.invalidName"); importName.focus(); return; }
@@ -1056,9 +1056,9 @@ function renderDiscovery(root, kind, onChoose) {
 async function openSkills(container = null) {
   if (!container && document.querySelector("dialog.skills")) return;
   const list = h("div", { class: "skill-list" }, h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading")));
-  const name = h("input", { class: "skill-name", placeholder: t("skills.name"), maxlength: 64, autocomplete: "off", spellcheck: "false" });
-  const description = h("input", { class: "skill-description", placeholder: t("skills.description"), maxlength: 1024 });
-  const instructions = h("textarea", { class: "skill-instructions", placeholder: t("skills.instructions"), rows: 8, spellcheck: "false" });
+  const name = textField({ class: "skill-name", placeholder: t("skills.name"), maxlength: 64, autocomplete: "off", spellcheck: "false" });
+  const description = textField({ class: "skill-description", placeholder: t("skills.description"), maxlength: 1024 });
+  const instructions = textField({ class: "skill-instructions", placeholder: t("skills.instructions"), rows: 8, spellcheck: "false" }, true);
   const filesNote = h("div", { class: "muted small skill-files" });
   const save = h("button", { class: "btn sm primary skill-save", onclick: () => saveSkill() }, t("skills.save"));
   const cancel = h("button", { class: "btn sm ghost skill-cancel", onclick: () => resetForm() }, t("skills.cancel"));
@@ -1083,7 +1083,7 @@ async function openSkills(container = null) {
     h("button", { class: "btn sm skill-view", onclick: () => viewSkill(s.name) }, t("skills.view")),
     s.scope === "user" ? h("button", { class: "btn sm skill-edit", onclick: () => editSkill(s.name) }, t("skills.edit")) : null,
     s.scope === "user" ? h("button", { class: "btn sm skill-retire", onclick: () => retireSkill(s.name) }, t("skills.retire")) : null);
-  const search = h("input", { class: "field management-search", type: "search", placeholder: t("skills.search") });
+  const search = textField({ class: "field management-search", type: "search", placeholder: t("skills.search"), "aria-label": t("skills.search") });
   let listed = null;
   search.addEventListener("input", () => { if (listed) draw(listed); });
   list.before(search);
@@ -1155,10 +1155,10 @@ async function openSkills(container = null) {
 async function openMcp(container = null) {
   if (!container && document.querySelector("dialog.mcp")) return;
   const list = h("div", { class: "mcp-list" }, h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading")));
-  const name = h("input", { class: "mcp-name", placeholder: t("mcp.name"), maxlength: 32, autocomplete: "off", spellcheck: "false" });
-  const url = h("input", { class: "mcp-url", placeholder: "https://example.com/mcp", autocomplete: "off", spellcheck: "false" });
+  const name = textField({ class: "mcp-name", placeholder: t("mcp.name"), maxlength: 32, autocomplete: "off", spellcheck: "false" });
+  const url = textField({ class: "mcp-url", placeholder: "https://example.com/mcp", autocomplete: "off", spellcheck: "false" });
   const secret = selectField({ options: [{ value: "", label: t("mcp.noSecret") }], label: t("mcp.auth"), className: "mcp-secret" });
-  const header = h("input", { class: "mcp-header", placeholder: t("mcp.header"), maxlength: 64, autocomplete: "off", spellcheck: "false" });
+  const header = textField({ class: "mcp-header", placeholder: t("mcp.header"), maxlength: 64, autocomplete: "off", spellcheck: "false" });
   const create = h("button", { class: "btn sm primary mcp-create", onclick: () => createConn() }, t("mcp.create"));
   const form = h("div", { class: "mcp-form" }, h("div", { class: "t" }, t("mcp.add")), h("label", { class: "lbl" }, t("mcp.name"), name), h("label", { class: "lbl" }, t("mcp.url"), url), h("label", { class: "lbl" }, t("mcp.auth"), secret), h("label", { class: "lbl" }, t("mcp.header"), header), state.config.network_secrets ? h("button", { class: "btn ghost sm", onclick: openSecrets }, t("secrets.open")) : null, create);
   const dialog = h(container ? "section" : "dialog", { class: "mcp" + (container ? " page management-page" : "") },
@@ -1175,7 +1175,7 @@ async function openMcp(container = null) {
       { value: "", label: t("mcp.off") },
       { value: "read", label: readOnly ? t("mcp.read") : t("mcp.readNotOffered"), disabled: !readOnly },
       { value: "write_irreversible", label: t("mcp.write") }] });
-    const timeout = h("input", { class: "mcp-timeout", type: "number", min: 1, max: 300, value: tool.timeout_s || 30, title: t("mcp.timeout") });
+    const timeout = textField({ class: "mcp-timeout", type: "number", min: 1, max: 300, value: tool.timeout_s || 30, title: t("mcp.timeout"), "aria-label": `${tool.tool} · ${t("mcp.timeout")}` });
     const mark = () => edits.set(tool.tool, { tool: tool.tool, enabled: !!choice.value, effect: choice.value, timeout_s: Number(timeout.value) || 30, schema_digest: tool.schema_digest });
     choice.addEventListener("change", mark);
     timeout.addEventListener("change", mark);
@@ -1373,7 +1373,7 @@ function openPop(anchor, build, opts = {}) {
   };
   const observer=new ResizeObserver(schedule);
   observer.observe(el);observer.observe(anchor);
-  for(const child of el.querySelectorAll("textarea"))observer.observe(child);
+  for(const child of el.querySelectorAll("textarea, .hero-text"))observer.observe(child);
   const mutations=new MutationObserver(schedule);
   mutations.observe(el,{subtree:true,childList:true,attributes:true,attributeFilter:["hidden"]});
   window.addEventListener("resize",schedule);
@@ -2498,7 +2498,7 @@ function openEnvironmentEditor(env) {
   let mode = net.mode;
   const counters = {};
   const field = (name, tag, value, attrs = {}) => {
-    const el = h(tag, { class: "field" + (tag === "textarea" ? " mono" : ""), name, value: value || "", ...attrs });
+    const el = textField({ class: "field" + (tag === "textarea" ? " mono" : ""), name, value: value || "", ...attrs }, tag === "textarea");
     if (ENV_LIMITS[name]) {
       counters[name] = h("span", { class: "env-bytes" });
       el.addEventListener("input", () => countBytes(name, el));
@@ -2544,8 +2544,8 @@ function openEnvironmentEditor(env) {
   const secretList = h("div", { class: "env-secrets" });
   const secretRows = [];
   const addSecret = (name = "", existing = false) => {
-    const nameEl = h("input", { class: "field mono", "data-secret-name": "", value: name, placeholder: "API_KEY", autocomplete: "off", spellcheck: "false", readonly: existing || null });
-    const valueEl = h("input", { class: "field mono", type: "password", "data-secret-value": "", autocomplete: "new-password",
+    const nameEl = textField({ class: "field mono", "data-secret-name": "", value: name, placeholder: "API_KEY", autocomplete: "off", spellcheck: "false", readonly: existing || null });
+    const valueEl = textField({ class: "field mono", type: "password", "data-secret-value": "", autocomplete: "new-password",
       placeholder: existing ? t("envcfg.secretKeep") : t("envcfg.secretValuePh") });
     const item = { nameEl, valueEl };
     item.row = h("div", { class: "env-secret-row", "data-secret-row": "" }, nameEl, valueEl,
@@ -2893,6 +2893,61 @@ function segmentField({ items = [], selected = "", label = "", size = "md", clas
     value: { get: () => st.selected },
     disabled: { get: () => st.disabled, set: (next) => { st.disabled = !!next; paint(); } },
     update: { value: (next) => { Object.assign(st, next); paint(); } },
+  });
+  paint();
+  return host;
+}
+
+// textField 换掉 <input>，textField(attrs, true) 换掉 <textarea>：HeroUI 的 Input 或 TextArea，type=search 的是 SearchField
+// （带放大镜与清除按钮）。attrs 与 h("input", attrs) 的写法一样：class（去掉 field）、hidden、autofocus、data-* 与 on* 留在宿主上，
+// 别的给里面的输入框；约束（required、pattern、min、max、type）仍是浏览器自己的，form.reportValidity() 照旧。
+// 宿主的 value、disabled、readOnly、required、placeholder、maxLength 可读可写，type 可读。Input 与 TextArea 不受控，字就在元素里
+// （受控的会把每次输入抄进 value 属性，密码就进了页面的 HTML），宿主直接读写元素；SearchField 自己管值，宿主跟着它的 onChange。
+// focus() 在组件画出来之前调用时，画出来后再聚焦。里面输入框的 input、change、keydown 等照常冒泡到宿主；SearchField 用清除按钮
+// 或 Escape 清空时宿主补发一次 input。chat-ui.js 还没到时直接给原生的输入框。
+const TEXT_PROPS = { maxlength: "maxLength", minlength: "minLength", autocomplete: "autoComplete", spellcheck: "spellCheck", inputmode: "inputMode",
+  enterkeyhint: "enterKeyHint", autocapitalize: "autoCapitalize", autocorrect: "autoCorrect", tabindex: "tabIndex" };
+function textField(attrs = {}, multiline = false) {
+  if (!sideIsland?.module?.mountField) return h(multiline ? "textarea" : "input", attrs);
+  const search = !multiline && attrs.type === "search";
+  const own = {}, input = {};
+  const st = { value: "", revision: 0, disabled: false, readOnly: false, label: "", focus: false };
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === false || value === null || value === undefined) continue;
+    if (key === "class") own.class = String(value).split(/\s+/).filter((name) => name && name !== "field").join(" ");
+    else if (key === "hidden" || key === "autofocus" || key.startsWith("data-") || (key.startsWith("on") && typeof value === "function")) own[key] = value;
+    else if (key === "value") st.value = String(value);
+    else if (key === "disabled") st.disabled = true;
+    else if (key === "readonly") st.readOnly = true;
+    else if (key === "aria-label") st.label = String(value);
+    else if (!(search && key === "type")) input[TEXT_PROPS[key] || key] = value;
+  }
+  const host = h("div", { ...own, class: ["hero-field", "hero-text", own.class].filter(Boolean).join(" ") });
+  let element = null;
+  const focusNow = () => { if (element?.isConnected) element.focus(); else requestAnimationFrame(() => { if (element?.isConnected) element.focus(); }); };
+  const inputRef = (node) => {
+    if (!node && element && !search) st.value = element.value; // 卸掉之后 value 仍是最后的字
+    element = node;
+    if (node && st.focus) { st.focus = false; focusNow(); }
+  };
+  const paint = fieldPainter(host, search ? "search" : "text", () => {
+    host.toggleAttribute("data-disabled", st.disabled);
+    return { label: st.label, multiline, disabled: st.disabled, readOnly: st.readOnly, value: st.value, revision: st.revision, input: { ...input }, inputRef,
+      onChange: (next) => { st.value = next; }, onClear: () => host.dispatchEvent(new Event("input", { bubbles: true })) };
+  }, () => {});
+  const attr = (name) => ({ get: () => input[name], set: (next) => { if (next === null || next === undefined || next === false || next === "") delete input[name]; else input[name] = next; paint(); } });
+  Object.defineProperties(host, {
+    value: search
+      ? { get: () => st.value, set: (next) => { st.value = String(next ?? ""); st.revision++; paint(); } }
+      : { get: () => (element ? element.value : st.value), set: (next) => { st.value = String(next ?? ""); if (element) element.value = st.value; else paint(); } },
+    disabled: { get: () => st.disabled, set: (next) => { st.disabled = !!next; paint(); } },
+    readOnly: { get: () => st.readOnly, set: (next) => { st.readOnly = !!next; paint(); } },
+    required: { get: () => !!input.required, set: (next) => { if (next) input.required = true; else delete input.required; paint(); } },
+    type: { get: () => (search ? "search" : multiline ? "textarea" : input.type || "text") },
+    placeholder: attr("placeholder"),
+    maxLength: attr("maxLength"),
+    focus: { value: () => { if (st.disabled) return; if (element) focusNow(); else st.focus = true; } },
+    blur: { value: () => element?.blur() },
   });
   paint();
   return host;
@@ -4541,7 +4596,7 @@ function taskSettingsTool() {
       if (environmentID && !(state.environments || []).some((item) => item.id === environmentID)) environmentOptions.push({ value: environmentID, label: state.env?.environment?.name || t("envcfg.missing") });
       const environment = selectField({ label: t("envcfg.heading"), attrs: { "data-environment-select": "" }, disabled: !!state.session, options: environmentOptions });
       environment.value = environmentID;
-      const hosts = h("textarea", { class: "field network-hosts-input", rows: 3, "aria-label": t("network.hostInput"), placeholder: "api.example.com\ndocs.example.com", value: (state.networkRequest?.hosts || policy.hosts || []).join("\n"), spellcheck: "false" });
+      const hosts = textField({ class: "field network-hosts-input", rows: 3, "aria-label": t("network.hostInput"), placeholder: "api.example.com\ndocs.example.com", value: (state.networkRequest?.hosts || policy.hosts || []).join("\n"), spellcheck: "false" }, true);
       const limit = Math.max(1, Number(policy.max_grant_minutes) || 15);
       const lengths = [15,30,60].filter((minutes) => minutes <= limit);
       if (policy.allowed && policy.supports_unlimited === true) lengths.push(0);
@@ -5437,7 +5492,7 @@ async function drawChanges(body, focus) {
   } else {
     const added = data.files.reduce((n, f) => n + f.added, 0);
     const deleted = data.files.reduce((n, f) => n + f.deleted, 0);
-    commitInput = h("input", { class: "field", placeholder: t("commit.ph"), value: lastMessage() });
+    commitInput = textField({ class: "field", placeholder: t("commit.ph"), "aria-label": t("commit.ph"), value: lastMessage() });
     const commit = h("button", { class: "btn primary sm", "data-git-commit": "", disabled: busy || !canWriteRepo(), onclick: async () => {
       commit.disabled = true;
       try {
@@ -5502,7 +5557,7 @@ function publishCard(busy, dirty) {
       title: null,
     };
   }
-  const title = h("input", { class: "field", placeholder: t("publish.titlePh", { rn }), value: s.title || lastMessage() });
+  const title = textField({ class: "field", placeholder: t("publish.titlePh", { rn }), "aria-label": t("publish.titlePh", { rn }), value: s.title || lastMessage() });
   const out = h("div", {});
   const label = s.pr_number ? t("publish.pushTo", { rn, n: s.pr_number }) : t("publish.pushDraft", { rn });
   const push = h("button", { class: "btn primary sm", disabled: busy, onclick: async () => {
@@ -5706,10 +5761,10 @@ function openWorkspaceRepos(project, session) {
   const base = workspaceRepoBase(project, session);
   const list = h("div", { class: "col", "data-workspace-repos": "" });
   const error = h("div", { class: "err-text", role: "alert" });
-  const name = h("input", { class: "field", "aria-label": t("repos.name"), maxlength: 64 });
-  const path = h("input", { class: "field", "aria-label": t("repos.path"), maxlength: 64 });
-  const url = h("input", { class: "field", "aria-label": t("new.url"), placeholder: "https://github.com/owner/repo.git" });
-  const ref = h("input", { class: "field", "aria-label": t("env.branch"), placeholder: t("new.branchPh") });
+  const name = textField({ class: "field", "aria-label": t("repos.name"), maxlength: 64 });
+  const path = textField({ class: "field", "aria-label": t("repos.path"), maxlength: 64 });
+  const url = textField({ class: "field", "aria-label": t("new.url"), placeholder: "https://github.com/owner/repo.git" });
+  const ref = textField({ class: "field", "aria-label": t("env.branch"), placeholder: t("new.branchPh") });
   const access = selectField({ label: t("repos.access"), attrs: { "data-repo-access": "" },
     options: [{ value: "REPO_ACCESS_READ", label: t("repos.readOnly") }, { value: "REPO_ACCESS_WRITE", label: t("repos.writable") }] });
   const primary = checkField({ text: t("repos.primary") });
@@ -5786,9 +5841,9 @@ function openNewProject(initial) {
   const selected = new Map();
   const completed = new Set();
   let filter = "", created = null, running = false;
-  const name = h("input", { class: "field", placeholder: t("new.name"), "aria-label": t("new.name"), maxlength: 80 });
-  const gitUrl = h("input", { class: "field", placeholder: "https://github.com/owner/repo.git", "aria-label": t("new.url") });
-  const branch = h("input", { class: "field", placeholder: t("new.branchPh"), "aria-label": t("env.branch") });
+  const name = textField({ class: "field", placeholder: t("new.name"), "aria-label": t("new.name"), maxlength: 80 });
+  const gitUrl = textField({ class: "field", placeholder: "https://github.com/owner/repo.git", "aria-label": t("new.url") });
+  const branch = textField({ class: "field", placeholder: t("new.branchPh"), "aria-label": t("env.branch") });
   const err = h("div", { class: "err-text", role: "alert" });
   const progress = h("div", { class: "workspace-progress", role: "status", "aria-live": "polite" });
   const seg = segmentField({ label: t("new.source"), className: "workspace-source-tabs", size: "lg", selected: mode, onChange: (key) => { mode = key; draw(); },
@@ -5815,9 +5870,9 @@ function openNewProject(initial) {
     selection.replaceChildren(
       h("div", { class: "selection-head" }, h("strong", {}, t("new.selected", { n: selected.size })), h("span", { class: "muted small" }, t("new.selectionHint"))),
       ...[...selected.entries()].map(([key, r]) => {
-        const ref = h("input", { class: "field repo-ref", value: r.ref, placeholder: t("new.branchPh"), "aria-label": `${r.full_name} · ${t("env.branch")}`, disabled: !!created });
+        const ref = textField({ class: "field repo-ref", value: r.ref, placeholder: t("new.branchPh"), "aria-label": `${r.full_name} · ${t("env.branch")}`, disabled: !!created });
         ref.addEventListener("input", () => { r.ref = ref.value; });
-        const mount = h("input", { class: "field repo-path", value: r.path, "aria-label": `${r.full_name} · ${t("repos.path")}`, title: t("repos.path"), maxlength: 64, disabled: !!created });
+        const mount = textField({ class: "field repo-path", value: r.path, "aria-label": `${r.full_name} · ${t("repos.path")}`, title: t("repos.path"), maxlength: 64, disabled: !!created });
         mount.addEventListener("input", () => { r.path = mount.value; });
         return h("div", { class: "selected-repo", "data-selected-repo": key },
           icon("branch", "sm"), h("span", { class: "grow ellipsis", title: r.full_name }, r.full_name),
@@ -5873,7 +5928,7 @@ function openNewProject(initial) {
     if (mode === "git") {
       if (conns.length) {
         parts.push(h("div", { class: "pv-tabs" }, conns.map((c) => h("button", { class: "pv-tab" + (c.provider === provider ? " active" : ""), onclick: () => { provider = c.provider; filter = ""; draw(); } }, badge(c.provider, "xs"), providerInfo(c.provider).name))));
-        const search = h("input", { class: "field", type: "search", placeholder: t("new.searchPh", { name: providerInfo(provider).name }), value: filter });
+        const search = textField({ class: "field repo-search", type: "search", placeholder: t("new.searchPh", { name: providerInfo(provider).name }), "aria-label": t("new.searchPh", { name: providerInfo(provider).name }), value: filter });
         search.addEventListener("input", () => { filter = search.value; drawRepos(); });
         parts.push(search, repoList); drawRepos();
       }

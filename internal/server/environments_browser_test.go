@@ -142,7 +142,10 @@ const wait = async (test, label) => {
 };
 const check = (ok, text) => { if (!ok) throw new Error(text); };
 const field = (name, value) => {
-  const el = $('.environment-editor [name="' + name + '"]');
+  // The named <input> or <textarea> is inside a HeroUI text field, whose host the controller reads and writes; it is
+  // the native element itself when the editor opened before chat-ui.js arrived.
+  const named = $('.environment-editor [name="' + name + '"]');
+  const el = named?.closest('.hero-field') || named;
   check(el, 'Missing field ' + name);
   if (value !== undefined) { el.value = value; el.dispatchEvent(new Event('input', {bubbles:true})); }
   return el;
@@ -174,6 +177,7 @@ try {
   const id = card.dataset.environmentId;
   check(!$('.environment-editor'), 'editor did not close');
   card.querySelector('[data-environment-edit]').click();
+  await wait(() => $('.environment-editor [name="env"]'), 'editor fields'); // the HeroUI fields render a microtask later
   check(field('env').value === 'MODE=dev\nPORT=8080', 'edit did not restore ordinary .env');
   field('description', 'Updated shared tooling');
   // .env 的密钥：只写，存在服务端；之后只看得到名字。
