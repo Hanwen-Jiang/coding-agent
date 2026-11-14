@@ -130,10 +130,14 @@ const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const wait=async(fn,label)=>{const end=Date.now()+15000;while(Date.now()<end){let v=fn();if(v)return v;await new Promise(r=>setTimeout(r,30));}throw Error(label+'\n'+document.body.innerText.slice(0,3500));};
 const check=(ok,message)=>{if(!ok)throw Error(message);};
 const request=async(method,path,body)=>{const r=await fetch(path,{method,headers:{'X-Coding-Web':'1','Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});if(!r.ok)throw Error(await r.text());return r.json();};
+// The account menu is the HeroUI Pro sidebar's Dropdown once chat-ui.js has loaded, the native popup before that.
+const profile=()=>$('.side-pro-profile')||$('.profile');
+// While the React sidebar mounts there is a frame with neither, so wait for one.
+const userMenu=async(label)=>{const button=await wait(profile,'account menu button');const pro=button.matches('.side-pro-profile');button.click();(await wait(()=>(pro?$$('[role=menuitem]'):$$('.pop-item')).find(x=>x.textContent.includes(label)),'user menu '+label)).click();};
 try {
  (await wait(()=>$('.task-settings-trigger'),'task settings')).click();
  await wait(()=>$('[data-environment-select]')?.textContent.includes('Environment alice'),'personal default environment');$('[data-task-settings-apply]').click();
- $('.profile').click();$$('.pop-item').find(x=>x.textContent.includes(t('account.title'))).click();
+ await userMenu(t('account.title'));
  (await wait(()=>$('.personal-open'),'personal configuration entry')).click();
  const instructions=await wait(()=>$('.personal-instructions'),'personal editor');
  check(instructions.value==='instructions alice','private document missing');
@@ -156,11 +160,11 @@ try {
  check(session.personal_config?.skill_names?.length===0&&session.personal_config?.mcp_connection_ids?.length===0,'empty session selection lost');
  (await wait(()=>$('.task-settings-trigger'),'task settings')).click();(await wait(()=>$('.personal-tools'),'session tool button')).click();await wait(()=>$('.personal-skills input'),'session tools reopened');
  check(!$$('.personal-skills input').some(x=>x.checked),'explicit empty reset to defaults');$('dialog.personal-config').close();
- $('.profile').click();$$('.pop-item').find(x=>x.textContent.includes(t('menu.logout'))).click();
+ await userMenu(t('menu.logout'));
  await wait(()=>$('input[autocomplete=username]'),'logout');
  localStorage.setItem('cw_environment','env-alice');
  $('input[autocomplete=organization]').value='acme';$('input[autocomplete=username]').value='bob';$('form').requestSubmit();
- await wait(()=>$('.profile')?.textContent.includes('bob'),'login Bob');
+ await wait(()=>profile()?.textContent.includes('bob'),'login Bob');
  location.hash='#/w/'+C.pid+'/new';
  await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
  (await wait(()=>$('.task-settings-trigger'),'task settings')).click();

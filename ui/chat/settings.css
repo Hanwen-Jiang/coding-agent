@@ -1,0 +1,15 @@
+/* Settings: HeroUI Tabs (secondary variant, underline indicator) over the controller-drawn panels. */
+.settings-island { display: block; }
+.settings-tabs-pro { gap: 0; }
+.settings-tabs-pro > .settings-tab-bar { margin-bottom: 28px; }
+.settings-tab-bar .tabs__list { gap: 4px; }
+.settings-tab-bar .settings-tab { width: auto; min-width: 0; height: 40px; padding-inline: 12px; font-size: 13px; white-space: nowrap; color: var(--muted); }
+.settings-tab-bar .settings-tab[data-selected=true] { color: var(--text); }
+/* Changing tabs re-renders the page and the browser treats the restored focus as focus-visible; only keyboard focus
+   (React Aria's data-focus-visible, which draws upstream's ring) should be marked. */
+.settings-tab-bar .settings-tab:focus-visible:not([data-focus-visible=true]) { outline: none; }
+.settings-tabs-pro > .settings-panel { padding: 0; margin-top: 0; }
+.settings-tabs-pro > .settings-panel:focus-visible { outline: none; }
+@media (max-width: 700px) {
+ .settings-tabs-pro > .settings-tab-bar { margin-bottom: 22px; }
+}

@@ -212,7 +212,8 @@ try {
 
   // 复制会话：新会话从这个会话的工作副本复制，标题按语言加“副本”。
   $('.topbar [data-topbar-menu]').click();
-  const dup = await wait(() => [...$$('.pop-item')].find((b) => b.innerText.includes(t('session.duplicate'))), 'duplicate item');
+  // The menu is the HeroUI Dropdown once chat-ui.js has loaded, the native popup before that.
+  const dup = await wait(() => [...$$('.pop-item'), ...$$('.topbar-menu [role="menuitem"]')].find((b) => b.innerText.includes(t('session.duplicate'))), 'duplicate item');
   const title = (await session()).title;
   dup.click();
   await wait(() => { const m = location.hash.match(/\/s\/([^/?]+)/); return m && m[1] !== C.sid; }, 'opened the copy');

@@ -28,8 +28,8 @@ function ConfirmDialog({request, onResult}: {request: ConfirmRequest | null; onR
     </AlertDialog.Header>
     <AlertDialog.Body><p className="app-dialog-message">{shown.message}</p></AlertDialog.Body>
     <AlertDialog.Footer>
-     <Button autoFocus variant="tertiary" onPress={() => onResult(shown.id, false)}>{shown.cancelLabel}</Button>
-     <Button variant={shown.danger ? 'danger' : 'primary'} onPress={() => onResult(shown.id, true)}>{shown.confirmLabel}</Button>
+     <Button autoFocus data-dialog-cancel="" variant="tertiary" onPress={() => onResult(shown.id, false)}>{shown.cancelLabel}</Button>
+     <Button data-dialog-confirm="" variant={shown.danger ? 'danger' : 'primary'} onPress={() => onResult(shown.id, true)}>{shown.confirmLabel}</Button>
     </AlertDialog.Footer>
    </AlertDialog.Dialog>
   </AlertDialog.Container>

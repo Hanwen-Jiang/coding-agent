@@ -198,13 +198,48 @@ input[type="checkbox"],input[type="radio"] { width: 16px; height: 16px; accent-c
   padding: 9px 12px;
 }
 .settings-content :is(input, textarea)::placeholder { color: var(--muted); opacity: 1; }
-.settings-content .personal-page { max-width: 720px; }
+.settings-content .personal-page { max-width: 960px; }
 .personal-page .d-head { padding: 0 0 20px; border: 0; }
-.personal-page .d-body { padding: 0; max-height: none; overflow: visible; gap: 16px; }
+.personal-page .d-body { padding: 0; max-height: none; overflow: visible; gap: 0; }
 .personal-page .personal-instructions { min-height: 140px; width: 100%; }
-.personal-page .personal-files .personal-file { padding: 16px 0; }
-.personal-page .personal-file { display: flex; flex-direction: column; gap: 8px; }
-.personal-page .personal-version { overflow-wrap: anywhere; }
+/* The section heading repeats the selected tab; the tab already names the panel. */
+.settings-content .personal-page > .d-head,.settings-content .management-page > .d-head h2,.settings-content .entry-heading h2 { display: none; }
+.settings-content .entry-heading .muted { margin-top: 0; }
+.settings-content .management-page > .d-head { justify-content: flex-start; }
+/* Settings groups: title and note on the left, controls on the right; stacked in dialogs and on narrow screens. */
+.settings-group { display: grid; grid-template-columns: minmax(0,240px) minmax(0,1fr); gap: 12px 40px; padding: 24px 0; border-top: 1px solid var(--line); }
+.personal-note + .settings-group { border-top: 0; padding-top: 12px; }
+.settings-group-head h3 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.5; }
+.settings-group-head p { margin: 6px 0 0; font-size: 12px; line-height: 1.65; color: var(--muted); }
+.settings-group-body { min-width: 0; display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.settings-group-body > .personal-add { align-self: flex-start; }
+.personal-config .settings-group-body > fieldset { margin: 0; }
+.personal-page .personal-note { margin: 0 0 4px; font-size: 13px; }
+dialog .settings-group { grid-template-columns: 1fr; gap: 10px; padding: 18px 0; }
+@media(max-width: 860px) { .settings-group { grid-template-columns: 1fr; gap: 10px; padding: 20px 0; } }
+/* A configuration file is one card: path row on top, contents below; the card carries the focus ring. */
+.personal-files { display: flex; flex-direction: column; gap: 10px; }
+.personal-files:empty::before { content: attr(data-empty); display: block; padding: 16px; border: 1px dashed var(--line-2); border-radius: 12px; color: var(--muted); font-size: 12px; text-align: center; }
+.personal-config .personal-files .personal-file { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); overflow: hidden; transition: border-color .12s, box-shadow .12s; }
+.personal-config .personal-files .personal-file:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent); }
+.personal-file-head { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 12px; border-bottom: 1px solid var(--line); color: var(--muted); }
+.personal-config .personal-file .personal-file-head input.personal-path,
+.personal-config .personal-file textarea.personal-content { flex: 1; width: 100%; min-width: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-family: var(--font-mono); font-size: 12px; }
+.personal-config .personal-file .personal-file-head input.personal-path { min-height: 32px; padding: 6px 4px; }
+.personal-config .personal-file textarea.personal-content { min-height: 88px; padding: 10px 12px; resize: vertical; line-height: 1.6; }
+.personal-file-head .personal-remove { flex: none; color: var(--muted); }
+.personal-file-head .personal-remove:hover { color: var(--err); }
+/* Version and actions close the form; on the page the bar stays in view while the form scrolls. */
+.personal-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 16px; border-top: 1px solid var(--line); }
+.personal-page .personal-actions { position: sticky; bottom: 0; z-index: 2; padding: 14px 0 18px; background: var(--page); }
+.personal-actions .personal-version { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media(max-width: 700px) {
+ .personal-actions { gap: 8px 10px; }
+ .personal-actions .personal-version { flex-basis: 100%; }
+ .personal-actions > .grow { display: none; }
+ .personal-actions .personal-save { margin-left: auto; }
+ .personal-page .personal-actions { padding: 10px 0 12px; }
+}
 dialog { margin: auto; }
 .workspace-source-tabs button { white-space: nowrap; min-width: max-content; }
 .workspace-source-tabs { overflow-x: auto; flex-wrap: nowrap; }

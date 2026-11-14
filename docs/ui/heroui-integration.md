@@ -78,6 +78,26 @@ Workspaces, Active and Environments are React pages (`ui/chat/pages.tsx`): `Card
 
 `style.css` already skins `.card` and `.chip`, including the `run`, `ok`, `warn` and `err` tone classes, so the pages pass those classes alongside the upstream `color` prop and the components keep the application's look. Page layout is `ui/chat/pages.css`. The empty workspace page shows the same three starters as the welcome screen inside an `EmptyState`.
 
+## Settings
+
+Settings (`ui/chat/settings.tsx`) is the `Tabs` component from `@heroui/react` in its secondary (underline) variant, with one `Tabs.Panel` for the selected section. The panel's content is still drawn by the controller: the component hands a host element to `onPanel`, and `fillSettings()` in `app.js` draws personal configuration, Skills, MCP connections or entry points into it. React renders no children into that host, so it never touches the controller's DOM.
+
+- Changing tabs goes through `goSettings()` and the route, like every other navigation. The component keys the panel by section, so a new section gets a new host and `onPanel` fires again. When the same section is redrawn (after saving, or after a language change), `renderSettings()` draws into the existing host directly.
+- Before `chat-ui.js` has loaded, `nativeSettings()` draws the previous segmented tabs and the same content.
+- The tab already names the panel, so each section's own heading is hidden on the page. Personal configuration is split into groups (`settingsGroup()`: instructions, configuration files, default tools, default environment): title and note on the left, controls on the right, stacked in the account dialog and below 860px. Each configuration file is one card (path row with a remove action, contents below). Version, disable and save sit in an action bar that stays in view while the page scrolls.
+
+## Session header menu
+
+The session header's "More actions" button opens a `Dropdown` (`ui/chat/topbar-menu.tsx`), the same menu as the sidebar's session menu: the session context on top, then repository and review links, repository management, files and history, then rename, duplicate and delete. `topbarMenuProps()` in `app.js` builds the items; each action resolves the workspace and session at the moment it is chosen. The header is rebuilt on every render, so the controller re-attaches one host (`topbarMenuIsland`) each time; the first render is synchronous, so the header never shows a frame without the button. Before `chat-ui.js` has loaded the native popup (`topbarMenu()`) is used.
+
+Items keep the attributes other code and tests rely on (`data-topbar-menu` on the trigger, `data-topbar-source`, `data-repo-manage`, `data-topbar-drawer` on items), and the popover keeps the `topbar-menu` class.
+
+A menu opened with the pointer focuses its container, and the application's generic `:focus-visible` outline would frame the whole list; `sidebar.css` turns that off for these menus, since the items draw their own focus state.
+
+## Testing against the components
+
+Browser tests drive the components with `element.click()`, which React Aria handles as a virtual press. Before `chat-ui.js` has loaded the native fallbacks are on screen, and while an island mounts there can be a frame with neither, so probes wait for whichever is present: `.side-pro-profile` or the native `.profile` for the account menu, `.topbar-menu [role="menuitem"]` or `.pop-item` for the header menu, and the AlertDialog (`[data-pro-component="AlertDialog"]`, buttons `[data-dialog-confirm]` and `[data-dialog-cancel]`) or a stubbed `window.confirm` for confirmations.
+
 ## Main conversation surface
 
 See [Conversation design and migration](conversation-design.md) and the root `DESIGN.md` for the current architecture and visual rules. The task activity stream uses one React root with keyed public messages and compact tool groups. Plans and sub-agent summaries are React-rendered data, not native DOM slots. Groups keep expansion state across event updates, share one border, and progressively disclose large histories without an inner scroll viewport.

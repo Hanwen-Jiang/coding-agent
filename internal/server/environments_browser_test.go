@@ -219,9 +219,12 @@ try {
   location.hash = '#/environments';
   await wait(() => $('[data-environment-id="' + id + '"]'), 'list after sessions');
   // 删除时说清还有几个会话在用、密钥立即删除（2026-11-03 人定）。
+  // The confirmation is the HeroUI AlertDialog once chat-ui.js has loaded, the browser's confirm before that.
   let asked = '';
   window.confirm = (text) => { asked = text; return true; };
   $('[data-environment-delete]').click();
+  const confirmation = await wait(() => asked || $('[data-pro-component="AlertDialog"]'), 'delete confirmation');
+  if (typeof confirmation !== 'string') { asked = confirmation.innerText; confirmation.querySelector('[data-dialog-confirm]').click(); }
   await wait(() => !$('[data-environment-id]'), 'delete');
   check(asked.includes('2 sessions') && asked.includes('immediately'), 'delete confirmation: ' + asked);
   check((await fetch('/api/environments/' + id)).status === 404, 'deleted environment still available');

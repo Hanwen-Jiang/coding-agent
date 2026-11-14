@@ -51,6 +51,9 @@
 /* The application sets --radius to 16px, which doubles the upstream menu radii; restore the library's proportions. */
 .side-pro-popover.dropdown__popover { border-radius: 16px; }
 .side-pro-popover .menu-item { border-radius: 10px; font-size: 13px; }
+/* A menu opened with the pointer focuses its container; the application's generic :focus-visible outline would frame
+   the whole list. Items carry their own focus state. */
+.side-pro-popover .dropdown__menu:focus-visible { outline: none; }
 .side-pro-user-menu { min-width: 236px; }
 .side-pro-item-icon { flex: none; color: var(--muted); }
 .side-pro-item-icon.danger { color: var(--danger, var(--err)); }
@@ -66,3 +69,11 @@
   .app.pro-side .only-wide { display: none !important; }
 }
 @media (prefers-reduced-motion: reduce) { .side-pro-profile { transition: none; } }
+
+/* Session header "More actions": the same Dropdown as the sidebar's session menu, with the session context on top. */
+.topbar-menu-island { display: contents; }
+.topbar-menu-pro.dropdown__popover { width: 300px; max-width: calc(100vw - 24px); }
+.topbar-menu-pro .topbar-menu-context { padding: 10px 12px 10px; margin: 0 4px 4px; border-bottom: 1px solid var(--line); }
+.topbar-menu-pro .topbar-menu-section { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+.topbar-menu-pro a.menu-item { color: inherit; text-decoration: none; }
+.topbar-menu-pro .side-pro-item-text .description { overflow-wrap: anywhere; }

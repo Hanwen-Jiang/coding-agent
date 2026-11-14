@@ -809,6 +809,13 @@ function toolChoices(items, selected, key, label, inheritEmpty = false) {
   return { el, values: () => rows.filter((item) => item.input.checked).map((item) => item.row.dataset.toolChoice) };
 }
 
+// settingsGroup 是设置页上的一组：标题与说明，再是控件。
+function settingsGroup(title, note, ...children) {
+  return h("section", { class: "settings-group" },
+    h("div", { class: "settings-group-head" }, h("h3", {}, title), note ? h("p", {}, note) : null),
+    h("div", { class: "settings-group-body" }, ...children));
+}
+
 async function openPersonalConfig(sessionOnly = false, container = null) {
   if (!container && document.querySelector("dialog.personal-config")) return;
   const choiceKey = personalChoiceKey();
@@ -828,14 +835,17 @@ async function openPersonalConfig(sessionOnly = false, container = null) {
     const doc = config.document || {}, defaults = doc.defaults || {};
     const chosen = sessionOnly ? personalSelection() : null;
     const instructions = h("textarea", { class: "personal-instructions", rows: 5, value: doc.instructions || "", "aria-label": t("personal.instructions") });
-    const fileList = h("div", { class: "personal-files" });
+    const fileList = h("div", { class: "personal-files", "data-empty": t("personal.noFiles") });
     const fileRows = [];
     const addFile = (file = {}) => {
       if (fileRows.length >= 10) return;
       const path = h("input", { class: "personal-path", value: file.path || "", placeholder: ".config/ruff.toml", "aria-label": t("personal.path") });
-      const content = h("textarea", { class: "personal-content", value: file.content || "", rows: 3, "aria-label": t("personal.content") });
+      const content = h("textarea", { class: "personal-content", value: file.content || "", rows: 3, "aria-label": t("personal.content"), spellcheck: "false" });
       const item = { path, content };
-      const row = h("div", { class: "personal-file" }, path, content, h("button", { class: "btn sm", onclick: () => { fileRows.splice(fileRows.indexOf(item), 1); row.remove(); } }, t("personal.remove")));
+      const row = h("div", { class: "personal-file" },
+        h("div", { class: "personal-file-head" }, icon("file", "sm"), path,
+          h("button", { class: "btn ghost sm icon-only personal-remove", title: t("personal.remove"), onclick: () => { fileRows.splice(fileRows.indexOf(item), 1); row.remove(); } }, icon("trash", "sm"))),
+        content);
       fileRows.push(item); fileList.append(row);
     };
     (doc.files || []).forEach(addFile);
@@ -860,18 +870,24 @@ async function openPersonalConfig(sessionOnly = false, container = null) {
         toast(t("personal.saved")); finish();
       } catch (ex) { report(ex); } finally { save.disabled = false; }
     } }, t(sessionOnly ? "personal.use" : "skills.save"));
-    body.replaceChildren(h("p", { class: "muted" }, t(sessionOnly ? "personal.sessionNote" : "personal.note")),
-      ...(!sessionOnly ? [h("label", { class: "lbl" }, t("personal.instructions"), instructions), fileList,
-        h("button", { class: "btn sm personal-add", onclick: () => addFile() }, t("personal.add")),
-        h("p", { class: "muted" }, t("personal.defaultNote"))] : []),
-      skillChoices.el, mcpChoices.el,
-      ...(!sessionOnly ? [h("label", { class: "lbl" }, t("personal.environment"), environment),
+    if (sessionOnly) {
+      body.replaceChildren(h("p", { class: "muted" }, t("personal.sessionNote")), skillChoices.el, mcpChoices.el, save);
+      return;
+    }
+    // 整页分成几组：标题与说明在左，控件在右（窄屏与对话框里上下排）；保存与停用在最后一条操作栏里。
+    const retire = config.version ? h("button", { class: "btn danger personal-retire", onclick: async () => {
+      if (!(await askConfirm({ title: t("personal.retire"), message: t("personal.retireConfirm") }))) return;
+      try { await api("DELETE", "/api/personal-config"); state.personalConfig = null; finish(); } catch (ex) { report(ex); }
+    } }, t("personal.retire")) : null;
+    body.replaceChildren(h("p", { class: "muted personal-note" }, t("personal.note")),
+      settingsGroup(t("personal.instructions"), t("personal.instructionsNote"), instructions),
+      settingsGroup(t("personal.files"), t("personal.filesNote"), fileList,
+        h("button", { class: "btn sm personal-add", onclick: () => addFile() }, icon("plus", "sm"), t("personal.add"))),
+      settingsGroup(t("personal.defaultTools"), t("personal.defaultNote"), skillChoices.el, mcpChoices.el),
+      settingsGroup(t("personal.environmentTitle"), t("personal.environmentNote"), environment),
+      h("div", { class: "personal-actions" },
         h("p", { class: "muted small personal-version" }, config.version ? `${config.version} · ${config.digest}` : ""),
-        h("p", { class: "muted small personal-inherit-hint" }, t("personal.inheritHint"))] : []), save,
-      ...(!sessionOnly && config.version ? [h("button", { class: "btn ghost personal-retire", onclick: async () => {
-        if (!(await askConfirm({ message: t("personal.retireConfirm") }))) return;
-        try { await api("DELETE", "/api/personal-config"); state.personalConfig = null; finish(); } catch (ex) { report(ex); }
-      } }, t("personal.retire"))] : []));
+        h("span", { class: "grow" }), retire, save));
   } catch (ex) { body.replaceChildren(h("p", { class: "error" }, ex.message)); }
 }
 
@@ -1680,21 +1696,48 @@ function goSettings(section = "personal") {
   renderApp();
 }
 
-function renderSettings() {
-  const section = state.settingsSection || "personal";
-  const content = h("div", { class: "settings-content", role: "tabpanel", id: "settings-panel" });
-  ui.scroll.replaceChildren(h("div", { class: "page settings-page" },
-    h("div", { class: "page-head" }, h("h1", {}, t("settings.title"))),
-    h("nav", { class: "settings-tabs seg", role: "tablist", "aria-label": t("settings.title") },
-      [["personal", "personal.title"], ["skills", "skills.title"], ["mcp", "mcp.title"], ["entry", "entry.title"]].map(([key, label]) =>
-        h("button", { role: "tab", "aria-selected": String(section === key), "aria-controls": "settings-panel", class: section === key ? "active" : "", onclick: () => goSettings(key) }, t(label)))),
-    content));
-  const tabs=ui.scroll.querySelector(".settings-tabs"), selected=tabs?.querySelector('[aria-selected="true"]');
-  if(tabs&&selected&&selected.offsetLeft+selected.offsetWidth>tabs.offsetLeft+tabs.clientWidth)tabs.scrollLeft=selected.offsetLeft-tabs.offsetLeft;
+// 设置页的分栏是 React 的 HeroUI Tabs（ui/chat/settings.tsx）：组件管分栏、键盘与 tabpanel，栏里的内容仍由下面的 fillSettings
+// 画进组件交出来的宿主（onPanel）。换栏时组件给一个新的宿主；同一栏重画（保存后、换语言）时直接重画现有的宿主。
+const SETTINGS_SECTIONS = [["personal", "personal.title"], ["skills", "skills.title"], ["mcp", "mcp.title"], ["entry", "entry.title"]];
+let settingsPanel = null;
+
+function fillSettings(content, section) {
   if (section === "entry") entryUI.renderPage(content);
   else if (section === "skills") openSkills(content);
   else if (section === "mcp") openMcp(content);
   else openPersonalConfig(false, content);
+}
+
+function settingsProps(section) {
+  return {
+    label: t("settings.title"), selected: section,
+    sections: SETTINGS_SECTIONS.map(([id, label]) => ({ id, label: t(label) })),
+    onSelect: (id) => goSettings(id),
+    onPanel: (element, id) => {
+      settingsPanel = { element, id };
+      if (state.view === "settings" && id === (state.settingsSection || "personal")) fillSettings(element, id);
+    },
+  };
+}
+
+function nativeSettings(section) {
+  const content = h("div", { class: "settings-content", role: "tabpanel", id: "settings-panel" });
+  const tabs = h("nav", { class: "settings-tabs seg", role: "tablist", "aria-label": t("settings.title") },
+    SETTINGS_SECTIONS.map(([key, label]) =>
+      h("button", { role: "tab", "aria-selected": String(section === key), "aria-controls": "settings-panel", class: section === key ? "active" : "", onclick: () => goSettings(key) }, t(label))));
+  fillSettings(content, section);
+  return h("div", { class: "settings-native" }, tabs, content);
+}
+
+function renderSettings() {
+  const section = state.settingsSection || "personal";
+  const ready = presentationIslands.get("settings")?.handle || (sideIsland && sideIsland.module);
+  const island = proPresentation("settings", "settings-island", "mountSettings", settingsProps(section), ready ? null : nativeSettings(section));
+  ui.scroll.replaceChildren(h("div", { class: "page settings-page" },
+    h("div", { class: "page-head" }, h("h1", {}, t("settings.title"))),
+    island));
+  // 组件已经在了、栏也没换：它不会再交宿主，就地重画。换了栏或刚挂上时由 onPanel 来画。
+  if (presentationIslands.get("settings")?.handle && settingsPanel?.id === section && settingsPanel.element.isConnected) fillSettings(settingsPanel.element, section);
 }
 
 // newSession 是左栏的“新建会话”：在当前工作区（没有时取最近活动的一个）开草稿；还没有工作区就先建一个。
@@ -1830,6 +1873,7 @@ function proSide() {
 function releaseSide() {
   releaseDialogs();
   if (commandIsland) { commandIsland.handle.unmount(); commandIsland.host.remove(); commandIsland = null; }
+  if (topbarMenuIsland) { topbarMenuIsland.handle?.unmount(); topbarMenuIsland = null; }
   if (sideIsland) sideIsland.handle?.unmount();
   sideIsland = null;
 }
@@ -2125,6 +2169,53 @@ function topbarMenu(project, session, close) {
   return items;
 }
 
+// 会话顶栏的“更多操作”：chat-ui.js 到了以后是 React 的 HeroUI Dropdown（ui/chat/topbar-menu.tsx），与左栏会话菜单一致；
+// 之前是原生的弹出菜单（topbarMenu）。顶栏每次重画都把同一个宿主接回去，组件只收新的 props。
+let topbarMenuIsland = null;
+
+function topbarMenuProps(project, session) {
+  const repo = project.layout === "WORKSPACE_LAYOUT_MULTI" ? gitProject() : project;
+  const git = session ? gitSessionState() : {};
+  const source = repoURL(repo) || repo.source || "";
+  const open = [], actions = [];
+  if (/^https:\/\//.test(source)) open.push({ id: "source", icon: "external", label: t("topbar.repository"), description: repo.repo || source, href: source, data: { "topbar-source": "" } });
+  if (git.pr_url) open.push({ id: "review", icon: "branch", label: t("topbar.review", { type: requestName(repo) }), href: git.pr_url });
+  if (project.layout === "WORKSPACE_LAYOUT_MULTI") open.push({ id: "repos", icon: "folder", label: t("repos.manage"), data: { "repo-manage": "" } });
+  if (session) {
+    open.push({ id: "drawer:files", icon: "file", label: t("drawer.files"), data: { "topbar-drawer": "files" } },
+      { id: "drawer:history", icon: "clock", label: t("drawer.history"), data: { "topbar-drawer": "history" } });
+    actions.push({ id: "rename", icon: "edit", label: t("session.rename") },
+      { id: "duplicate", icon: "copy", label: t("session.duplicate"), description: t("session.duplicateDesc") },
+      { id: "delete", icon: "trash", label: t("session.delete"), description: t(session.workspace_id !== project.id ? "session.deleteCopy" : "session.deleteRecord"), danger: true });
+  }
+  return {
+    icons: ICONS, label: t("topbar.actions"),
+    context: { project: project.name, session: session?.title || t("session.new"), branch: git.branch || repo.base_branch || "" },
+    groups: [open, actions],
+    // 链接（仓库、评审）由菜单项自己打开；其余按点下去那一刻的工作区与会话来做。
+    onAction: (id) => {
+      const p = state.project, s = state.session;
+      if (!p) return;
+      if (id === "repos") openWorkspaceRepos(p, s);
+      else if (id.startsWith("drawer:")) openDrawer(id.slice("drawer:".length));
+      else if (s && id === "rename") renameSession(p, s);
+      else if (s && id === "duplicate") duplicateSession(p, s);
+      else if (s && id === "delete") deleteSession(p, s);
+    },
+  };
+}
+
+function topbarMenuControl(p, s) {
+  const module = sideIsland?.module;
+  if (!module?.mountTopbarMenu)
+    return h("button",{class:"btn ghost sm icon-only",title:t("topbar.actions"),"aria-haspopup":"menu","data-topbar-menu":"",onclick:(event)=>openPop(event.currentTarget,(close)=>topbarMenu(p,s,close),{className:"topbar-menu"})},icon("more","sm"));
+  const entry = topbarMenuIsland ||= { element: h("span", { class: "topbar-menu-island" }), handle: null };
+  const props = topbarMenuProps(p, s);
+  if (entry.handle) entry.handle.update(props);
+  else entry.handle = module.mountTopbarMenu(entry.element, props);
+  return entry.element;
+}
+
 function renderTopbar() {
   if (!ui.topbar) return;
   const p=state.project,s=state.session;
@@ -2160,7 +2251,7 @@ function renderTopbar() {
       h("button",{class:"btn ghost sm icon-only",title:t("drawer.title"),"data-topbar-drawer":"changes",onclick:()=>openDrawer("changes")},icon("diff","sm")),
       h("button",{class:"btn ghost sm icon-only",title:t(state.statusOpen?"status.hide":"status.show"),"aria-pressed":String(state.statusOpen),onclick:toggleStatus},icon("panelRight","sm")));
     const hasMenu = inSession() || p.layout === "WORKSPACE_LAYOUT_MULTI" || /^https:\/\//.test(repoURL(p) || p.source || "");
-    if (hasMenu) actions.append(h("button",{class:"btn ghost sm icon-only",title:t("topbar.actions"),"aria-haspopup":"menu","data-topbar-menu":"",onclick:(event)=>openPop(event.currentTarget,(close)=>topbarMenu(p,s,close),{className:"topbar-menu"})},icon("more","sm")));
+    if (hasMenu) actions.append(topbarMenuControl(p,s));
     if (actions.childElementCount) parts.push(actions);
   }
   ui.topbar.replaceChildren(...parts.filter(Boolean));

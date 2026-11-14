@@ -112,5 +112,10 @@ export const mountWorkspacesPage=(container:HTMLElement,props:WorkspacesProps)=>
 export const mountActivityPage=(container:HTMLElement,props:ActivityProps)=>mountComponent(container,ActivityPage,props);
 export const mountEnvironmentsPage=(container:HTMLElement,props:EnvironmentsProps)=>mountComponent(container,EnvironmentsPage,props);
 
+export {mountTopbarMenu} from './topbar-menu';
+
+import {SettingsTabs,type SettingsProps} from './settings';
+export const mountSettings=(container:HTMLElement,props:SettingsProps)=>mountComponent(container,SettingsTabs,props);
+
 import {FileWorkbench,type FileWorkbenchProps} from './file-workbench';
 export const mountFileWorkbench=(container:HTMLElement,props:FileWorkbenchProps)=>mountComponent(container,FileWorkbench,props);
