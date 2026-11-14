@@ -46,6 +46,7 @@ Use actual `@heroui-pro/react` components, not names copied onto native controls
 - `Accordion`: the status panel's sections, on one surface with thin separators. Each heading has an icon tile, which is tinted with the accent while the section is open, and a muted summary on the right.
 - `Drawer` (right) with `Tabs` (secondary): changes, files and history.
 - `Modal`: every application dialog (account, settings dialogs, environment editor, repositories, new workspace, entry points). One 24px-radius surface, sans-serif heading, footer actions on the right, Escape to close. Confirmations stack above it.
+- `Select` (with `ListBox`), `Checkbox` and `Segment`: selects, checkboxes and the source switch in dialogs and Settings. Fields keep the text fields' 10px radius and 1px border in both themes; menus use the same 16px popover as the sidebar's.
 
 Icons are Gravity UI (the set HeroUI's components use), filled on a 16px grid, generated into `internal/web/static/icons.js` by `ui/icons.mjs`. Do not hand-draw new stroked icons. Add a mapping instead.
 

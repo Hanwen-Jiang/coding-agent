@@ -109,7 +109,7 @@ const state = {
 };
 
 const ui = {}; // 常驻的 DOM 节点（重画时只换内容）
-const entryUI = createEntryUI({api,h,t,lang,icon,copy,state,openSession,ask:(message,danger=true)=>askConfirm({message,danger}),show:(d)=>showDialog(d),changed:()=>{
+const entryUI = createEntryUI({api,h,t,lang,icon,copy,state,openSession,ask:(message,danger=true)=>askConfirm({message,danger}),show:(d)=>showDialog(d),selectField:(o)=>selectField(o),checkField:(o)=>checkField(o),changed:()=>{
   renderTopbar(); if(state.view === "activity") renderActivity();
 }});
 let entryActivityFilter = "all";
@@ -724,7 +724,7 @@ function toolChoices(items, selected, key, label, inheritEmpty = false) {
     count.textContent = inheritEmpty && rows.length && !n ? t("personal.inheritAll") : t("personal.selectedTools", { n, total: rows.length });
   };
   const rows = options.map((item) => {
-    const input = h("input", { type: "checkbox", checked: checked.has(item.id), "data-reference": item.id, "aria-label": item.name });
+    const input = checkField({ checked: checked.has(item.id), label: item.name, attrs: { "data-reference": item.id } });
     const title = h("span", { class: "tool-choice-name" }, item.name);
     const summary = h("span", { class: "tool-choice-description" }, item.summary || item.description || t("personal.noDescription"));
     const select = h("label", { class: "tool-choice-select" },
@@ -801,9 +801,9 @@ async function openPersonalConfig(sessionOnly = false, container = null) {
     const mcpDefault = defaults.mcpConnectionIds?.length ? defaults.mcpConnectionIds : undefined;
     const skillChoices = toolChoices((skills.skills || []).filter((x) => !x.shadowed).map((x) => ({ id: x.name, name: x.name, description: x.description || "", summary: builtinSkillSummary(x), source: t(`skills.scope.${x.scope || "user"}`) })), chosen?.skill_names ?? (sessionOnly ? skillDefault : defaults.skillNames || []), "personal-skills", t("skills.open"), !sessionOnly);
     const mcpChoices = toolChoices((mcp.connections || []).filter((x) => x.tools?.some((tool) => tool.enabled)).map((x) => ({ id: x.connection_id, name: x.name, description: x.server_name || x.url || "", source: t("mcp.enabledCount", { n: (x.tools || []).filter((tool) => tool.enabled).length }) })), chosen?.mcp_connection_ids ?? (sessionOnly ? mcpDefault : defaults.mcpConnectionIds || []), "personal-mcp", t("mcp.open"), !sessionOnly);
-    const environment = h("select", { class: "personal-environment", "aria-label": t("personal.environment") }, h("option", { value: "" }, t("personal.noEnvironment")), ...environments.map((x) => h("option", { value: x.id }, x.name)));
-    if (defaults.environmentId && !environments.some((x) => x.id === defaults.environmentId)) environment.append(h("option", { value: defaults.environmentId }, `${defaults.environmentId} · ${t("personal.missing")}`));
-    environment.value = defaults.environmentId || "";
+    const environmentOptions = [{ value: "", label: t("personal.noEnvironment") }, ...environments.map((x) => ({ value: x.id, label: x.name }))];
+    if (defaults.environmentId && !environments.some((x) => x.id === defaults.environmentId)) environmentOptions.push({ value: defaults.environmentId, label: `${defaults.environmentId} · ${t("personal.missing")}` });
+    const environment = selectField({ options: environmentOptions, value: defaults.environmentId || "", label: t("personal.environment"), className: "personal-environment" });
     const save = h("button", { class: "btn primary personal-save", onclick: async () => {
       save.disabled = true;
       try {
@@ -922,7 +922,7 @@ function renderDiscovery(root, kind, onChoose) {
   const query = h("input", { type: "search", class: "field discovery-query", placeholder: t(isSkill ? "explore.skillSearch" : "explore.mcpSearch"), "aria-label": t("explore.search") });
   const search = h("button", { class: "btn", type: "submit" }, t("explore.search"));
   const repository = h("input", { class: "field discovery-repo", value: "anthropics/skills", placeholder: "owner/repository", "aria-label": t("explore.repository") });
-  const sources = h("select", { class: "field discovery-sources", "aria-label": t("explore.source") }, h("option", { value: "anthropics/skills" }, "Anthropic"), h("option", { value: "custom" }, t("explore.customRepo")));
+  const sources = selectField({ options: [{ value: "anthropics/skills", label: "Anthropic" }, { value: "custom", label: t("explore.customRepo") }], label: t("explore.source"), className: "discovery-sources" });
   const sourceRow = h("div", { class: "discovery-source-row" }, sources, repository);
   const results = h("div", { class: "discovery-results" });
   const notice = h("div", { class: "discovery-notice", role: "status", "aria-live": "polite" });
@@ -1157,7 +1157,7 @@ async function openMcp(container = null) {
   const list = h("div", { class: "mcp-list" }, h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading")));
   const name = h("input", { class: "mcp-name", placeholder: t("mcp.name"), maxlength: 32, autocomplete: "off", spellcheck: "false" });
   const url = h("input", { class: "mcp-url", placeholder: "https://example.com/mcp", autocomplete: "off", spellcheck: "false" });
-  const secret = h("select", { class: "mcp-secret" }, h("option", { value: "" }, t("mcp.noSecret")));
+  const secret = selectField({ options: [{ value: "", label: t("mcp.noSecret") }], label: t("mcp.auth"), className: "mcp-secret" });
   const header = h("input", { class: "mcp-header", placeholder: t("mcp.header"), maxlength: 64, autocomplete: "off", spellcheck: "false" });
   const create = h("button", { class: "btn sm primary mcp-create", onclick: () => createConn() }, t("mcp.create"));
   const form = h("div", { class: "mcp-form" }, h("div", { class: "t" }, t("mcp.add")), h("label", { class: "lbl" }, t("mcp.name"), name), h("label", { class: "lbl" }, t("mcp.url"), url), h("label", { class: "lbl" }, t("mcp.auth"), secret), h("label", { class: "lbl" }, t("mcp.header"), header), state.config.network_secrets ? h("button", { class: "btn ghost sm", onclick: openSecrets }, t("secrets.open")) : null, create);
@@ -1171,11 +1171,10 @@ async function openMcp(container = null) {
     : t("mcp.error", { why: t(`mcp.err.${c.error_code}`) === `mcp.err.${c.error_code}` ? c.error_code : t(`mcp.err.${c.error_code}`) });
   const toolRow = (c, tool, edits) => {
     const readOnly = tool.read_only_hint === true;
-    const choice = h("select", { class: "mcp-effect", disabled: !!tool.unavailable_reason },
-      h("option", { value: "" }, t("mcp.off")),
-      h("option", { value: "read", disabled: !readOnly }, readOnly ? t("mcp.read") : t("mcp.readNotOffered")),
-      h("option", { value: "write_irreversible" }, t("mcp.write")));
-    choice.value = tool.enabled ? tool.effect : "";
+    const choice = selectField({ label: tool.tool, className: "mcp-effect", disabled: !!tool.unavailable_reason, value: tool.enabled ? tool.effect : "", options: [
+      { value: "", label: t("mcp.off") },
+      { value: "read", label: readOnly ? t("mcp.read") : t("mcp.readNotOffered"), disabled: !readOnly },
+      { value: "write_irreversible", label: t("mcp.write") }] });
     const timeout = h("input", { class: "mcp-timeout", type: "number", min: 1, max: 300, value: tool.timeout_s || 30, title: t("mcp.timeout") });
     const mark = () => edits.set(tool.tool, { tool: tool.tool, enabled: !!choice.value, effect: choice.value, timeout_s: Number(timeout.value) || 30, schema_digest: tool.schema_digest });
     choice.addEventListener("change", mark);
@@ -1225,7 +1224,8 @@ async function openMcp(container = null) {
   const loadSecrets = async () => {
     if (!state.config.network_secrets) return;
     try {
-      for (const s of (await api("GET", "/api/secrets")).secrets || []) secret.append(h("option", { value: s.name }, s.name));
+      const secrets = (await api("GET", "/api/secrets")).secrets || [];
+      secret.setOptions([{ value: "", label: t("mcp.noSecret") }, ...secrets.map((s) => ({ value: s.name, label: s.name }))]);
     } catch { /* 网络密钥不可用时只能建不带鉴权的连接 */ }
   };
   async function toggle(c) {
@@ -2705,6 +2705,7 @@ function releaseDialog(entry) {
   const at = hostedDialogs.indexOf(entry);
   if (at < 0) return;
   hostedDialogs.splice(at, 1);
+  releaseFields(entry.content);
   renderModalHost();
 }
 
@@ -2759,9 +2760,121 @@ function askText({ title, label, value = "", action }) {
 
 function releaseDialogs() {
   for (const kind of ["confirm", "prompt"]) if (dialogs[kind]) settleDialog(kind, dialogs[kind].id, kind === "confirm" ? false : null);
-  for (const entry of hostedDialogs.splice(0)) { entry.content.close(); entry.content.remove(); }
+  for (const entry of hostedDialogs.splice(0)) { entry.content.close(); entry.content.remove(); releaseFields(entry.content); }
   if (modalHostIsland) { modalHostIsland.handle.unmount(); modalHostIsland.host.remove(); modalHostIsland = null; }
   if (dialogIsland) { dialogIsland.handle.unmount(); dialogIsland.host.remove(); dialogIsland = null; }
+}
+
+// 对话框与设置页里的下拉框、复选框与分段切换是 HeroUI 的 Select、Checkbox 与 Pro 的 Segment（ui/chat/fields.tsx）。
+// 宿主元素照原生控件的样子给这里的代码用：value、checked、disabled、options 可读可写，用户改了在宿主上发 input 与 change，
+// 所以别处的代码与测试照旧读写、照旧挂监听。组件里面元素自己的 input、change 不往外传，只有宿主发的那一份。
+// chat-ui.js 还没到时宿主里画原生控件。离开页面的宿主不用登记：对话框关上时卸掉它里面的，别的随元素一起回收。
+function fieldHost(tag, className, attrs = {}) {
+  const host = h(tag, { ...attrs, class: ["hero-field", className, attrs.class].filter(Boolean).join(" ") });
+  const own = (event) => { if (event.target !== host) event.stopImmediatePropagation(); };
+  host.addEventListener("input", own);
+  host.addEventListener("change", own);
+  return host;
+}
+
+function fieldEmit(host) {
+  host.dispatchEvent(new Event("input", { bubbles: true }));
+  host.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+// The component once chat-ui.js is in (it renders in a microtask, before the next paint), else drawNative().
+function fieldPainter(host, kind, props, drawNative) {
+  const mount = sideIsland?.module?.mountField;
+  if (!mount) return drawNative;
+  const root = h("span", { class: "hero-field-root" });
+  host.replaceChildren(root);
+  const handle = mount(root, kind, props());
+  host.fieldUnmount = () => handle.unmount();
+  return () => handle.update(props());
+}
+
+function releaseFields(container) {
+  for (const host of container.querySelectorAll(".hero-field")) host.fieldUnmount?.();
+}
+
+// selectField 换掉 <select>：options 是 [{value, label, disabled}]。和原生的一样，没给或给了不存在的 value 时选第一个能选的；
+// 之后设成不存在的值则什么都不选（value 为空串）。setOptions() 换选项。
+function selectField({ options = [], value, label = "", placeholder = "", className = "", attrs = {}, disabled = false } = {}) {
+  const host = fieldHost("div", `hero-select ${className}`, attrs);
+  const st = { options: [], value: "", disabled: !!disabled };
+  const list = (items) => items.map((o) => ({ value: String(o.value ?? ""), label: String(o.label ?? o.value ?? ""), disabled: !!o.disabled }));
+  const first = () => (st.options.find((o) => !o.disabled) || st.options[0])?.value ?? "";
+  st.options = list(options);
+  st.value = value != null && st.options.some((o) => o.value === String(value)) ? String(value) : first();
+  let native = null;
+  const paint = fieldPainter(host, "select", () => ({ label, placeholder, options: st.options, value: st.value, disabled: st.disabled,
+    onChange: (next) => { if (next === st.value) return; st.value = next; paint(); fieldEmit(host); } }), () => {
+    if (!native) {
+      native = h("select", { class: "field", "aria-label": label || null });
+      native.addEventListener("change", () => { st.value = native.value; fieldEmit(host); });
+      host.replaceChildren(native);
+    }
+    native.replaceChildren(...st.options.map((o) => h("option", { value: o.value, disabled: o.disabled }, o.label)));
+    native.value = st.value;
+    native.disabled = st.disabled;
+  });
+  Object.defineProperties(host, {
+    value: { get: () => st.value, set: (next) => { next = String(next ?? ""); st.value = st.options.some((o) => o.value === next) ? next : ""; paint(); } },
+    disabled: { get: () => st.disabled, set: (next) => { st.disabled = !!next; paint(); } },
+    options: { get: () => st.options.map((o) => ({ ...o, text: o.label, selected: o.value === st.value })) },
+    setOptions: { value: (items) => { st.options = list(items); if (!st.options.some((o) => o.value === st.value)) st.value = first(); paint(); } },
+    focus: { value: () => host.querySelector("button, select")?.focus() },
+  });
+  paint();
+  return host;
+}
+
+// checkField 换掉复选框。给了 text 时它是可点的标签；没给时只有方框，名字是 label，旁边的文字由调用方排。
+// click() 和原生的一样切换并发事件（测试与“整行可点”的行用它）。
+function checkField({ checked = false, label = "", text = "", className = "", attrs = {}, disabled = false } = {}) {
+  const host = fieldHost("span", `hero-check ${className}`, attrs);
+  const st = { checked: !!checked, disabled: !!disabled };
+  let native = null;
+  const paint = fieldPainter(host, "check", () => ({ label, text, checked: st.checked, disabled: st.disabled,
+    onChange: (next) => { if (!!next === st.checked) return; st.checked = !!next; paint(); fieldEmit(host); } }), () => {
+    if (!native) {
+      native = h("input", { type: "checkbox", "aria-label": text ? null : label || null });
+      native.addEventListener("change", () => { st.checked = native.checked; fieldEmit(host); });
+      host.replaceChildren(text ? h("label", { class: "hero-check-native" }, native, text) : native);
+    }
+    native.checked = st.checked;
+    native.disabled = st.disabled;
+  });
+  Object.defineProperties(host, {
+    checked: { get: () => st.checked, set: (next) => { st.checked = !!next; paint(); } },
+    disabled: { get: () => st.disabled, set: (next) => { st.disabled = !!next; paint(); } },
+    click: { value: () => { if (st.disabled) return; st.checked = !st.checked; paint(); fieldEmit(host); } },
+    focus: { value: () => host.querySelector("input")?.focus() },
+  });
+  paint();
+  return host;
+}
+
+// segmentField 是几个互斥选项的切换（Pro Segment）：items 是 [{id, label, icon}]，选了别的调用 onChange(id)。
+// update({selected, disabled}) 由调用方在自己的状态变了时调。
+function segmentField({ items = [], selected = "", label = "", size = "md", className = "", attrs = {}, disabled = false, onChange } = {}) {
+  const host = fieldHost("div", `hero-segment-host ${className}`, attrs);
+  const st = { items, selected, disabled: !!disabled };
+  const choose = (id) => { if (id === st.selected || st.disabled) return; st.selected = id; paint(); onChange?.(id); };
+  const paint = fieldPainter(host, "segment", () => ({ label, size, items: st.items, selected: st.selected, disabled: st.disabled, onChange: choose }), () => {
+    host.classList.add("seg");
+    host.setAttribute("role", "tablist");
+    if (label) host.setAttribute("aria-label", label);
+    host.replaceChildren(...st.items.map((item) => h("button", { type: "button", class: st.selected === item.id ? "active" : "", role: "tab",
+      "aria-selected": String(st.selected === item.id), disabled: st.disabled, onclick: () => choose(item.id) }, item.icon ? icon(item.icon, "sm") : null, item.label)));
+  });
+  Object.defineProperties(host, {
+    value: { get: () => st.selected },
+    disabled: { get: () => st.disabled, set: (next) => { st.disabled = !!next; paint(); } },
+    update: { value: (next) => { Object.assign(st, next); paint(); } },
+  });
+  paint();
+  return host;
 }
 
 // 搜索面板（Ctrl/⌘ K）是 HeroUI Pro 的 Command（ui/chat/command.tsx）：会话、工作区，再加几个常用的去处。
@@ -5575,9 +5688,9 @@ function openWorkspaceRepos(project, session) {
   const path = h("input", { class: "field", "aria-label": t("repos.path"), maxlength: 64 });
   const url = h("input", { class: "field", "aria-label": t("new.url"), placeholder: "https://github.com/owner/repo.git" });
   const ref = h("input", { class: "field", "aria-label": t("env.branch"), placeholder: t("new.branchPh") });
-  const access = h("select", { class: "field", "aria-label": t("repos.access") },
-    h("option", { value: "REPO_ACCESS_READ" }, t("repos.readOnly")), h("option", { value: "REPO_ACCESS_WRITE" }, t("repos.writable")));
-  const primary = h("input", { type: "checkbox" });
+  const access = selectField({ label: t("repos.access"), attrs: { "data-repo-access": "" },
+    options: [{ value: "REPO_ACCESS_READ", label: t("repos.readOnly") }, { value: "REPO_ACCESS_WRITE", label: t("repos.writable") }] });
+  const primary = checkField({ text: t("repos.primary") });
   const attach = h("button", { class: "btn primary", "data-repo-attach": "" }, t("repos.attach"));
   const close = h("button", { class: "btn ghost" }, t("common.close"));
   let running = false;
@@ -5588,7 +5701,7 @@ function openWorkspaceRepos(project, session) {
       h("div", { class: "row" }, h("label", { class: "grow lbl" }, t("repos.name"), name), h("label", { class: "grow lbl" }, t("repos.path"), path)),
       h("label", { class: "lbl" }, t("env.branch")), ref,
       h("label", { class: "lbl" }, t("repos.access")), access,
-      h("label", { class: "row" }, primary, t("repos.primary")), error),
+      primary, error),
     h("div", { class: "d-foot" }, close, attach));
   close.onclick = () => dialog.close();
   dialog.addEventListener("close", () => dialog.remove());
@@ -5656,7 +5769,10 @@ function openNewProject(initial) {
   const branch = h("input", { class: "field", placeholder: t("new.branchPh"), "aria-label": t("env.branch") });
   const err = h("div", { class: "err-text", role: "alert" });
   const progress = h("div", { class: "workspace-progress", role: "status", "aria-live": "polite" });
-  const seg = h("div", { class: "seg workspace-source-tabs", role: "tablist", "aria-label": t("new.source") });
+  const seg = segmentField({ label: t("new.source"), className: "workspace-source-tabs", size: "lg", selected: mode, onChange: (key) => { mode = key; draw(); },
+    items: [["git", "branch", conns.length ? t("new.myRepos") : t("new.gitUrl")], ["sample", "box", t("new.sample")], ["empty", "folder", t("source.empty")]].map(([id, ic, label]) => ({ id, icon: ic, label })) });
+  // Inputs, selects, buttons and textareas, plus the HeroUI fields as a whole (never the elements inside them).
+  const formControls = "input:not(.hero-field *),select:not(.hero-field *),button:not(.hero-field *),textarea:not(.hero-field *),.hero-field";
   const body = h("div", { class: "col" });
   const create = h("button", { class: "btn primary", "data-workspace-create": "" }, t("new.create"));
   const cancel = h("button", { class: "btn ghost" }, t("common.cancel"));
@@ -5711,7 +5827,7 @@ function openNewProject(initial) {
     const shown = repos.filter((r) => !q || r.full_name.toLowerCase().includes(q));
     const rows = shown.map((r) => {
       const checked = selected.has(r.clone_url);
-      const check = h("input", { type: "checkbox", checked, disabled: !!created || running, "aria-label": r.full_name, "data-repository": r.clone_url });
+      const check = checkField({ checked, label: r.full_name, disabled: !!created || running, attrs: { "data-repository": r.clone_url } });
       check.addEventListener("change", () => addRepo(r));
       return h("label", { class: "pick repo-choice" + (checked ? " active" : "") }, check, badge(r.provider || p, "sm"),
         h("span", { class: "grow ellipsis", title: r.full_name }, r.full_name),
@@ -5730,8 +5846,7 @@ function openNewProject(initial) {
     drawRepos(); summarize(); return true;
   };
   const draw = () => {
-    seg.replaceChildren(...[["git", "branch", conns.length ? t("new.myRepos") : t("new.gitUrl")], ["sample", "box", t("new.sample")], ["empty", "folder", t("source.empty")]].map(([key, ic, label]) =>
-      h("button", { class: mode === key ? "active" : "", type: "button", role: "tab", "aria-selected": String(mode === key), disabled: !!created || running, onclick: () => { mode = key; draw(); } }, icon(ic, "sm"), label)));
+    seg.update({ selected: mode, disabled: !!created || running });
     const parts = [];
     if (mode === "git") {
       if (conns.length) {
@@ -5771,8 +5886,8 @@ function openNewProject(initial) {
     const paths = entries.map(([, repo]) => repo.path);
     if (submittedMode === "git" && (new Set(paths).size !== paths.length || paths.some((path) => !/^[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}$/.test(path)))) { err.textContent = t("new.invalidPath"); return; }
     running = true; create.disabled = true; cancel.disabled = true; name.disabled = true;
-    body.inert = true; seg.inert = true;
-    for (const control of [...body.querySelectorAll("input,select,button,textarea"), ...seg.querySelectorAll("button")]) control.disabled = true;
+    body.inert = true; seg.inert = true; seg.disabled = true;
+    for (const control of body.querySelectorAll(formControls)) control.disabled = true;
     create.textContent = t("new.creating");
     try {
       if (!created) {
@@ -5805,7 +5920,7 @@ function openNewProject(initial) {
       if (created) cancel.textContent = t("new.openCreated");
     } finally {
       running = false; create.disabled = false; cancel.disabled = false; body.inert = false; seg.inert = false;
-      for (const control of body.querySelectorAll("input,select,button,textarea")) control.disabled = false;
+      for (const control of body.querySelectorAll(formControls)) control.disabled = false;
       name.disabled = !!created;
       if (dialog.isConnected) draw();
     }

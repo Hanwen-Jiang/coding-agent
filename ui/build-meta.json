@@ -4,7 +4,7 @@
     "react": "19.3.1",
     "shiki": "4.6.0"
   },
-  "output_bytes": 2911293,
+  "output_bytes": 2963612,
   "components": [
     "chat-message",
     "markdown",
@@ -20,6 +20,7 @@
   ],
   "shell_components": [
     "sidebar",
-    "command"
+    "command",
+    "segment"
   ]
 }

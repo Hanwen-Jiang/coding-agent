@@ -30,7 +30,7 @@ try {
  const instructions = await wait(() => document.querySelector("dialog.personal-config .personal-instructions"));
  out.instructions = instructions.value;
  out.version = document.querySelector(".personal-version").textContent;
- out.selected = [...document.querySelectorAll(".personal-skills input:checked")].map(x => x.dataset.reference);
+ out.selected = [...document.querySelectorAll(".personal-skills [data-reference]")].filter(x => x.checked).map(x => x.dataset.reference);
  out.environment = document.querySelector(".personal-environment").value;
  instructions.value = "Use pytest";
  document.querySelector(".personal-add").click();

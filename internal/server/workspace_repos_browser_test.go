@@ -121,7 +121,7 @@ try {
  await wait(()=>$('dialog [data-repo-attach]'),'attach form');
  const input=key=>$('dialog [aria-label="'+t(key)+'"]');
  const attach=async(name,access)=>{
-  input('new.url').value='https://example.com/'+name+'.git';input('repos.name').value=name;input('repos.path').value=name;input('repos.access').value=access;
+  input('new.url').value='https://example.com/'+name+'.git';input('repos.name').value=name;input('repos.path').value=name;$('dialog [data-repo-access]').value=access;
   $('dialog [data-repo-attach]').click();
   await wait(()=>$('dialog [data-repo-name="'+name+'"]')&&!$('dialog [data-repo-attach]').disabled,'attached '+name);
  };

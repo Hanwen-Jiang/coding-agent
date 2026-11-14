@@ -2,7 +2,8 @@
 // Secrets live only in the one-time dialog; they never enter browser storage or cached connections.
 // ask(message, danger) confirms an action; the controller supplies its dialog, and the browser's confirm is the default.
 // show(dialog) opens a built <dialog>; the controller hosts it in its Modal, and showModal() is the default.
-export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, changed, ask = (message) => Promise.resolve(confirm(message)), show = (d) => { document.body.append(d); d.showModal(); }}) {
+// selectField and checkField are the controller's HeroUI Select and Checkbox; they behave like <select> and checkbox inputs.
+export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, changed, selectField, checkField, ask = (message) => Promise.resolve(confirm(message)), show = (d) => { document.body.append(d); d.showModal(); }}) {
   const enc = encodeURIComponent;
   let emailAvailable=true;
   let kinds = [], connections = [], runs = [], lastIndex = 0, indexPending = null, generation = 0;
@@ -100,15 +101,15 @@ export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, 
   function editConnection(existing, host) {
     const c=existing?connectionBody(existing):{name:"",kind:kinds.find(k=>k.available!==false)?.name,project_id:state.projects[0]?.id,enabled:false,config:{},sinks:[{kind:"web",address:{}}],language:lang,autonomy:"analyze",runs_per_hour:3,budget_usd_per_hour:5};
     const text=(name,value,attrs={})=>h("input",{class:"field",name,value,...attrs});
-    const select=(name,options,value)=>{const e=h("select",{class:"field",name},...options.map(o=>h("option",{value:o.value,disabled:o.disabled},o.label)));e.value=value;return e;};
-    const fields={name:text("name",c.name,{required:true,maxlength:80}),kind:select("kind",kinds.map(k=>({value:k.name,label:kindLabel(k.name),disabled:k.available===false})),c.kind),
-      project_id:select("project_id",state.projects.map(p=>({value:p.id,label:p.name})),c.project_id),
-      language:select("language",[{value:"zh",label:"简体中文"},{value:"en",label:"English"}],c.language),
-      autonomy:select("autonomy",["analyze","draft_pr","confirm"].map(value=>({value,label:tr(`autonomy.${value}`)})),c.autonomy),
+    const select=(name,options,value,title)=>selectField({options,value,label:title,attrs:{name}});
+    const fields={name:text("name",c.name,{required:true,maxlength:80}),kind:select("kind",kinds.map(k=>({value:k.name,label:kindLabel(k.name),disabled:k.available===false})),c.kind,tr("kind")),
+      project_id:select("project_id",state.projects.map(p=>({value:p.id,label:p.name})),c.project_id,tr("workspace")),
+      language:select("language",[{value:"zh",label:"简体中文"},{value:"en",label:"English"}],c.language,tr("language")),
+      autonomy:select("autonomy",["analyze","draft_pr","confirm"].map(value=>({value,label:tr(`autonomy.${value}`)})),c.autonomy,tr("autonomy")),
       runs_per_hour:text("runs_per_hour",c.runs_per_hour,{type:"number",min:1,max:3,step:1,required:true}),
       budget_usd_per_hour:text("budget_usd_per_hour",c.budget_usd_per_hour,{type:"number",min:0.01,max:5,step:0.01,required:true})};
     fields.kind.disabled=!!existing;fields.project_id.disabled=!!existing;
-    const enabled=h("input",{type:"checkbox",name:"enabled",checked:c.enabled,disabled:!existing});
+    const enabled=checkField({checked:c.enabled,disabled:!existing,text:tr(existing?"enabled":"activateAfterSaving"),className:"entry-check",attrs:{name:"enabled"}});
     const dynamic=h("div",{class:"entry-fields"}), sinksHost=h("div",{class:"entry-sinks"}), err=errorBox();
     let configControls=[],sinkRows=[];
     const defaultSinks=kind=>[{kind:["github_comment","email"].includes(kind)?kind:"web",address:{}}];
@@ -120,8 +121,8 @@ export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, 
         const value=current??f.default??"";
         const opts=f.options||f.enum||[];
         let input;
-        if(opts.length) input=select(`config.${f.name}`,opts.map(o=>({value:typeof o==="object"?o.value:o,label:label(o.label)||String(o.value??o)})),value);
-        else if(f.type==="boolean") input=h("input",{type:"checkbox",name:`config.${f.name}`,checked:!!value});
+        if(opts.length) input=select(`config.${f.name}`,opts.map(o=>({value:typeof o==="object"?o.value:o,label:label(o.label)||String(o.value??o)})),value,fieldLabel(f));
+        else if(f.type==="boolean") input=checkField({checked:!!value,label:fieldLabel(f),attrs:{name:`config.${f.name}`}});
         else if(["textarea","multiline","array","string_array","string[]","object"].includes(f.type)||f.name==="instruction"||f.name==="instruction_template") input=h("textarea",{class:"field",name:`config.${f.name}`,rows:3,value:Array.isArray(value)?value.join("\n"):typeof value==="object"?JSON.stringify(value,null,2):value});
         else input=text(`config.${f.name}`,value,{type:["integer","number"].includes(f.type)?"number":f.type==="email"?"email":"text",step:f.type==="integer"?1:"any",min:f.min,max:f.max});
         input.required=!!f.required; if(f.max_length)input.maxLength=f.max_length;
@@ -134,22 +135,22 @@ export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, 
     };
     fields.kind.addEventListener("change",()=>{dynamicConfig();sinkRows=[];sinksHost.replaceChildren();defaultSinks(fields.kind.value).forEach(addSink);}); dynamicConfig();
     function addSink(value={kind:"web",address:{}}) {
-      const kind=select("sink",["web","github_comment","email"].map(value=>({value,label:tr(`sink.${value}`)})),value.kind||value.sink||"web");
+      const kind=select("sink",["web","github_comment","email"].map(value=>({value,label:tr(`sink.${value}`)})),value.kind||value.sink||"web",tr("destination"));
       const address=value.address || {};
       const repo=text("repo",address.repo||"",{placeholder:"owner/repository",pattern:"[^/\\s]+/[^/\\s]+"});
       const issue=text("issue",address.issue||"",{type:"number",min:1,step:1});
       const email=text("email",address.email||"",{type:"email"});
       const controls=h("div",{class:"entry-sink-address"});
-      const original=h("input",{type:"checkbox",checked:kind.value===fields.kind.value&&![address.repo,address.issue,address.email].some(Boolean)});
-      const originalRow=h("label",{class:"entry-check"},original,tr("replyOriginal"));
+      const original=checkField({checked:kind.value===fields.kind.value&&![address.repo,address.issue,address.email].some(Boolean),text:tr("replyOriginal"),className:"entry-check"});
+      const originalRow=original;
       const mailNote=h("p",{class:"note"},tr("emailUnavailable"));
       const draw=()=>{const canReply=["github_comment","email"].includes(kind.value)&&kind.value===fields.kind.value;originalRow.hidden=!canReply;
         const reply=canReply&&original.checked;repo.required=issue.required=kind.value==="github_comment"&&!reply;email.required=kind.value==="email"&&!reply;
         repo.disabled=issue.disabled=email.disabled=reply;mailNote.hidden=kind.value!=="email"||emailAvailable;
         controls.replaceChildren(...(kind.value==="github_comment"?[h("label",{class:"lbl"},tr("repository"),repo),h("label",{class:"lbl"},tr("issue"),issue)]:kind.value==="email"?[h("label",{class:"lbl"},tr("emailAddress"),email)]:[h("p",{class:"muted small"},tr("webOnly"))]));};
       kind.addEventListener("change",draw);original.addEventListener("change",draw);draw();
-      const phaseControls=["accepted","question","result","failed"].map(phase=>({phase,input:h("input",{type:"checkbox",checked:(value.phases||["question","result","failed"]).includes(phase)})}));
-      const phases=h("div",{class:"entry-phases"},...phaseControls.map(({phase,input})=>h("label",{class:"entry-check"},input,tr(`phase.${phase}`))));
+      const phaseControls=["accepted","question","result","failed"].map(phase=>({phase,input:checkField({checked:(value.phases||["question","result","failed"]).includes(phase),text:tr(`phase.${phase}`),className:"entry-check"})}));
+      const phases=h("div",{class:"entry-phases"},...phaseControls.map(({input})=>input));
       const item={kind,repo,issue,email,original,phaseControls};
       item.row=h("div",{class:"entry-sink"},h("div",{class:"entry-row"},h("label",{class:"lbl grow"},tr("destination"),kind),
         h("button",{type:"button",class:"btn ghost sm icon-only",title:tr("removeDestination"),onclick:()=>{sinkRows=sinkRows.filter(x=>x!==item);item.row.remove();}},icon("x","sm"))),originalRow,controls,mailNote,phases);
@@ -161,7 +162,7 @@ export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, 
       h("h3",{},tr("triggerConfiguration")),dynamic,
       h("h3",{},tr("destinations")),sinksHost,h("button",{type:"button",class:"btn ghost sm",onclick:()=>addSink()},icon("plus","xs"),tr("addDestination")),
       h("h3",{},tr("limits")),h("div",{class:"entry-fields entry-fields-two"},...[["autonomy","autonomy"],["language","language"],["runs_per_hour","runLimit"],["budget_usd_per_hour","budgetLimit"]].map(([key,title])=>h("label",{class:"lbl"},tr(title),fields[key]))),
-      h("label",{class:"entry-check"},enabled,tr(existing?"enabled":"activateAfterSaving")),h("p",{class:"muted small"},tr("disabledHint")),err));
+      enabled,h("p",{class:"muted small"},tr("disabledHint")),err));
     const save=h("button",{type:"submit",class:"btn primary",form:"entry-connection-form"},tr("save"));form.id="entry-connection-form";
     const d=dialog(tr(existing?"edit":"create"),form,[save]);
     form.addEventListener("submit",async e=>{

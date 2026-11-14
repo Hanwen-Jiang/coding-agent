@@ -128,7 +128,7 @@ try {
  check(row.querySelector('.tool-choice-source').textContent===t('skills.scope.platform'),'scope badge missing');
  $('.personal-skills .tool-choice-actions button:last-child').click();
  check($('.personal-skills .tool-choice-count').textContent===t('personal.inheritAll'),'empty defaults must disclose inheritance');
- $('[data-tool-choice="writer"] input').click();
+ $('[data-tool-choice="writer"] [data-reference]').click();
  const short=row.querySelector('.tool-choice-description');
  check(getComputedStyle(short).webkitLineClamp==='2' && short.getBoundingClientRect().height<42,'description must be two lines');
  if(lang==='zh'){
@@ -140,7 +140,7 @@ try {
  row.querySelector('details summary').click();check(row.querySelector('details').open && row.querySelector('details p').textContent.length>300,'full original description unavailable');
  row.querySelector('input').click();
  const search=$('.personal-skills .tool-choice-search');search.value='publishing';search.dispatchEvent(new Event('input'));
- check($$('.personal-skills [data-tool-choice]').length===1,'search filtering');$('.personal-skills input[type="checkbox"]').click();
+ check($$('.personal-skills [data-tool-choice]').length===1,'search filtering');$('.personal-skills [data-reference]').click();
  check($('.personal-skills .tool-choice-count').textContent===t('personal.selectedTools',{n:3,total:3}),'selection lost during search');
  $('.personal-save').click();await wait(()=>document.body.textContent.includes(t('personal.saved')),'saved choices');
  location.hash='#/settings/skills';

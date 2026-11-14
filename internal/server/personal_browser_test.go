@@ -147,9 +147,9 @@ try {
  const stored=await request('GET','/api/personal-config');check(stored.config.document.instructions==='Prefer concise answers','save did not reach service');
  const history=await fetch('/api/personal-config?version=user%2Fv2');check(history.headers.get('Cache-Control')==='no-store','personal history was cacheable');
  $('.task-settings-trigger').click();(await wait(()=>$('.personal-tools'),'session tool settings')).click();await wait(()=>$('.personal-skills input'),'session tools');
- check($('.personal-skills input[data-reference="review"]').checked,'default skill not selected');
- check(!$('.personal-skills input[data-reference="test"]').checked,'default subset expanded');
- $$('.personal-skills input,.personal-mcp input').forEach(x=>x.checked=false);$('.personal-save').click();
+ check($('.personal-skills [data-reference="review"]').checked,'default skill not selected');
+ check(!$('.personal-skills [data-reference="test"]').checked,'default subset expanded');
+ $$('.personal-skills [data-reference],.personal-mcp [data-reference]').forEach(x=>x.checked=false);$('.personal-save').click();
  await wait(()=>!$('dialog.personal-config'),'session choices closed');
  const input=$('#composer');input.value='Run the test';input.dispatchEvent(new Event('input',{bubbles:true}));
  // Match separate user input/click events by waiting for React to enable Send.
@@ -159,7 +159,7 @@ try {
  let list=await request('GET','/api/sessions');const session=list.find(x=>x.id===sid);
  check(session.personal_config?.skill_names?.length===0&&session.personal_config?.mcp_connection_ids?.length===0,'empty session selection lost');
  (await wait(()=>$('.task-settings-trigger'),'task settings')).click();(await wait(()=>$('.personal-tools'),'session tool button')).click();await wait(()=>$('.personal-skills input'),'session tools reopened');
- check(!$$('.personal-skills input').some(x=>x.checked),'explicit empty reset to defaults');$('dialog.personal-config').close();
+ check(!$$('.personal-skills [data-reference]').some(x=>x.checked),'explicit empty reset to defaults');$('dialog.personal-config').close();
  await userMenu(t('menu.logout'));
  await wait(()=>$('input[autocomplete=username]'),'logout');
  localStorage.setItem('cw_environment','env-alice');
@@ -171,7 +171,7 @@ try {
  await wait(()=>$('[data-environment-select]')?.textContent.includes('Environment bob'),'account-specific default environment');$('[data-task-settings-apply]').click();
  list=await request('GET','/api/sessions');check(!list.find(x=>x.id===sid).personal_config,'Alice session references leaked to Bob');
  $('.task-settings-trigger').click();(await wait(()=>$('.personal-tools'),'session tool settings')).click();await wait(()=>$('.personal-skills input'),'Bob tool defaults');
- check($('.personal-skills input[data-reference="review"]').checked,'Bob inherited Alice empty override');
+ check($('.personal-skills [data-reference="review"]').checked,'Bob inherited Alice empty override');
  await fetch('/__personal_result',{method:'POST',body:'ok'});
 } catch(err){await fetch('/__personal_result',{method:'POST',body:String(err.stack||err)});}
 `

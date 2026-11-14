@@ -1,0 +1,35 @@
+/* HeroUI Select and Checkbox and the Pro Segment, hosted in controller-drawn forms (ui/chat/fields.tsx). The
+   application sets --radius to 16px, which upstream multiplies for field and control radii; the hosts restore the
+   library's proportions, as the sidebar does. The upstream button reset in style.css makes the trigger inherit its
+   font, so the trigger sets the form size itself. */
+/* Upstream fields draw no border (--border-width-field is 0) and rely on a shadow that the dark theme drops; the
+   application's fields have a 1px border in both themes, so these do too. */
+.hero-field { --radius: .5rem; --border-width-field: 1px; --field-radius: var(--radius-sm, 10px); }
+.hero-field[hidden] { display: none; }
+.hero-field-root { display: contents; }
+.hero-select { display: block; min-width: 0; }
+.hero-select > select.field { width: 100%; }
+.hero-select .hero-select-field { width: 100%; min-width: 0; }
+.hero-select .hero-select-trigger { width: 100%; min-width: 0; font-size: 13px; line-height: 1.4; color: var(--text); }
+.hero-select .select__value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: inherit; }
+.hero-select-popover.select__popover { --radius: .5rem; border-radius: 16px; }
+.hero-select-popover .list-box { padding: 4px; }
+.hero-select-popover .list-box-item { border-radius: 10px; font-size: 13px; }
+.hero-select-popover:focus-visible { outline: none; }
+
+.hero-check { display: inline-flex; align-items: center; vertical-align: middle; flex: none; }
+.hero-check .hero-check-field { flex-direction: row; align-items: center; }
+.hero-check .hero-check-content { display: inline-flex; align-items: center; gap: 8px; }
+.hero-check .hero-check-text { font-size: 13px; color: var(--text); }
+.hero-check .checkbox__control { --radius: .5rem; }
+.hero-check-native { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+
+.hero-segment-host { display: flex; min-width: 0; max-width: 100%; }
+.hero-segment-host .hero-segment { --radius: .5rem; max-width: 100%; }
+.hero-segment-host .hero-segment-item { gap: 6px; font-size: 13px; }
+.hero-segment-host .hero-segment-item .icon.gi { width: 14px; height: 14px; }
+@media (max-width: 700px) {
+ .hero-segment-host .hero-segment { width: 100%; }
+ .hero-segment-host .hero-segment-item { flex: 1 1 auto; min-width: 0; padding-inline: 8px; white-space: nowrap; }
+ .hero-segment-host .hero-segment-item .icon.gi { display: none; }
+}

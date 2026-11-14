@@ -118,7 +118,7 @@ input[type="checkbox"],input[type="radio"] { width: 16px; height: 16px; accent-c
 .repo-url-disclosure summary { color: var(--muted); cursor: pointer; font-size: 12px; }
 .url-fields { margin-top: 12px; }
 .workspace-progress { font-size: 12px; color: var(--accent); overflow-wrap: anywhere; }
-.workspace-source-tabs button { flex: 1; justify-content: center; }
+.workspace-source-tabs.seg button { flex: 1; justify-content: center; }
 .management-page .d-head { padding: 0 0 24px; border: 0; }
 .management-page .d-head h2 { font-size: 28px; }
 .management-page .d-body { display: grid; grid-template-columns: minmax(0,1.6fr) minmax(260px,1fr); gap: 20px 28px; padding: 0; align-items: start; }
@@ -147,6 +147,7 @@ input[type="checkbox"],input[type="radio"] { width: 16px; height: 16px; accent-c
 .mcp-tool > .grow { flex-basis: 100%; }
 .mcp-desc { max-height: 5em; overflow: auto; }
 .mcp-timeout { width: 76px; }
+.mcp-tool .mcp-effect { flex: 1 1 200px; max-width: 280px; }
 .personal-config fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-top: 16px; }
 .personal-config fieldset label { padding: 8px 0; align-items: flex-start; }
 .personal-config legend { font-weight: 600; font-size: 13px; padding: 0 6px; }
@@ -168,8 +169,8 @@ input[type="checkbox"],input[type="radio"] { width: 16px; height: 16px; accent-c
  .hero-empty { padding-top: 34px; }
  .hero-empty h2 { font-size: 24px; }
  .selection-head { flex-wrap: wrap; }
- .workspace-source-tabs button { padding: 8px; font-size: 12px; }
- .workspace-source-tabs .ic { display: none; }
+ .workspace-source-tabs.seg button { padding: 8px; font-size: 12px; }
+ .workspace-source-tabs.seg .ic { display: none; }
  .selected-repo .grow { flex-basis: calc(100% - 40px); }
  .conn-row { padding: 16px; }
  .new-workspace .d-body { gap: 16px; }
@@ -241,8 +242,8 @@ dialog .settings-group { grid-template-columns: 1fr; gap: 10px; padding: 18px 0;
  .personal-page .personal-actions { padding: 10px 0 12px; }
 }
 dialog { margin: auto; }
-.workspace-source-tabs button { white-space: nowrap; min-width: max-content; }
-.workspace-source-tabs { overflow-x: auto; flex-wrap: nowrap; }
+.workspace-source-tabs.seg button { white-space: nowrap; min-width: max-content; }
+.workspace-source-tabs.seg { overflow-x: auto; flex-wrap: nowrap; }
 .app.status-closed > .status { border: 0; overflow: hidden; }
 /* Searchable tool choices: compact identities, summaries and trailing selection. */
 .personal-config .tool-choice-group { min-width: 0; padding: 18px; margin-top: 4px; border-radius: 14px; }
@@ -259,7 +260,7 @@ dialog { margin: auto; }
 .tool-choice-name { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .tool-choice-source { color: var(--muted); font-size: 10px; flex: none; }
 .tool-choice-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--muted); font-size: 12px; line-height: 1.55; margin-top: 5px; overflow-wrap: anywhere; }
-.tool-choice-select input { flex: none; margin: 3px 0 0; }
+.tool-choice-select input, .tool-choice-select .hero-check { flex: none; margin: 3px 0 0; }
 .tool-choice-detail { margin: -4px 12px 10px 54px; }
 .tool-choice-detail summary { width: fit-content; font-size: 11px; color: var(--muted); cursor: pointer; }
 .tool-choice-detail p { margin: 10px 0 0; font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
@@ -278,8 +279,9 @@ dialog.new-workspace[open] { display: flex; flex-direction: column; max-height: 
 .new-workspace > .d-head,.new-workspace > .d-foot { flex: none; }
 .new-workspace > .d-body { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; }
 .new-workspace > .d-body > * { flex-shrink: 0; }
-.new-workspace .workspace-source-tabs { flex: none; min-height: 40px; max-width: 100%; }
-.new-workspace .workspace-source-tabs button { flex-shrink: 0; min-height: 32px; }
+.new-workspace .workspace-source-tabs { flex: none; max-width: 100%; }
+.new-workspace .workspace-source-tabs.seg { min-height: 40px; }
+.new-workspace .workspace-source-tabs.seg button { flex-shrink: 0; min-height: 32px; }
 /* Discovery stays inside Settings, with explicit preview and installation actions. */
 .discovery-tabs { margin-top: 18px; width: fit-content; }
 .discovery-tabs button { white-space: nowrap; }

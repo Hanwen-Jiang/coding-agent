@@ -119,6 +119,7 @@ export const mountSettings=(container:HTMLElement,props:SettingsProps)=>mountCom
 import {StatusPanel,type StatusPanelProps} from './status-panel';
 export const mountStatusPanel=(container:HTMLElement,props:StatusPanelProps)=>mountComponent(container,StatusPanel,props);
 export {mountModalHost} from './modal-host';
+export {mountField} from './fields';
 import {WorkspaceDrawer,type WorkspaceDrawerProps} from './workspace-drawer';
 export const mountWorkspaceDrawer=(container:HTMLElement,props:WorkspaceDrawerProps)=>mountComponent(container,WorkspaceDrawer,props);
 
