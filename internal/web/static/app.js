@@ -2170,6 +2170,45 @@ function renderTopbar() {
 
 function renderWorkspaces() {
   if (!ui.scroll) return;
+  showPage("page-workspaces", "mountWorkspacesPage", workspacesProps(), nativeWorkspaces);
+}
+
+function workspacesProps() {
+  const live = liveSessions();
+  const sample = state.samples[0];
+  const conns = gitConnections();
+  return {
+    icons: ICONS, title: t("nav.workspaces"), lead: t("ws.lead"),
+    labels: { create: t("ws.create"), newSession: t("nav.newSession"), manage: t("repos.manage"), remove: t("ws.delete"), welcome: t("welcome.title") },
+    workspaces: orderedProjects().map((p) => {
+      const sessions = state.sessions.filter((s) => s.project_id === p.id);
+      const running = sessions.filter((s) => live.has(`${p.id}/${s.id}`)).length;
+      return {
+        id: p.id, name: p.name, source: sourceLabel(p), multi: p.layout === "WORKSPACE_LAYOUT_MULTI",
+        mark: markOf(p.git_provider, p.source && p.source.startsWith("sample:") ? "box" : "folder"),
+        sessions: t("ws.sessions", { n: sessions.length }),
+        running: running ? t("ws.running", { n: running }) : "",
+        recentAgo: sessions[0] ? t("ws.recent", { ago: fmtAgo(sessions[0].updated_at) }) : "",
+        recent: sessions.slice(0, 3).map((s) => ({ id: s.id, title: s.title || t("session.untitled"), when: fmtShortAgo(s.updated_at), live: live.has(`${p.id}/${s.id}`) })),
+      };
+    }),
+    // 还没有工作区时的三个起手方式，与 welcome() 里的一样。
+    starters: [
+      sample ? { id: "sample", icon: "box", title: t("welcome.sample"), desc: sample.description } : null,
+      { id: "git", icon: "branch", title: conns.length ? t("welcome.myRepos") : t("welcome.clone"),
+        desc: conns.length ? t("welcome.myReposDesc", { names: conns.map((c) => providerInfo(c.provider).name).join(t("list.sep")) }) : t("welcome.cloneDesc") },
+      { id: "empty", icon: "folder", title: t("source.empty"), desc: t("welcome.emptyDesc") },
+    ].filter(Boolean),
+    onCreate: () => openNewProject(),
+    onNewSession: (id) => openDraft(id),
+    onOpenSession: (pid, sid) => openSession(pid, sid),
+    onManage: (id) => { const p = findProject(id); if (p) openWorkspaceRepos(p, null); },
+    onDelete: (id) => { const p = findProject(id); if (p) deleteProject(p); },
+    onStarter: (id) => (id === "sample" ? quickSample(state.samples[0]) : openNewProject(id)),
+  };
+}
+
+function nativeWorkspaces() {
   const live = liveSessions();
   const cards = orderedProjects().map((p) => {
     const sessions = state.sessions.filter((s) => s.project_id === p.id);
@@ -2191,16 +2230,52 @@ function renderWorkspaces() {
         h("button", { class: "btn ghost sm danger icon-only", title: t("ws.delete"), onclick: () => deleteProject(p) }, icon("trash", "sm"))),
     );
   });
-  ui.scroll.replaceChildren(h("div", { class: "page" },
+  return h("div", { class: "page" },
     h("div", { class: "page-head" },
       h("div", { class: "grow" }, h("h1", {}, t("nav.workspaces")), h("p", {}, t("ws.lead"))),
       h("button", { class: "btn primary", onclick: () => openNewProject() }, icon("plus", "sm"), t("ws.create"))),
     cards.length ? h("div", { class: "ws-grid" }, cards) : welcome(),
-  ));
+  );
+}
+
+// 工作区、进行中、环境三个列表页是 React 的（ui/chat/pages.tsx：Card、Chip、ItemCard、EmptyState）；
+// chat-ui.js 还没到时先画原生的页面（native*），到了由 proPresentation 换上。同一个页面重画时只更新数据。
+function showPage(id, mountName, props, native) {
+  // 模块已经在了（左栏已换上）就不先画原生的那一版，免得闪一下。
+  const ready = presentationIslands.get(id)?.handle || (sideIsland && sideIsland.module);
+  const island = proPresentation(id, "page-island", mountName, props, ready ? null : native());
+  if (island.parentNode !== ui.scroll) ui.scroll.replaceChildren(island);
 }
 
 function renderActivity() {
   if (!ui.scroll) return;
+  showPage("page-activity", "mountActivityPage", activityProps(), nativeActivity);
+}
+
+function activityProps() {
+  const find = (key) => state.active.find((a) => `${a.project_id}/${a.session_id}/${a.task.id}` === key);
+  return {
+    icons: ICONS, title: t("nav.activity"),
+    filter: {
+      label: t("entry.filter"), value: entryActivityFilter,
+      options: [{ id: "all", label: t("entry.allSources") }, ...entryUI.filterOptions().map((kind) => ({ id: kind, label: entryUI.kindLabel(kind) }))],
+    },
+    rows: state.active.filter((a) => entryActivityFilter === "all" || entryUI.sourceKind(a.session_id) === entryActivityFilter).map((a) => {
+      const [status, tone] = STATUS[a.task.status] || [a.task.status || t("status.unknown"), ""];
+      return {
+        key: `${a.project_id}/${a.session_id}/${a.task.id}`, title: a.task.message, status, tone, running: a.task.status === "TASK_STATUS_RUNNING",
+        meta: `${a.project_name} / ${a.session_title || t("session.untitled")} · ${entryUI.kindLabel(entryUI.sourceKind(a.session_id))} · ${fmtAgo(a.task.created_at)}`,
+      };
+    }),
+    labels: { stop: t("common.stop"), empty: t("activity.empty"), newSession: t("nav.newSession") },
+    onFilter: (value) => { entryActivityFilter = value; renderActivity(); },
+    onOpen: (key) => { const a = find(key); if (a) jumpTo(a.project_id, a.session_id, a.task.id); },
+    onStop: (key) => { const a = find(key); if (a) cancelTask(a.task.id, sessionURL(a.project_id, a.session_id)); },
+    onNewSession: newSession,
+  };
+}
+
+function nativeActivity() {
   const sourceFilter=h("select",{class:"field entry-activity-filter","aria-label":t("entry.filter")},
     h("option",{value:"all"},t("entry.allSources")),...entryUI.filterOptions().map(kind=>h("option",{value:kind},entryUI.kindLabel(kind))));
   sourceFilter.value=entryActivityFilter;
@@ -2214,13 +2289,13 @@ function renderActivity() {
     statusChip(a.task.status),
     h("button", { class: "btn sm", onclick: (e) => { e.stopPropagation(); cancelTask(a.task.id, sessionURL(a.project_id, a.session_id)); } }, icon("stop", "xs"), t("common.stop")),
   ));
-  ui.scroll.replaceChildren(h("div", { class: "page" },
+  return h("div", { class: "page" },
     h("div", { class: "page-head" },
       h("div", { class: "grow" }, h("h1", {}, t("nav.activity"))),sourceFilter),
     rows.length ? h("div", { class: "act-list" }, rows)
       : h("div", { class: "empty-page" }, icon("check", "lg"), h("div", {}, t("activity.empty")),
         h("button", { class: "btn sm", onclick: newSession }, icon("compose", "sm"), t("nav.newSession"))),
-  ));
+  );
 }
 
 // ---------------------------------------------------------------- 环境配置
@@ -2293,6 +2368,10 @@ function environmentSessions(env) {
 
 function renderEnvironments() {
   if (!ui.scroll || state.view !== "environments") return;
+  showPage("page-environments", "mountEnvironmentsPage", environmentsProps(), nativeEnvironments);
+}
+
+function nativeEnvironments() {
   const list = state.environments;
   const cards = (list || []).map((env) => {
     const n = networkOf(env);
@@ -2315,14 +2394,41 @@ function renderEnvironments() {
         h("button", { class: "btn ghost sm danger", "data-environment-delete": "", onclick: () => deleteEnvironment(env) }, icon("trash", "sm"), t("envcfg.delete"))),
     );
   });
-  ui.scroll.replaceChildren(h("div", { class: "page" },
+  return h("div", { class: "page" },
     h("div", { class: "page-head" },
       h("div", { class: "grow" }, h("h1", {}, t("nav.environments")), h("p", {}, t("envcfg.lead"))),
       h("button", { class: "btn primary", "data-environment-create": "", onclick: () => openEnvironmentEditor(null) }, icon("plus", "sm"), t("envcfg.create"))),
     list === null ? h("div", { class: "row muted" }, h("span", { class: "spinner" }), t("common.loading"))
       : cards.length ? h("div", { class: "ws-grid" }, cards)
         : h("div", { class: "empty-page" }, icon("server", "lg"), h("div", {}, t("envcfg.empty"))),
-  ));
+  );
+}
+
+function environmentsProps() {
+  const list = state.environments;
+  const find = (id) => (state.environments || []).find((env) => env.id === id);
+  return {
+    icons: ICONS, title: t("nav.environments"), lead: t("envcfg.lead"), loading: list === null,
+    labels: { create: t("envcfg.create"), edit: t("envcfg.edit"), remove: t("envcfg.delete"), empty: t("envcfg.empty"), loading: t("common.loading") },
+    environments: (list || []).map((env) => {
+      const n = networkOf(env);
+      const used = environmentSessions(env).length;
+      return {
+        id: env.id, name: env.name, description: env.description || "", usage: used ? t("envcfg.used", { n: used }) : t("envcfg.unused"),
+        chips: [
+          { icon: "user", label: t("envcfg.onlyMe"), title: t("envcfg.privacy") },
+          { icon: (NETWORK_MODES.find((m) => m.id === n.mode) || NETWORK_MODES[0]).icon, label: networkLabel(env), tone: n.mode === "open" ? "warn" : "" },
+          env.setup_script ? { icon: "terminal", label: t("envcfg.setupChip") } : null,
+          env.start_command ? { icon: "play", label: t("envcfg.startChip") } : null,
+          envVarCount(env) ? { label: t("envcfg.vars", { n: envVarCount(env) }), mono: true } : null,
+          (env.secrets || []).length ? { icon: "shield", label: t("envcfg.secretsCount", { n: env.secrets.length }) } : null,
+        ].filter(Boolean),
+      };
+    }),
+    onCreate: () => openEnvironmentEditor(null),
+    onEdit: (id) => { const env = find(id); if (env) openEnvironmentEditor(env); },
+    onDelete: (id) => { const env = find(id); if (env) deleteEnvironment(env); },
+  };
 }
 
 // openEnvironmentEditor 新建（env 为空）或编辑一份环境配置。保存失败时对话框不关、填的内容都留着。

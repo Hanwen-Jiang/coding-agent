@@ -107,5 +107,10 @@ export const mountCommand=(container:HTMLElement,props:CommandProps)=>mountCompo
 import {Dialogs,type DialogsProps} from './dialogs';
 export const mountDialogs=(container:HTMLElement,props:DialogsProps)=>mountComponent(container,Dialogs,props);
 
+import {WorkspacesPage,ActivityPage,EnvironmentsPage,type WorkspacesProps,type ActivityProps,type EnvironmentsProps} from './pages';
+export const mountWorkspacesPage=(container:HTMLElement,props:WorkspacesProps)=>mountComponent(container,WorkspacesPage,props);
+export const mountActivityPage=(container:HTMLElement,props:ActivityProps)=>mountComponent(container,ActivityPage,props);
+export const mountEnvironmentsPage=(container:HTMLElement,props:EnvironmentsProps)=>mountComponent(container,EnvironmentsPage,props);
+
 import {FileWorkbench,type FileWorkbenchProps} from './file-workbench';
 export const mountFileWorkbench=(container:HTMLElement,props:FileWorkbenchProps)=>mountComponent(container,FileWorkbench,props);

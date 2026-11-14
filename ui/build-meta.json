@@ -4,7 +4,7 @@
     "react": "19.3.1",
     "shiki": "4.6.0"
   },
-  "output_bytes": 2856288,
+  "output_bytes": 2870583,
   "components": [
     "chat-message",
     "markdown",
@@ -14,7 +14,9 @@
     "chat-attachment",
     "prompt-input",
     "chat-loader",
-    "text-shimmer"
+    "text-shimmer",
+    "empty-state",
+    "item-card"
   ],
   "shell_components": [
     "sidebar",

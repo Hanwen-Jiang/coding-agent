@@ -70,6 +70,14 @@ Both render in modal portals, so the upstream `command.css` is global like `side
 
 `style.css` also resets `button { color: inherit }` outside any layer, which overrides the layered upstream `.button` foreground. The dialogs restore `color: var(--button-fg)` for their own buttons; an upstream `Button` rendered elsewhere needs the same until that reset moves into a layer.
 
+## List pages
+
+Workspaces, Active and Environments are React pages (`ui/chat/pages.tsx`): `Card`, `Chip` and `Button` from `@heroui/react`, `ItemCard` and `EmptyState` from `@heroui-pro/react`, and a `Dropdown` with single selection for the Active page's source filter. `workspacesProps()`, `activityProps()` and `environmentsProps()` in `app.js` build the data; every action calls the existing controller functions (`openDraft`, `jumpTo`, `cancelTask`, `openEnvironmentEditor`, `deleteProject` and so on).
+
+`showPage()` mounts each page through `proPresentation`, so a page keeps one React root while it stays on screen and only receives new props on re-render. Before `chat-ui.js` has loaded the previous native page (`nativeWorkspaces()`, `nativeActivity()`, `nativeEnvironments()`) is drawn instead; once the module is in, pages mount directly without that first native frame.
+
+`style.css` already skins `.card` and `.chip`, including the `run`, `ok`, `warn` and `err` tone classes, so the pages pass those classes alongside the upstream `color` prop and the components keep the application's look. Page layout is `ui/chat/pages.css`. The empty workspace page shows the same three starters as the welcome screen inside an `EmptyState`.
+
 ## Main conversation surface
 
 See [Conversation design and migration](conversation-design.md) and the root `DESIGN.md` for the current architecture and visual rules. The task activity stream uses one React root with keyed public messages and compact tool groups. Plans and sub-agent summaries are React-rendered data, not native DOM slots. Groups keep expansion state across event updates, share one border, and progressively disclose large histories without an inner scroll viewport.

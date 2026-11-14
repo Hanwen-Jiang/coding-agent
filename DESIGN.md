@@ -40,6 +40,7 @@ Use actual `@heroui-pro/react` components, not names copied onto native controls
 - `Sidebar` (with `Dropdown`, `Avatar`, `Kbd`): application navigation, the workspace and session tree, session actions and the account menu.
 - `Command`: search and quick navigation (Ctrl/⌘ K).
 - `AlertDialog`, `Modal`, `TextField`: confirmations and single-value prompts, in place of the browser's `confirm` and `prompt`.
+- `Card`, `Chip`, `ItemCard`, `EmptyState`: the Workspaces, Active and Environments pages.
 
 `ui/chat/conversation.tsx` owns the complete activity stream and expansion state under one React root per task. The application controller supplies serializable data. It must not replace individual React tool rows on SSE updates. The composer uses a subscription model and retains the same textarea while the task phase changes. Approval/status controls currently bridge into the React composer; application routing and settings remain in the existing controller. `ui/chat/sidebar.tsx` owns the sidebar's presentation under one React root per signed-in session; the controller supplies its data and performs every action.
 
