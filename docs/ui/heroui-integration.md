@@ -132,7 +132,13 @@ Selects, checkboxes and the new-workspace source switch in the dialogs and in Se
 - The application's 16px `--radius` would make field and control radii too large, so the hosts set `--radius: .5rem` and `--field-radius` to the 10px of the text fields, as the sidebar does. Upstream fields draw no border (`--border-width-field` is 0) and rely on a shadow that the dark theme drops; the hosts set a 1px border so the controls stay visible in both themes. Styles are in `ui/chat/fields.css`; the Pro `segment.css` is included unscoped.
 - Before `chat-ui.js` has loaded, the hosts draw the native controls instead.
 
-Text inputs and text areas are still native elements with the application's `.field` style, which already matches HeroUI's field surface. The composer's task settings (sandbox, environment, network duration), the approval's duration, the session header's repository picker and the entry page's source filter are outside dialogs and still native.
+The composer's task settings (sandbox, environment, network duration) and the session header's repository picker use the same fields.
+
+- Task settings is the controller's own popover, which closes on a mousedown outside it. A select's menu renders under `<body>`, so the handler ignores mousedowns inside `.hero-select-popover`, and `closePop()` unmounts the fields it held. Escape closes the menu first and the panel on the next press.
+- The header is rebuilt on every render, so `repositoryPicker()` keeps one picker host across renders (an open menu survives an update) and only updates its options and value. It makes a new one when the language changes or when `chat-ui.js` arrives after a native fallback; `releaseSide()` drops it.
+- The components draw their own keyboard focus ring (`[data-focus-visible]`), so `fields.css` turns off the application's generic `:focus-visible` outline on triggers, segment items and options.
+
+Text inputs and text areas are still native elements with the application's `.field` style, which already matches HeroUI's field surface. The Active page's source filter is a `Dropdown` (see "List pages"); its native `<select>` is only the fallback.
 
 ## Icons
 

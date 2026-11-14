@@ -16,6 +16,9 @@
 .hero-select-popover .list-box { padding: 4px; }
 .hero-select-popover .list-box-item { border-radius: 10px; font-size: 13px; }
 .hero-select-popover:focus-visible { outline: none; }
+/* The components draw their own keyboard focus ring ([data-focus-visible]); the application's generic :focus-visible
+   outline would add a second one, and would also frame an option focused when the menu opens under the pointer. */
+.hero-field .select__trigger:focus-visible, .hero-field .segment__item:focus-visible, .hero-select-popover .list-box-item:focus-visible { outline: none; }
 
 .hero-check { display: inline-flex; align-items: center; vertical-align: middle; flex: none; }
 .hero-check .hero-check-field { flex-direction: row; align-items: center; }

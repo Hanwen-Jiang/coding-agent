@@ -1394,6 +1394,7 @@ function closePop() {
   const previous=pop;pop=null;
   previous.cleanup?.();
   previous.el.remove();
+  releaseFields(previous.el);
   previous.anchor.classList.remove("open");
   if (ui.barDirty) updateComposer(true);
 }
@@ -1821,6 +1822,7 @@ function releaseSide() {
   releaseDialogs();
   if (commandIsland) { commandIsland.handle.unmount(); commandIsland.host.remove(); commandIsland = null; }
   if (topbarMenuIsland) { topbarMenuIsland.handle?.unmount(); topbarMenuIsland = null; }
+  if (repoPicker) { repoPicker.fieldUnmount?.(); repoPicker = null; }
   if (sideIsland) sideIsland.handle?.unmount();
   sideIsland = null;
 }
@@ -2163,6 +2165,25 @@ function topbarMenuControl(p, s) {
   return entry.element;
 }
 
+// The header is rebuilt on every render; the repository picker keeps one host (and its open menu) across them.
+// A new one is made only when the language changes or the HeroUI module arrives after a native fallback.
+let repoPicker = null;
+
+function repositoryPicker(options) {
+  const live = !!sideIsland?.module?.mountField, label = t("repos.select");
+  if (!repoPicker || repoPicker.live !== live || repoPicker.label !== label) {
+    repoPicker?.fieldUnmount?.();
+    const picker = selectField({ label, attrs: { "data-repo-picker": "" }, options, value: state.repoName });
+    picker.addEventListener("change", () => { state.repoName = picker.value; state.changes = null; renderTopbar(); renderStatus(); loadChanges(); if (state.drawer) renderDrawer(); });
+    Object.assign(picker, { live, label });
+    repoPicker = picker;
+  } else {
+    repoPicker.setOptions(options);
+    if (options.some((o) => o.value === state.repoName)) repoPicker.value = state.repoName;
+  }
+  return repoPicker;
+}
+
 function renderTopbar() {
   if (!ui.topbar) return;
   const p=state.project,s=state.session;
@@ -2186,9 +2207,9 @@ function renderTopbar() {
   } else parts.push(h("span",{class:"grow"}));
   if (p?.layout === "WORKSPACE_LAYOUT_MULTI" && s && state.repos.length) {
     const selected=selectedRepo();
-    const picker=h("select",{class:"field","aria-label":t("repos.select"),title:selected?.name || t("repos.select"),"data-repo-picker":""},
-      state.repos.map((repo)=>h("option",{value:repo.name,selected:repo.name===state.repoName},`${repo.name}${repo.access==="REPO_ACCESS_WRITE"?"":" · "+t("repos.readOnly")}`)));
-    picker.addEventListener("change",()=>{state.repoName=picker.value;state.changes=null;renderTopbar();renderStatus();loadChanges();if(state.drawer)renderDrawer();});
+    const options=state.repos.map((repo)=>({value:repo.name,label:`${repo.name}${repo.access==="REPO_ACCESS_WRITE"?"":" · "+t("repos.readOnly")}`}));
+    const picker=repositoryPicker(options);
+    picker.title=selected?.name || t("repos.select");
     parts.push(h("div",{class:"topbar-repository"},picker));
   }
   if(p){
@@ -4512,19 +4533,20 @@ function taskSettingsTool() {
       let mode = state.networkRequest?.scope === "public" ? "open" : state.networkRequest?.scope === "hosts" ? "allowlist" : "deny";
       const modes = policy.allowed ? policy.modes || ["deny", "allowlist"] : ["deny"];
       if (!modes.includes(mode)) mode = "deny";
-      const sandbox = h("select", { class: "field", "aria-label": t("sandbox.heading"), disabled: !state.config.sandbox_control },
-        SANDBOX.filter((item) => !item.disabled).map((item) => h("option", { value: item.id }, item.label)));
+      const sandbox = selectField({ label: t("sandbox.heading"), className: "task-sandbox", disabled: !state.config.sandbox_control,
+        options: SANDBOX.filter((item) => !item.disabled).map((item) => ({ value: item.id, label: item.label })) });
       sandbox.value = state.settings.sandbox;
-      const environment = h("select", { class: "field", "data-environment-select": "", "aria-label": t("envcfg.heading"), disabled: !!state.session },
-        h("option", { value: "" }, t("envcfg.default")), (state.environments || []).map((item) => h("option", { value: item.id }, item.name)));
       const environmentID = state.session?.environment_id || draftEnvironment();
-      if (environmentID && !(state.environments || []).some((item) => item.id === environmentID)) environment.append(h("option", {value:environmentID}, state.env?.environment?.name || t("envcfg.missing")));
+      const environmentOptions = [{ value: "", label: t("envcfg.default") }, ...(state.environments || []).map((item) => ({ value: item.id, label: item.name }))];
+      if (environmentID && !(state.environments || []).some((item) => item.id === environmentID)) environmentOptions.push({ value: environmentID, label: state.env?.environment?.name || t("envcfg.missing") });
+      const environment = selectField({ label: t("envcfg.heading"), attrs: { "data-environment-select": "" }, disabled: !!state.session, options: environmentOptions });
       environment.value = environmentID;
       const hosts = h("textarea", { class: "field network-hosts-input", rows: 3, "aria-label": t("network.hostInput"), placeholder: "api.example.com\ndocs.example.com", value: (state.networkRequest?.hosts || policy.hosts || []).join("\n"), spellcheck: "false" });
       const limit = Math.max(1, Number(policy.max_grant_minutes) || 15);
       const lengths = [15,30,60].filter((minutes) => minutes <= limit);
       if (policy.allowed && policy.supports_unlimited === true) lengths.push(0);
-      const duration = h("select", { class: "field", "aria-label": t("network.duration") }, lengths.map((minutes) => h("option", { value: minutes }, minutes === 0 ? t("network.unlimited") : t("network.minutes", { minutes }))));
+      const duration = selectField({ label: t("network.duration"), className: "network-duration",
+        options: lengths.map((minutes) => ({ value: String(minutes), label: minutes === 0 ? t("network.unlimited") : t("network.minutes", { minutes }) })) });
       duration.value = String(lengths.includes(state.networkRequest?.minutes) ? state.networkRequest.minutes : lengths[0]);
       const hostField = h("label", { class: "lbl network-hosts-field" }, t("network.hostsLabel"), hosts);
       const durationHint = h("span", {class:"muted small network-duration-hint",hidden:duration.value!=="0"},t("network.unlimitedHint"));
@@ -5989,8 +6011,9 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// A select's menu inside a popover (task settings) renders under <body>, outside the popover; choosing from it keeps the popover open.
 document.addEventListener("mousedown", (e) => {
-  if (pop && !pop.el.contains(e.target) && !pop.anchor.contains(e.target)) closePop();
+  if (pop && !pop.el.contains(e.target) && !pop.anchor.contains(e.target) && !e.target.closest?.(".hero-select-popover")) closePop();
 });
 // Open popovers observe their anchor, content and visual viewport until closed.
 

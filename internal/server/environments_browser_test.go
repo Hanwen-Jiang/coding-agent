@@ -200,7 +200,7 @@ try {
     location.hash = '#/w/' + projects[i % 2] + '/new';
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
     (await wait(()=>$('.task-settings-trigger'),'task settings')).click();
-    const select = await wait(() => $('[data-environment-select]:not(:disabled)'), 'draft selector');
+    const select = await wait(() => { const e = $('[data-environment-select]'); return e && !e.disabled && e; }, 'draft selector');
     select.value = i===2 ? '' : id;
     select.dispatchEvent(new Event('change', {bubbles:true}));
     $('[data-task-settings-apply]').click();

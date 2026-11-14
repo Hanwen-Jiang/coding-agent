@@ -404,6 +404,7 @@ dialog > .discovery-body { padding: 20px 28px; overflow-y: auto; max-height: 64d
 .task-settings-heading { flex: none; padding: 16px 20px 12px; font-size: 14px; }
 .task-settings-panel .lbl { gap: 7px; }
 .task-settings-panel .field { width: 100%; min-width: 0; font-size: 13px; background: var(--surface-2); }
+.task-settings-panel .hero-select { --field-background: var(--surface-2); --field-hover: var(--surface-2); --field-focus: var(--surface-2); }
 .task-settings-network { display: flex; flex-direction: column; gap: 10px; }
 .network-mode-options { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; }
 .network-mode { min-height: 36px; padding: 6px 4px; font-size: 11px; border-radius: 8px; border: 1px solid var(--line); background: transparent; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
@@ -446,7 +447,9 @@ dialog > .discovery-body { padding: 20px 28px; overflow-y: auto; max-height: 64d
 .topbar-context .crumb { display: block; flex: 0 1 auto; min-width: 0; max-width: min(30%,160px); padding: 0 10px 0 0; border-right: 1px solid var(--line); border-radius: 0; font: 12px/1.4 var(--font-sans); color: var(--muted); text-align: left; }
 .topbar-context .title { display: block; flex: 1 1 auto; min-width: 0; max-width: 100%; font: 550 13px/1.4 var(--font-sans); }
 .topbar-repository { flex: 0 1 160px; min-width: 0; }
-.topbar .topbar-repository select[data-repo-picker] { width: 100%; min-width: 0; max-width: 160px; height: 32px; padding: 5px 26px 5px 10px; font-size: 12px; text-overflow: ellipsis; background: var(--surface-2); border-color: transparent; }
+.topbar .topbar-repository select { width: 100%; min-width: 0; max-width: 160px; height: 32px; padding: 5px 26px 5px 10px; font-size: 12px; text-overflow: ellipsis; background: var(--surface-2); border-color: transparent; }
+.topbar .topbar-repository .hero-select { max-width: 160px; --field-background: var(--surface-2); --field-hover: var(--surface-2); --field-focus: var(--surface-2); --field-border: transparent; --field-border-hover: transparent; }
+.topbar .topbar-repository .hero-select-trigger { min-height: 32px; height: 32px; padding: 4px 8px 4px 10px; font-size: 12px; }
 .topbar-actions { display: flex; align-items: center; flex: none; gap: 4px; }
 .topbar-actions .btn.icon-only { min-width: 32px; width: 32px; height: 32px; min-height: 32px; border-radius: 8px; }
 .topbar-menu-context { display: flex; flex-direction: column; gap: 5px; padding: 10px 9px 12px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
@@ -461,7 +464,8 @@ dialog > .discovery-body { padding: 20px 28px; overflow-y: auto; max-height: 64d
  .topbar-chat .topbar-context .crumb { display: none; }
  .topbar-context .title { font-size: 13px; }
  .topbar-repository { flex: 0 0 104px; }
- .topbar .topbar-repository select[data-repo-picker] { font-size: 11px; padding-left: 8px; padding-right: 20px; }
+ .topbar .topbar-repository select { font-size: 11px; padding-left: 8px; padding-right: 20px; }
+ .topbar .topbar-repository .hero-select-trigger { font-size: 11px; padding-left: 8px; padding-right: 6px; }
  .topbar-actions { gap: 0; }
  .topbar-utility,.topbar-utility.has-toggle { height: 44px; min-height: 44px; padding: 6px 12px 0; }
 }

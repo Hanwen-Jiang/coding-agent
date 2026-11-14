@@ -105,26 +105,26 @@ const send=async(message,count)=>{const input=$('#composer');input.value=message
 try{
  if(!sessionStorage.getItem('settings-reloaded')){
   (await wait(()=>$('dialog.account'),'account')).close();await route('a');await open();
-  $('[data-network-mode="open"]').click();$('.task-settings-panel select[aria-label="Sandbox level"]').value='read';$('.network-duration-field select').value='15';await apply();
-  await send('first',1);await open();check(selected('open')&&$('.network-duration-field select').value==='15','A reset to offline after first send');close();
+  $('[data-network-mode="open"]').click();$('.task-settings-panel .task-sandbox').value='read';$('.network-duration-field .network-duration').value='15';await apply();
+  await send('first',1);await open();check(selected('open')&&$('.network-duration-field .network-duration').value==='15','A reset to offline after first send');close();
   await send('second',2);await open();check(selected('open'),'A reset after second send');close();
-  await route('b');await open();check(selected('deny'),'B inherited A public setting');check($('.task-settings-panel select[aria-label="Sandbox level"]').value==='write_reversible','B inherited A sandbox');
-  $('[data-network-mode="allowlist"]').click();$('.network-hosts-input').value='docs.example.com';$('.network-duration-field select').value='60';await apply();
-  await route('a');await open();check(selected('open')&&$('.network-duration-field select').value==='15','A overwritten by B');close();
+  await route('b');await open();check(selected('deny'),'B inherited A public setting');check($('.task-settings-panel .task-sandbox').value==='write_reversible','B inherited A sandbox');
+  $('[data-network-mode="allowlist"]').click();$('.network-hosts-input').value='docs.example.com';$('.network-duration-field .network-duration').value='60';await apply();
+  await route('a');await open();check(selected('open')&&$('.network-duration-field .network-duration').value==='15','A overwritten by B');close();
   sessionStorage.setItem('settings-reloaded','1');location.reload();
  }else{
-  await wait(()=>$('.task-settings-trigger'),'reloaded composer');await open();check(selected('open')&&$('.network-duration-field select').value==='15','refresh lost backend settings');close();
-  await route('b');await open();check(selected('allowlist')&&$('.network-duration-field select').value==='60','B backend setting lost');$('[data-network-mode="deny"]').click();await apply();await send('offline',3);
-  await route('a');await open();$('.network-duration-field select').value='30';$('[data-task-settings-apply]').click();await route('b');await new Promise(r=>setTimeout(r,450));await open();check(selected('deny'),'late save from A overwrote B');close();
-  await route('a');await open();check(selected('open')&&$('.network-duration-field select').value==='30','A late save was not persisted');close();
+  await wait(()=>$('.task-settings-trigger'),'reloaded composer');await open();check(selected('open')&&$('.network-duration-field .network-duration').value==='15','refresh lost backend settings');close();
+  await route('b');await open();check(selected('allowlist')&&$('.network-duration-field .network-duration').value==='60','B backend setting lost');$('[data-network-mode="deny"]').click();await apply();await send('offline',3);
+  await route('a');await open();$('.network-duration-field .network-duration').value='30';$('[data-task-settings-apply]').click();await route('b');await new Promise(r=>setTimeout(r,450));await open();check(selected('deny'),'late save from A overwrote B');close();
+  await route('a');await open();check(selected('open')&&$('.network-duration-field .network-duration').value==='30','A late save was not persisted');close();
   location.hash='#/w/p/new';await wait(()=>$('.topbar-context .title')?.title==='New session','draft P');await open();check(selected('deny'),'new draft inherited existing session settings');
   const environment=id=>{const e=$('[data-environment-select]');e.value=id;e.dispatchEvent(new Event('change'));};
-  environment('env-a');check(selected('open')&&$('.network-duration-field select').value==='15','env A network did not populate');$('.network-duration-field select').value='60';$('.task-settings-panel select[aria-label="Sandbox level"]').value='read';
-  environment('env-b');check(selected('allowlist')&&$('.network-hosts-input').value==='docs.example.com'&&$('.network-duration-field select').value==='15','env B did not populate independent hosts/duration');check($('.task-settings-panel select[aria-label="Sandbox level"]').value==='write_reversible','env B inherited A sandbox');
+  environment('env-a');check(selected('open')&&$('.network-duration-field .network-duration').value==='15','env A network did not populate');$('.network-duration-field .network-duration').value='60';$('.task-settings-panel .task-sandbox').value='read';
+  environment('env-b');check(selected('allowlist')&&$('.network-hosts-input').value==='docs.example.com'&&$('.network-duration-field .network-duration').value==='15','env B did not populate independent hosts/duration');check($('.task-settings-panel .task-sandbox').value==='write_reversible','env B inherited A sandbox');
   environment('');check(selected('deny'),'default environment inherited networking');
-  environment('env-a');check(selected('open')&&$('.network-duration-field select').value==='60'&&$('.task-settings-panel select[aria-label="Sandbox level"]').value==='read','env A draft values not restored');await apply();
-  location.hash='#/w/q/new';await wait(()=>$('.topbar-context .crumb')?.title==='Q','draft Q');await open();check(selected('deny')&&$('[data-environment-select]').value==='','project Q inherited draft P');environment('env-a');check(selected('open')&&$('.network-duration-field select').value==='15'&&$('.task-settings-panel select[aria-label="Sandbox level"]').value==='write_reversible','project Q inherited A overrides from P');close();
-  location.hash='#/w/p/new';await wait(()=>$('.topbar-context .crumb')?.title==='P','back draft P');await open();check(selected('open')&&$('.network-duration-field select').value==='60'&&$('[data-environment-select]').value==='env-a','draft P lost preferences');
+  environment('env-a');check(selected('open')&&$('.network-duration-field .network-duration').value==='60'&&$('.task-settings-panel .task-sandbox').value==='read','env A draft values not restored');await apply();
+  location.hash='#/w/q/new';await wait(()=>$('.topbar-context .crumb')?.title==='Q','draft Q');await open();check(selected('deny')&&$('[data-environment-select]').value==='','project Q inherited draft P');environment('env-a');check(selected('open')&&$('.network-duration-field .network-duration').value==='15'&&$('.task-settings-panel .task-sandbox').value==='write_reversible','project Q inherited A overrides from P');close();
+  location.hash='#/w/p/new';await wait(()=>$('.topbar-context .crumb')?.title==='P','back draft P');await open();check(selected('open')&&$('.network-duration-field .network-duration').value==='60'&&$('[data-environment-select]').value==='env-a','draft P lost preferences');
   await fetch('/__result',{method:'POST',body:JSON.stringify(out)});
  }
 }catch(error){out.errors.push(String(error.stack||error));await fetch('/__result',{method:'POST',body:JSON.stringify(out)});}

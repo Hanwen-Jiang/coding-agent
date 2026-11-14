@@ -95,12 +95,12 @@ try{
    const hosts=$('.network-hosts-input');check(hosts.tagName==='TEXTAREA'&&hosts.rows>=3,'hosts need editable multiline field');
    hosts.value='a.example.com\nb.example.com';check(hosts.getBoundingClientRect().width>220,'hosts input truncated');
   }else check($('.network-hosts-field').hidden,'public mode does not need hosts');
-  check([...$('.network-duration-field select').options].some(o=>o.value==='0')===C.unlimited,'unlimited must follow server support');
-  $('.network-duration-field select').value=C.unlimited?'0':'30';
+  check([...$('.network-duration-field .network-duration').options].some(o=>o.value==='0')===C.unlimited,'unlimited must follow server support');
+  $('.network-duration-field .network-duration').value=C.unlimited?'0':'30';
  }
  check($('.task-settings-pop').getBoundingClientRect().right<=innerWidth,'popover exceeds viewport');
  $('[data-task-settings-apply]').click();await wait(()=>!$('.task-settings-pop'),'applied settings');
- if(C.unlimited){$('.task-settings-trigger').click();await wait(()=>$('.network-duration-field select'),'reopened unlimited settings');check($('.network-duration-field select').value==='0','unlimited choice lost before submit');$('[data-task-settings-apply]').click();await wait(()=>!$('.task-settings-pop'),'reapplied settings');}
+ if(C.unlimited){$('.task-settings-trigger').click();await wait(()=>$('.network-duration-field .network-duration'),'reopened unlimited settings');check($('.network-duration-field .network-duration').value==='0','unlimited choice lost before submit');$('[data-task-settings-apply]').click();await wait(()=>!$('.task-settings-pop'),'reapplied settings');}
  $('#composer').value='Check documentation';$('#composer').dispatchEvent(new Event('input',{bubbles:true}));
  // React commits the input event before a user's next browser event. Synthetic
  // dispatchEvent + click in one JS stack must wait for that same enabled state.

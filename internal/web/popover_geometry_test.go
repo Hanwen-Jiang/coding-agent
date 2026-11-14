@@ -54,7 +54,7 @@ try{
   for(const mode of ['open','deny','allowlist','open']){
    scroller.scrollTop=0;$('[data-network-mode="'+mode+'"]').click();await wait(footerVisible,'mode '+mode+' footer '+theme);
   }
-  const duration=$('.network-duration-field select');check([...duration.options].some(o=>o.value==='0'),'unlimited option missing');duration.value='0';duration.dispatchEvent(new Event('change'));
+  const duration=$('.network-duration-field .network-duration');check([...duration.options].some(o=>o.value==='0'),'unlimited option missing');duration.value='0';duration.dispatchEvent(new Event('change'));
   await wait(()=>!$('.network-duration-hint').hidden&&footerVisible(),'unlimited hint footer '+theme);
   check($('.network-duration-hint').textContent.includes('task finishes'),'unlimited must stay task scoped');
   $('.task-settings-actions button').click();await wait(()=>!$('.task-settings-pop'),'cancel closes popover');
