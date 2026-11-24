@@ -106,7 +106,7 @@ export function ContextPanel({agents,sources,sourcesLoading=false,sourcesError='
     <Button className="context-source-add" variant="ghost" size="sm" isIconOnly isDisabled={readOnly||uploading} onPress={onAdd} aria-label={labels.addSource} title={readOnly?labels.readOnly:uploading?labels.uploading:labels.addSource}><PlusIcon/></Button>
    </div>
    <p className="context-section-caption">{labels.uploaded}</p>
-   {onManage&&<Button className="context-workbench-open" variant="ghost" size="sm" onPress={onManage}>{document.documentElement.lang.startsWith("zh")?"打开文件工作台":"Open file workspace"}</Button>}
+   {onManage&&<Button className="context-workbench-open" variant="ghost" size="sm" onPress={onManage}><Icon name="folderOpen" size="xs"/>{document.documentElement.lang.startsWith("zh")?"打开文件工作台":"Open file workspace"}</Button>}
    {(sourcesLoading||uploading)&&<p className="context-loading" role="status">{uploading?labels.uploading:labels.loading}</p>}
    {sourcesError&&<div className="context-error" role="alert"><p>{sourcesError}</p>{onRetry&&<Button className="context-retry" variant="ghost" size="sm" onPress={onRetry} isDisabled={sourcesLoading}>{labels.retry}</Button>}</div>}
    {sources.length?<ul className="context-source-list">{visibleSources.map(source=><SourceRow key={source.id} source={source} onOpen={onOpenSource} onUse={onUseSource} disabled={readOnly||uploading} useLabel={labels.useSource} openLabel={labels.openSource} unavailableLabel={labels.unavailable}/>)}</ul>:!sourcesLoading&&!sourcesError&&<p className="context-empty">{labels.noSources}</p>}

@@ -12,7 +12,7 @@ export function RunDetails({title,summary,current,entries,raw,metrics,labels}:Ru
  useEffect(()=>()=>{if(timer.current)clearTimeout(timer.current);},[]);
  const copy=async()=>{try{await navigator.clipboard.writeText(raw);setCopied(labels.copied);}catch{setCopied(labels.copyFailed);}if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>setCopied(''),2000);};
  return <details className="run-diagnostics" data-pro-component="RunDetails">
-  <summary className="diagnostic-trigger"><Icon name="inspect" size="xs" className="diagnostic-inspect-icon"/><span>{title}</span><span className="diagnostic-summary">{summary}</span><Chevron/></summary>
+  <summary className="diagnostic-trigger"><span className="diagnostic-trigger-start"><Icon name="inspect" size="xs" className="diagnostic-inspect-icon"/><span>{title}</span></span><span className="diagnostic-trigger-end"><span className="diagnostic-summary">{summary}</span><Chevron/></span></summary>
   <div className="run-diagnostics-body">
    <dl className="diagnostic-metrics">{metrics.map(metric=><div key={metric.id} className="diagnostic-metric" data-metric={metric.id} data-value={metric.value}><dt>{metric.label}</dt><dd className="diagnostic-metric-value">{metric.value}</dd></div>)}</dl>
    {current&&<div className="diagnostic-current"><span className="diagnostic-dot" data-kind="run"/>{current}</div>}

@@ -4,6 +4,7 @@ import {ChatMessage} from '@heroui-pro/react/chat-message';
 import {Markdown} from '@heroui-pro/react/markdown';
 import {CodeBlock} from '@heroui-pro/react/code-block';
 import type {Components} from 'react-markdown';
+import {Icon} from './icon';
 
 export interface AnswerProps {
  id: string;
@@ -33,7 +34,7 @@ function CopyCode({code,label,copiedLabel,failedLabel}: {code:string;label:strin
  return <button type="button" className="btn ghost xs code-block__copy-button" data-slot="code-block-copy-button" aria-label={label} aria-live="polite" onClick={async()=>{
   try {await navigator.clipboard.writeText(code);setState('copied');} catch {setState('failed');}
   if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>setState('ready'),2000);
- }}>{state==='copied'?copiedLabel:state==='failed'?failedLabel:label}</button>;
+ }}><Icon name={state==='copied'?'check':'copy'} size="xs"/><span>{state==='copied'?copiedLabel:state==='failed'?failedLabel:label}</span></button>;
 }
 function Answer({id,text,streaming,copyLabel,copiedLabel,copyFailedLabel}: AnswerProps) {
  const components = React.useMemo<Components>(() => ({
@@ -44,7 +45,7 @@ function Answer({id,text,streaming,copyLabel,copiedLabel,copyFailedLabel}: Answe
    if (node?.position?.start.line === node?.position?.end.line) return <code>{children}</code>;
    const language = /language-([\w+-]+)/.exec(className || '')?.[1] || 'plaintext';
    const code = String(children || '').replace(/\n$/,'');
-   return <CodeBlock><CodeBlock.Header><span>{language}</span><CopyCode code={code} label={copyLabel} copiedLabel={copiedLabel} failedLabel={copyFailedLabel}/></CodeBlock.Header><CodeBlock.Code code={code} language={language}/></CodeBlock>;
+   return <CodeBlock><CodeBlock.Header><span className="code-block__lang"><Icon name="code" size="xs"/><span>{language}</span></span><CopyCode code={code} label={copyLabel} copiedLabel={copiedLabel} failedLabel={copyFailedLabel}/></CodeBlock.Header><CodeBlock.Code code={code} language={language}/></CodeBlock>;
   },
  }), [copyLabel,copiedLabel,copyFailedLabel]);
  return <AnswerBoundary text={text}><ChatMessage.Assistant data-pro-component="ChatMessage" data-streaming={String(streaming)}>

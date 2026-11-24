@@ -42,9 +42,10 @@ function ProgressParagraph({part}:{part:Note}) {
 }
 function PlanView({plan}:{plan:Plan}) {
  if(!plan.steps.length&&!plan.agents.length)return null;
+ const doneCount=plan.steps.filter(s=>s.status==='done').length;
  return <div className="execution-plan">
-  {plan.steps.length>0&&<div className="plan"><div className="plan-title">{plan.title}</div><ol className="plan-steps">
-   {plan.steps.map(step=><li key={step.id} className={'plan-step'+(step.current?' current':'')} data-status={step.status} title={step.statusLabel} aria-label={`${step.title} · ${step.statusLabel}`}><span className="plan-mark"/><span className="plan-text">{step.title}</span></li>)}
+  {plan.steps.length>0&&<div className="plan"><div className="plan-head"><div className="plan-title">{plan.title}</div><span className="plan-progress">{doneCount}/{plan.steps.length}</span></div><ol className="plan-steps">
+   {plan.steps.map(step=><li key={step.id} className={'plan-step'+(step.current?' current':'')} data-status={step.status} title={step.statusLabel} aria-label={`${step.title} · ${step.statusLabel}`}><span className="plan-mark">{step.status==='done'&&<Icon name="check" size="xs"/>}</span><span className="plan-text">{step.title}</span></li>)}
   </ol></div>}
   {plan.agents.length>0&&<div className="subagents"><div className="subagents-title">{plan.agentsTitle}</div>{plan.agents.map(agent=><div key={agent.id} className="subagent" data-node={agent.name} data-state={agent.state} title={agent.statusLabel} aria-label={`${agent.name} · ${agent.statusLabel}`}>
    <span className="subagent-mark"/><span className="subagent-name">{agent.name}</span><span className="subagent-steps muted">{agent.label}</span>{agent.last&&<span className="subagent-last">{agent.last}</span>}
@@ -93,9 +94,9 @@ function ToolGroup({part,labels}:{part:Group;labels:ConversationProps['labels']}
  const visible=all?part.steps:part.steps.slice(0,8);
  const failures=part.steps.filter(step=>step.state==='output-error');
  return <div className="progress-island">
-  <div className={'worklog pro-worklog'+(expanded?' open':'')} data-pro-component="ChainOfThought">
+  <div className={'worklog pro-worklog'+(expanded?' open':'')} data-pro-component="ChainOfThought" data-running={part.running?'true':undefined}>
    <ChainOfThought isExpanded={expanded} onExpandedChange={setExpanded}>
-    <ChainOfThought.Trigger className="worklog-head"><span className="execution-lead-icon" aria-hidden="true"><Icon name={part.running?'sparkles':'terminal'} size="xs"/></span><span className="execution-summary">{part.title}</span>
+    <ChainOfThought.Trigger className="worklog-head"><span className="execution-lead-icon" aria-hidden="true"><Icon name={part.running?'sparkles':'terminal'} size="xs"/></span><span className={'execution-summary'+(part.running?' ag-shimmer':'')}>{part.title}</span>
      {failures.length>0&&<span className="execution-failures">{labels.failed} {failures.length}</span>}
     </ChainOfThought.Trigger>
     <ChainOfThought.Content className="execution-content">
@@ -104,7 +105,7 @@ function ToolGroup({part,labels}:{part:Group;labels:ConversationProps['labels']}
      {part.steps.length>8&&<Button className="execution-more" size="sm" variant="ghost" onPress={()=>setAll(!all)}>{all?labels.less:labels.more.replace('{n}',String(part.steps.length-8))}</Button>}
     </ChainOfThought.Content>
    </ChainOfThought>
-   {part.running&&part.current&&<div className="execution-current" role="status"><ChatLoader.Dots aria-hidden="true"/><span data-current-label="">{part.current}</span></div>}
+   {part.running&&part.current&&<div className="execution-current" role="status"><ChatLoader.Dots size="sm" aria-hidden="true"/><span data-current-label="" className="ag-shimmer">{part.current}</span></div>}
   </div>
  </div>;
 }

@@ -5,11 +5,11 @@
 .pages-pro .button { border-radius: var(--radius-sm); color: var(--button-fg); }
 .pages-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
 .pages-card.card {
-  display: flex; flex-direction: column; gap: 14px; padding: 20px; border: 1px solid var(--line); border-radius: 16px;
+  display: flex; flex-direction: column; gap: 14px; padding: 20px; border: 1px solid var(--line); border-radius: 14px;
   background: var(--surface); box-shadow: none;
-  transition: border-color .12s cubic-bezier(.2, .7, .2, 1), box-shadow .18s cubic-bezier(.2, .7, .2, 1);
+  transition: border-color .12s cubic-bezier(.2, .7, .2, 1), box-shadow .18s cubic-bezier(.2, .7, .2, 1), transform .14s cubic-bezier(.2, .7, .2, 1);
 }
-.pages-card.card:hover { border-color: var(--line-2); box-shadow: var(--shadow); }
+.pages-card.card:hover { border-color: var(--line-2); box-shadow: var(--shadow); transform: translateY(-1px); }
 .pages-card-head { display: flex; flex-direction: row; align-items: center; gap: 12px; padding: 0; }
 .pages-card-mark { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 10px; background: var(--surface-2); color: var(--text-2); }
 .pages-card-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

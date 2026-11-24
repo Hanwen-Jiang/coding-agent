@@ -1,16 +1,16 @@
 /* Session status panel (ui/chat/status-panel.tsx): one HeroUI Accordion on one surface, matching the subagents and
    sources panel above it. Section bodies are drawn by the controller into .sp-body. */
 .status-island { display: block; flex: none; }
-.status-accordion { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); padding: 3px; contain: none; }
+.status-accordion { border: 1px solid color-mix(in srgb, var(--line) 85%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--surface) 75%, transparent); padding: 3px; contain: none; }
 .status-accordion .sp { border: 0; border-radius: 0; background: transparent; flex: none; }
-.status-accordion .sp + .sp { border-top: 1px solid var(--line); }
-.status-accordion .sp-head { gap: 9px; min-height: 42px; padding: 6px 8px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; text-align: left; }
+.status-accordion .sp + .sp { border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent); }
+.status-accordion .sp-head { gap: 9px; min-height: 40px; padding: 6px 8px; border: 0; border-radius: 9px; background: transparent; color: var(--text); font: inherit; text-align: left; }
 .status-accordion .sp-head:hover:not([aria-expanded=true]) { background: var(--surface-2); }
 .status-accordion .sp-head:focus-visible:not([data-focus-visible=true]) { outline: none; }
-.status-accordion .sp-icon { display: grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 7px; background: var(--surface-2); color: var(--muted); transition: color var(--motion-fast, .12s), background-color var(--motion-fast, .12s); }
+.status-accordion .sp-icon { display: grid; place-items: center; width: 22px; height: 22px; flex: none; border-radius: 6px; background: var(--surface-2); color: var(--muted); transition: color var(--motion-fast, .12s), background-color var(--motion-fast, .12s); }
 .status-accordion .sp-head[aria-expanded=true] .sp-icon { background: var(--accent-soft); color: var(--accent); }
-.status-accordion .sp-head .t { font-size: 13px; font-weight: 600; white-space: nowrap; }
-.status-accordion .sum { margin-left: auto; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; font-size: 12px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+.status-accordion .sp-head .t { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.status-accordion .sum { margin-left: auto; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; font-size: 11.5px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
 .status-accordion .sum-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-accordion .sp-indicator { margin-inline-start: 0; width: 14px; height: 14px; color: var(--faint); transition: rotate .22s cubic-bezier(.2,.7,.2,1); }
 .status-accordion .sp-head[aria-expanded=true] .sp-indicator { rotate: -180deg; }
@@ -20,7 +20,7 @@
 .status-accordion .sp-body > :first-child { margin-top: 0; }
 .status-accordion .kv { gap: 7px 12px; font-size: 12.5px; align-items: center; }
 .status-accordion .kv .k { font-size: 12px; color: var(--muted); }
-.status-accordion .sp-sub { margin-top: 12px; }
+.status-accordion .sp-sub { margin-top: 12px; padding-top: 10px; border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent); font-size: 11.5px; letter-spacing: 0; text-transform: none; font-weight: 600; color: var(--muted); }
 .status-accordion .sp-actions { gap: 6px; margin-top: 10px; }
 .status-accordion .sp-actions .btn.sm { min-height: 28px; height: 28px; }
 

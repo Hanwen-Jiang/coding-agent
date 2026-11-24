@@ -1,4 +1,4 @@
-import React, {useLayoutEffect, useRef, useState, useSyncExternalStore} from 'react';
+import React, {useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {PromptInput} from '@heroui-pro/react/prompt-input';
 import {Button} from '@heroui/react';
 import {ChatAttachment} from '@heroui-pro/react/chat-attachment';
@@ -54,6 +54,7 @@ function ComposerView(props: ComposerProps) {
  const fileInput=useRef<HTMLInputElement>(null);
  const dragDepth=useRef(0);
  const [dragging,setDragging]=useState(false);
+ const [showScrollDown,setShowScrollDown]=useState(false);
  const input=useRef<HTMLTextAreaElement>(null);
  const body=useRef<HTMLDivElement>(null);
  const right=useRef<HTMLDivElement>(null);
@@ -62,6 +63,17 @@ function ComposerView(props: ComposerProps) {
  const initial=useRef(props.input.value);
  const wasFocused=useRef(document.activeElement===props.input);
  const initialSelection=useRef([props.input.selectionStart,props.input.selectionEnd]);
+ useEffect(()=>{
+  const scroller=document.querySelector<HTMLElement>('.main .scroll');
+  if(!scroller)return;
+  const check=()=>{setShowScrollDown(scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight>140);};
+  check();
+  scroller.addEventListener('scroll',check,{passive:true});
+  const observer=new ResizeObserver(check);
+  observer.observe(scroller);
+  if(scroller.firstElementChild)observer.observe(scroller.firstElementChild);
+  return()=>{scroller.removeEventListener('scroll',check);observer.disconnect();};
+ },[]);
  useLayoutEffect(()=>{
   const previous=props.input;
   // Preserve edits entered while the React bundle was loading.
@@ -78,6 +90,7 @@ function ComposerView(props: ComposerProps) {
   onDrop={event=>{if(event.dataTransfer.types.includes('Files')){event.preventDefault();dragDepth.current=0;setDragging(false);props.onFiles(Array.from(event.dataTransfer.files));}}}
   onPaste={event=>{if(event.clipboardData.files.length){event.preventDefault();props.onFiles(Array.from(event.clipboardData.files));}}}>
   <input ref={fileInput} type="file" className="composer-file-input" multiple hidden aria-label={state.uploadLabels?.add} onChange={event=>{props.onFiles(Array.from(event.target.files||[]));event.target.value='';}}/>
+  {showScrollDown&&<button type="button" className="scroll-to-bottom" aria-label={document.documentElement.lang.startsWith('zh')?'滚动到底部':'Scroll to bottom'} onClick={()=>{const s=document.querySelector<HTMLElement>('.main .scroll');s?.scrollTo({top:s.scrollHeight,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});}}><Icon name="chevDown" size="xs"/></button>}
   <PromptInput.Shell>
    <div ref={body} className={'composer'+(state.mode==='waiting'?' waiting':'')}>
     <ControlSlot node={props.slots.status}/><ControlSlot node={props.slots.ask}/>
