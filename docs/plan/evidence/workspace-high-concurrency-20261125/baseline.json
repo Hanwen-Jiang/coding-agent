@@ -1,0 +1,58 @@
+{
+  "arm": "baseline",
+  "replicas": 4,
+  "concurrency": 200,
+  "total_requests": 14000,
+  "total_succeeded": 14000,
+  "overall_qps": 61476.039713521655,
+  "overall_p95_ms": 6.138,
+  "overall_p50_ms": 2.8164285714285713,
+  "downstream_calls": 4,
+  "scenarios": [
+    {
+      "name": "hot_duplicate_submit_200",
+      "replicas": 4,
+      "concurrency": 200,
+      "total_requests": 2000,
+      "succeeded": 2000,
+      "failed": 0,
+      "elapsed_ms": 84.913,
+      "qps": 23553.346120837497,
+      "p50_ms": 6.221,
+      "p95_ms": 18.57,
+      "p99_ms": 20.826,
+      "downstream_starts": 1,
+      "downstream_gets": 2
+    },
+    {
+      "name": "running_status_poll_storm_200",
+      "replicas": 4,
+      "concurrency": 200,
+      "total_requests": 6000,
+      "succeeded": 6000,
+      "failed": 0,
+      "elapsed_ms": 76.727,
+      "qps": 78198.86330653624,
+      "p50_ms": 2.499,
+      "p95_ms": 4.053,
+      "p99_ms": 4.778,
+      "downstream_starts": 0,
+      "downstream_gets": 0
+    },
+    {
+      "name": "completed_status_poll_storm_200",
+      "replicas": 4,
+      "concurrency": 200,
+      "total_requests": 6000,
+      "succeeded": 6000,
+      "failed": 0,
+      "elapsed_ms": 66.091,
+      "qps": 90783.11832839593,
+      "p50_ms": 1.999,
+      "p95_ms": 4.079,
+      "p99_ms": 5.543,
+      "downstream_starts": 0,
+      "downstream_gets": 0
+    }
+  ]
+}

@@ -118,8 +118,8 @@ type Server struct {
 	api       *TaskAPI
 	git       Git
 	ws        Workspaces
-	wsJobs    sync.Map // in-process runners for persisted HTTP workspace operations
 	wsLocks   sync.Map // 工作区 id → *sync.Mutex（workspaceLock）
+	wsHot     workspaceHotState
 	providers map[string]*Provider
 	allowed   map[string]bool
 	// handoff 把会话选定的环境配置交给 Runtime（envhandoff.go；ENV-02 的契约定下之前不发）。

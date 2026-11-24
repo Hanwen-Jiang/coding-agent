@@ -16,8 +16,55 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
+
+const workspaceDoneCacheMax = 4096
+
+// workspaceHotState accelerates high-concurrency async workspace operations:
+// - activeRunners avoids redundant open/flock syscalls when this replica already owns an op;
+// - done caches immutable terminal records (Status != 0) to skip disk I/O and mutex contention;
+// - readFlights coalesces concurrent status-poll disk reads for the same in-flight op.
+type workspaceHotState struct {
+	activeRunners sync.Map // key: tenant+"\x00"+opID -> struct{}
+	remoteOwned   sync.Map // key: tenant+"\x00"+opID -> int64 unix nano backoff deadline
+	admitFlights  singleflight.Group
+	readFlights   singleflight.Group
+	doneMu        sync.RWMutex
+	done          map[string]*workspaceHTTPRecord
+}
+
+const workspaceRemoteLockBackoff = 50 * time.Millisecond
+
+func workspaceHotKey(tenant, opID string) string { return tenant + "\x00" + opID }
+
+func (h *workspaceHotState) getDone(key string) (*workspaceHTTPRecord, bool) {
+	h.doneMu.RLock()
+	rec, ok := h.done[key]
+	h.doneMu.RUnlock()
+	return rec, ok
+}
+
+func (h *workspaceHotState) putDone(key string, rec *workspaceHTTPRecord) {
+	if rec == nil || rec.Status == 0 {
+		return
+	}
+	cp := *rec
+	cp.Response = append(json.RawMessage(nil), rec.Response...)
+	h.doneMu.Lock()
+	if h.done == nil {
+		h.done = make(map[string]*workspaceHTTPRecord, 64)
+	}
+	if len(h.done) >= workspaceDoneCacheMax {
+		// Simple bounded reset prevents unbounded memory growth under churn.
+		h.done = make(map[string]*workspaceHTTPRecord, 64)
+	}
+	h.done[key] = &cp
+	h.doneMu.Unlock()
+}
 
 // The HTTP journal retains application projection and response state only. Each
 // sandbox mutation remains an existing durable Runtime workspace operation.
@@ -64,9 +111,13 @@ func (s *Store) workspaceOperationFile(tenant, id string) string {
 }
 func (j *workspaceHTTPJournal) save() error {
 	j.server.store.mu.Lock()
-	defer j.server.store.mu.Unlock()
 	path := j.server.store.workspaceOperationFile(j.tenant, j.record.ID)
-	return writeWorkspaceHTTPRecord(path, j.record)
+	err := writeWorkspaceHTTPRecord(path, j.record)
+	j.server.store.mu.Unlock()
+	if err == nil && j.record.Status != 0 {
+		j.server.wsHot.putDone(workspaceHotKey(j.tenant, j.record.ID), j.record)
+	}
+	return err
 }
 
 func writeWorkspaceHTTPRecord(path string, record *workspaceHTTPRecord) error {
@@ -294,16 +345,28 @@ func (s *Server) workspaceHTTP(kind string) authedHandler {
 		}
 		opID := "who-" + workspaceHash(id.TenantID, id.UserID, key)
 		digest := workspaceHash(c.Request.Method, c.Request.URL.RequestURI(), string(body))
-		s.store.mu.Lock()
-		rec, err := readJSONFile[*workspaceHTTPRecord](s.store.workspaceOperationFile(id.TenantID, opID))
-		if err == nil && rec == nil {
-			rec = &workspaceHTTPRecord{ID: opID, User: id.UserID, Kind: kind, Digest: digest, Method: c.Request.Method, URL: c.Request.URL.RequestURI(), Body: body, Language: requestLang(c.Request), Created: time.Now().UTC(), Facts: map[string]json.RawMessage{}, Paths: map[string]string{}}
-			for _, p := range []string{"project", "session", "repo"} {
-				rec.Paths[p] = c.Param(p)
-			}
-			err = writeWorkspaceHTTPRecord(s.store.workspaceOperationFile(id.TenantID, opID), rec)
+		input := &workspaceHTTPRecord{ID: opID, User: id.UserID, Kind: kind, Digest: digest, Method: c.Request.Method, URL: c.Request.URL.RequestURI(), Body: body, Language: requestLang(c.Request), Created: time.Now().UTC(), Facts: map[string]json.RawMessage{}, Paths: map[string]string{}}
+		for _, p := range []string{"project", "session", "repo"} {
+			input.Paths[p] = c.Param(p)
 		}
-		s.store.mu.Unlock()
+		hotKey := workspaceHotKey(id.TenantID, opID)
+		var rec *workspaceHTTPRecord
+		if cached, ok := s.wsHot.getDone(hotKey); ok {
+			rec, err = cached, nil
+		} else {
+			flightKey := hotKey + "\x00" + digest
+			val, flightErr, _ := s.wsHot.admitFlights.Do(flightKey, func() (any, error) {
+				r, e := s.store.admitWorkspaceHTTP(id.TenantID, input)
+				if e == nil && r != nil && r.Status != 0 {
+					s.wsHot.putDone(hotKey, r)
+				}
+				return r, e
+			})
+			err = flightErr
+			if val != nil {
+				rec = val.(*workspaceHTTPRecord)
+			}
+		}
 		if err != nil {
 			writeErr(c, 500, err)
 			return
@@ -312,34 +375,119 @@ func (s *Server) workspaceHTTP(kind string) authedHandler {
 			writeJSON(c, 409, map[string]string{"error": "Idempotency-Key already used with different parameters"})
 			return
 		}
-		s.resumeWorkspaceHTTP(rec, id)
+		if rec.Status == 0 {
+			if err := s.resumeWorkspaceHTTP(rec, id); err != nil {
+				writeErr(c, 500, err)
+				return
+			}
+		}
 		writeJSON(c, http.StatusAccepted, map[string]string{"operation_id": opID, "status_url": "/api/workspace-operations/" + opID})
 	}
 }
 
-func (s *Server) resumeWorkspaceHTTP(rec *workspaceHTTPRecord, id identity) {
+func (s *Store) admitWorkspaceHTTP(tenant string, input *workspaceHTTPRecord) (*workspaceHTTPRecord, error) {
+	path := s.workspaceOperationFile(tenant, input.ID)
+	// Fast path: duplicate retries for an already-admitted operation only need
+	// a shared read lock and avoid contending on the cross-process metadata lock.
+	s.mu.RLock()
+	saved, err := readJSONFile[*workspaceHTTPRecord](path)
+	s.mu.RUnlock()
+	if err != nil || saved != nil {
+		return saved, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unlock, err := s.lockMetadata()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	saved, err = readJSONFile[*workspaceHTTPRecord](path)
+	if err != nil || saved != nil {
+		return saved, err
+	}
+	return input, writeWorkspaceHTTPRecord(path, input)
+}
+
+func (s *Server) readWorkspaceHTTPRecord(tenant, opID string) (*workspaceHTTPRecord, error) {
+	hotKey := workspaceHotKey(tenant, opID)
+	if cached, ok := s.wsHot.getDone(hotKey); ok {
+		return cached, nil
+	}
+	val, err, _ := s.wsHot.readFlights.Do(hotKey, func() (any, error) {
+		if cached, ok := s.wsHot.getDone(hotKey); ok {
+			return cached, nil
+		}
+		s.store.mu.RLock()
+		rec, err := readJSONFile[*workspaceHTTPRecord](s.store.workspaceOperationFile(tenant, opID))
+		s.store.mu.RUnlock()
+		if err != nil {
+			return nil, err
+		}
+		if rec != nil && rec.Status != 0 {
+			s.wsHot.putDone(hotKey, rec)
+		}
+		return rec, nil
+	})
+	if err != nil || val == nil {
+		return nil, err
+	}
+	return val.(*workspaceHTTPRecord), nil
+}
+
+func (s *Server) resumeWorkspaceHTTP(rec *workspaceHTTPRecord, id identity) error {
 	if rec.Status != 0 {
-		return
+		return nil
 	}
-	key := id.TenantID + "/" + rec.ID
-	if _, loaded := s.wsJobs.LoadOrStore(key, true); loaded {
-		return
+	hotKey := workspaceHotKey(id.TenantID, rec.ID)
+	// Fast path: this replica already holds the cross-process OS runner lock,
+	// or recently observed another replica holding it (50ms backoff preserves fast crash takeover).
+	if _, owned := s.wsHot.activeRunners.Load(hotKey); owned {
+		return nil
 	}
+	if until, ok := s.wsHot.remoteOwned.Load(hotKey); ok && time.Now().UnixNano() < until.(int64) {
+		return nil
+	}
+	path := s.store.workspaceOperationFile(id.TenantID, rec.ID)
+	// The journal is replaced by rename. A separate stable inode owns the
+	// runner across replicas and releases ownership if the process exits.
+	claim, err := os.OpenFile(path+".runner.lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	locked, err := tryLockMetadataFile(claim)
+	if err != nil || !locked {
+		_ = claim.Close()
+		if err == nil && !locked {
+			s.wsHot.remoteOwned.Store(hotKey, time.Now().Add(workspaceRemoteLockBackoff).UnixNano())
+		}
+		return err
+	}
+	s.wsHot.remoteOwned.Delete(hotKey)
+	release := func() {
+		s.wsHot.activeRunners.Delete(hotKey)
+		unlockMetadataFile(claim)
+		_ = claim.Close()
+	}
+	s.wsHot.activeRunners.Store(hotKey, struct{}{})
 	// The caller may have read RUNNING just before the preceding runner saved
 	// COMPLETED and released its slot. Never overwrite that newer result or its
 	// recorded steps with the caller's older snapshot.
-	s.store.mu.Lock()
-	latest, err := readJSONFile[*workspaceHTTPRecord](s.store.workspaceOperationFile(id.TenantID, rec.ID))
-	s.store.mu.Unlock()
+	s.store.mu.RLock()
+	latest, err := readJSONFile[*workspaceHTTPRecord](path)
+	s.store.mu.RUnlock()
 	if err != nil || latest == nil || latest.User != id.UserID || latest.Status != 0 {
-		s.wsJobs.Delete(key)
-		return
+		if err == nil && latest != nil && latest.Status != 0 {
+			s.wsHot.putDone(hotKey, latest)
+		}
+		release()
+		return err
 	}
 	rec = latest
 	s.background.Add(1)
 	go func() {
 		defer s.background.Done()
-		defer s.wsJobs.Delete(key)
+		defer release()
 		j := &workspaceHTTPJournal{server: s, tenant: id.TenantID, identity: id, record: rec}
 		defer func() {
 			if recovered := recover(); recovered != nil {
@@ -384,6 +532,7 @@ func (s *Server) resumeWorkspaceHTTP(rec *workspaceHTTPRecord, id identity) {
 		rec.Response = append(json.RawMessage(nil), out.body.Bytes()...)
 		_ = j.save()
 	}()
+	return nil
 }
 
 func (s *Server) handleWorkspaceHTTPStatus(c *gin.Context, id identity) {
@@ -392,9 +541,7 @@ func (s *Server) handleWorkspaceHTTPStatus(c *gin.Context, id identity) {
 		writeJSON(c, 404, map[string]string{"error": "operation not found"})
 		return
 	}
-	s.store.mu.Lock()
-	rec, err := readJSONFile[*workspaceHTTPRecord](s.store.workspaceOperationFile(id.TenantID, opID))
-	s.store.mu.Unlock()
+	rec, err := s.readWorkspaceHTTPRecord(id.TenantID, opID)
 	if err != nil {
 		writeErr(c, 500, err)
 		return
@@ -405,7 +552,10 @@ func (s *Server) handleWorkspaceHTTPStatus(c *gin.Context, id identity) {
 	}
 	c.Header("Cache-Control", "no-store")
 	if rec.Status == 0 {
-		s.resumeWorkspaceHTTP(rec, id)
+		if err := s.resumeWorkspaceHTTP(rec, id); err != nil {
+			writeErr(c, 500, err)
+			return
+		}
 		writeJSON(c, 200, map[string]any{"operation_id": rec.ID, "status": "RUNNING"})
 		return
 	}

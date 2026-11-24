@@ -1,0 +1,58 @@
+{
+  "arm": "candidate",
+  "replicas": 4,
+  "concurrency": 200,
+  "total_requests": 14000,
+  "total_succeeded": 14000,
+  "overall_qps": 190230.31455941303,
+  "overall_p95_ms": 5.6731428571428575,
+  "overall_p50_ms": 0.08442857142857142,
+  "downstream_calls": 3,
+  "scenarios": [
+    {
+      "name": "hot_duplicate_submit_200",
+      "replicas": 4,
+      "concurrency": 200,
+      "total_requests": 2000,
+      "succeeded": 2000,
+      "failed": 0,
+      "elapsed_ms": 44.111,
+      "qps": 45340.12141449753,
+      "p50_ms": 0.168,
+      "p95_ms": 21.451,
+      "p99_ms": 29.783,
+      "downstream_starts": 0,
+      "downstream_gets": 1
+    },
+    {
+      "name": "running_status_poll_storm_200",
+      "replicas": 4,
+      "concurrency": 200,
+      "total_requests": 6000,
+      "succeeded": 6000,
+      "failed": 0,
+      "elapsed_ms": 16.975,
+      "qps": 353454.03828013275,
+      "p50_ms": 0.136,
+      "p95_ms": 3.323,
+      "p99_ms": 4.531,
+      "downstream_starts": 1,
+      "downstream_gets": 1
+    },
+    {
+      "name": "completed_status_poll_storm_200",
+      "replicas": 4,
+      "concurrency": 200,
+      "total_requests": 6000,
+      "succeeded": 6000,
+      "failed": 0,
+      "elapsed_ms": 12.509,
+      "qps": 479624.28152282623,
+      "p50_ms": 0.005,
+      "p95_ms": 2.764,
+      "p99_ms": 10.892,
+      "downstream_starts": 0,
+      "downstream_gets": 0
+    }
+  ]
+}

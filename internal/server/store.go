@@ -188,7 +188,7 @@ func terminal(status string) bool {
 // 多进程必须使用同一支持跨客户端 advisory locks 的数据卷；不能各用一份本地目录。
 type Store struct {
 	dir string
-	mu  sync.Mutex
+	mu  sync.RWMutex
 }
 
 func NewStore(dir string) *Store { return &Store{dir: dir} }
