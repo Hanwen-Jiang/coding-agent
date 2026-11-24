@@ -267,6 +267,42 @@ func TestWorkspaceHTTPRestartResumesAcceptedRuntimeOperation(t *testing.T) {
 	}
 }
 
+func TestWorkspaceHTTPActiveRunnerIsObservedAcrossReplicas(t *testing.T) {
+	dir := t.TempDir()
+	remote := &workspaceRemote{started: map[string]map[string]any{}, ready: true}
+	first := newWorkspaceHTTPServer(t, dir, remote)
+	second := newWorkspaceHTTPServer(t, dir, remote)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	first.api.client.Transport = workspaceRoundTrip(func(r *http.Request) (*http.Response, error) {
+		once.Do(func() { close(entered); <-release })
+		return remote.roundTrip(r)
+	})
+	defer func() { close(release); first.background.Wait(); second.background.Wait() }()
+
+	id := workspaceOwner()
+	code, admitted := submitWorkspaceHTTP(t, first, id, "replica-retry-123456", `{"name":"Example"}`, context.Background())
+	if code != http.StatusAccepted {
+		t.Fatal(admitted)
+	}
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("owner did not reach Runtime")
+	}
+	code, status := workspaceStatus(t, second, id, admitted["operation_id"].(string))
+	if code != http.StatusOK || status["status"] != "RUNNING" {
+		t.Fatal(code, status)
+	}
+	second.background.Wait()
+	remote.mu.Lock()
+	calls := len(remote.tokens)
+	remote.mu.Unlock()
+	if calls != 0 {
+		t.Fatalf("observer made %d Runtime calls while another replica owned the operation", calls)
+	}
+}
+
 func TestWorkspaceHTTPRetainsFailureAndRejectsCredentialBodies(t *testing.T) {
 	remote := &workspaceRemote{started: map[string]map[string]any{}, ready: true, fail: true}
 	s := newWorkspaceHTTPServer(t, t.TempDir(), remote)
