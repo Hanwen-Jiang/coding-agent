@@ -621,7 +621,7 @@ dialog.mcp .mono { font-family: var(--mono, monospace); font-size: 12px; }
 .answer li { margin: 0.25em 0; }
 .answer blockquote { margin: 0 0 0.85em; padding: 2px 0 2px 14px; border-left: 3px solid var(--line-2); color: var(--text-2); }
 .answer hr { border: 0; border-top: 1px solid var(--line); margin: 1.2em 0; }
-.answer code { padding: 1px 5px; border-radius: 5px; background: var(--sunken); font-size: 0.84em; }
+.answer :not(pre) > code { padding: 1px 5px; border-radius: 5px; background: var(--sunken); font-size: 0.84em; }
 .answer a { text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--line-2); }
 .codeblock { margin: 0 0 1em; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); overflow: hidden; font-family: var(--font-sans); }
 .codeblock .cb-head { display: flex; align-items: center; height: 30px; padding: 0 4px 0 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }

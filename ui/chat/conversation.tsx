@@ -5,6 +5,7 @@ import {ChatTool} from '@heroui-pro/react/chat-tool';
 import {ChatMessage} from '@heroui-pro/react/chat-message';
 import {Markdown} from '@heroui-pro/react/markdown';
 import {ChatLoader} from '@heroui-pro/react/chat-loader';
+import {Icon} from './icon';
 
 type Step = {id:string;label:string;target:string;detail:string;error:string;tool:string;state:'input-available'|'output-error'|'output-available';time:string;duration:string};
 type Plan = {title:string;agentsTitle:string;steps:Array<{id:string;title:string;status:string;statusLabel:string;current:boolean}>;agents:Array<{id:string;name:string;state:string;statusLabel:string;label:string;last:string}>};
@@ -20,6 +21,7 @@ function ProgressNote({part}:{part:Note}) {
   <ChatMessage.Body><ChatMessage.Content><Markdown id={'progress-'+part.id} components={{
    a:({href,children})=><a href={publicHref(href)} target="_blank" rel="noopener noreferrer">{children}</a>,
    img:({alt})=><span>{alt}</span>,
+   table:({children})=><div className="md-table-wrap"><table>{children}</table></div>,
   }}>{part.message}</Markdown></ChatMessage.Content></ChatMessage.Body>
  </ChatMessage.Assistant>;
 }
@@ -93,7 +95,7 @@ function ToolGroup({part,labels}:{part:Group;labels:ConversationProps['labels']}
  return <div className="progress-island">
   <div className={'worklog pro-worklog'+(expanded?' open':'')} data-pro-component="ChainOfThought">
    <ChainOfThought isExpanded={expanded} onExpandedChange={setExpanded}>
-    <ChainOfThought.Trigger className="worklog-head"><span className="execution-summary">{part.title}</span>
+    <ChainOfThought.Trigger className="worklog-head"><span className="execution-lead-icon" aria-hidden="true"><Icon name={part.running?'sparkles':'terminal'} size="xs"/></span><span className="execution-summary">{part.title}</span>
      {failures.length>0&&<span className="execution-failures">{labels.failed} {failures.length}</span>}
     </ChainOfThought.Trigger>
     <ChainOfThought.Content className="execution-content">

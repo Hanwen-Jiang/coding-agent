@@ -39,6 +39,7 @@ function Answer({id,text,streaming,copyLabel,copiedLabel,copyFailedLabel}: Answe
  const components = React.useMemo<Components>(() => ({
   a: ({href,children}) => <a href={safeHref(href)} target="_blank" rel="noopener noreferrer">{children}</a>,
   img: ({src,alt}) => <img src={safeHref(src)} alt={alt || ''} loading="lazy" referrerPolicy="no-referrer" />,
+  table: ({children}) => <div className="md-table-wrap"><table>{children}</table></div>,
   code: ({children,className,node}) => {
    if (node?.position?.start.line === node?.position?.end.line) return <code>{children}</code>;
    const language = /language-([\w+-]+)/.exec(className || '')?.[1] || 'plaintext';
