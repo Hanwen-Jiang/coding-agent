@@ -519,8 +519,20 @@ dialog > .discovery-body { padding: 20px 28px; overflow-y: auto; max-height: 64d
 .main .msg-user .meta { padding-right: 2px; margin-top: 6px; gap: 6px; font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .main .msg-user .meta .chip { font-size: 11px; padding: 0 5px; border: 0; background: transparent; }
 .main .msg-agent { flex-direction: column; gap: 6px; }
-.main .agent-mark { width: 20px; height: 20px; margin-top: 0; opacity: .92; display: inline-flex; align-items: center; justify-content: flex-start; }
-.main .agent-mark svg { width: 17px; height: 17px; }
+.main .agent-mark { width: auto; min-width: 20px; height: 20px; margin-top: 0; opacity: .92; display: inline-flex; align-items: center; justify-content: flex-start; }
+.main .agent-mark svg { width: 17px; height: 17px; flex: none; }
+.main .msg-agent:not(:has(.waiting-line, .pro-worklog[data-running="true"], [data-streaming="true"], .ask-inline:not(.done))) > .agent-mark.live::after {
+ content: "";
+ display: inline-block;
+ flex: none;
+ width: 4.5px;
+ height: 4.5px;
+ margin-left: 8px;
+ margin-right: 16px;
+ border-radius: 50%;
+ background: color-mix(in srgb, var(--muted) 72%, transparent);
+ box-shadow: 8px 0 0 color-mix(in srgb, var(--muted) 42%, transparent), 16px 0 0 color-mix(in srgb, var(--muted) 26%, transparent);
+}
 .main .agent-body { gap: 12px; padding-top: 0; width: 100%; }
 .main .agent-body > .col { gap: 10px; }
 .main .answer { margin: 0; }
@@ -794,7 +806,24 @@ summary.diagnostic-event-title { cursor: pointer; }
  0% { background-position: 100% 0; }
  100% { background-position: -100% 0; }
 }
+@keyframes agent-wait-dots {
+ 0%, 100% {
+  background: color-mix(in srgb, var(--muted) 92%, var(--text));
+  box-shadow: 8px 0 0 color-mix(in srgb, var(--muted) 35%, transparent), 16px 0 0 color-mix(in srgb, var(--muted) 24%, transparent);
+ }
+ 33% {
+  background: color-mix(in srgb, var(--muted) 35%, transparent);
+  box-shadow: 8px 0 0 color-mix(in srgb, var(--muted) 92%, var(--text)), 16px 0 0 color-mix(in srgb, var(--muted) 35%, transparent);
+ }
+ 66% {
+  background: color-mix(in srgb, var(--muted) 24%, transparent);
+  box-shadow: 8px 0 0 color-mix(in srgb, var(--muted) 35%, transparent), 16px 0 0 color-mix(in srgb, var(--muted) 92%, var(--text));
+ }
+}
 @media(prefers-reduced-motion:no-preference) {
+ .main .msg-agent:not(:has(.waiting-line, .pro-worklog[data-running="true"], [data-streaming="true"], .ask-inline:not(.done))) > .agent-mark.live::after {
+  animation: agent-wait-dots 1.2s ease-in-out infinite;
+ }
  .main .ag-shimmer {
   background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 35%, var(--text) 50%, var(--muted) 65%, var(--muted) 100%);
   background-size: 240% 100%;
