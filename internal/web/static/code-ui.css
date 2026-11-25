@@ -548,7 +548,7 @@ dialog > .discovery-body { padding: 20px 28px; overflow-y: auto; max-height: 64d
 .main .pro-chat .markdown :not(pre) > code { background: color-mix(in srgb, var(--surface-2) 85%, transparent); border: 1px solid color-mix(in srgb, var(--line) 65%, transparent); padding: 1.5px 5.5px; border-radius: 5px; font: 12.5px/1.4 var(--font-mono); color: var(--text); }
 :root[data-theme="dark"] .main .pro-chat .markdown :not(pre) > code { color: #c8d7f5; background: rgba(148,163,184,.13); border-color: rgba(148,163,184,.16); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .main .pro-chat .markdown :not(pre) > code { color: #c8d7f5; background: rgba(148,163,184,.13); border-color: rgba(148,163,184,.16); } }
-.main .pro-worklog { border: 0; margin: 0; background: transparent; }
+.main .pro-worklog { border: 0; border-radius: 0; margin: 0; background: transparent; overflow: visible; }
 .main .conversation-flow { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .main .progress-note-island:not(:first-child) { margin-top: 4px; }
 .main .progress-message { width: 100%; padding: 0; }
@@ -558,6 +558,7 @@ dialog > .discovery-body { padding: 20px 28px; overflow-y: auto; max-height: 64d
 .main .progress-note { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14.5px; line-height: 1.75; margin: 0; }
 .main .pro-worklog .worklog-head { width: auto; max-width: 100%; min-height: 30px; padding: 5px 10px 5px 8px; gap: 7px; font-size: 12.5px; font-weight: 500; color: var(--muted); border: 1px solid transparent; border-radius: 9px; background: transparent; }
 .main .pro-worklog .worklog-head:hover, .main .pro-worklog.open .worklog-head, .main .pro-worklog[data-running="true"] .worklog-head { color: var(--text); background: var(--surface-2); border-color: color-mix(in srgb, var(--line) 90%, transparent); }
+.main .pro-worklog .worklog-head:focus-visible:not([data-focus-visible="true"]), .main .execution-tool .chat-tool__trigger:focus-visible:not([data-focus-visible="true"]) { outline: none; }
 .main .execution-lead-icon { display: inline-flex; align-items: center; flex: none; color: var(--muted); }
 .main .pro-worklog[data-running="true"] .execution-lead-icon { color: var(--accent); }
 .main .execution-lead-icon svg { width: 13px; height: 13px; }
