@@ -268,4 +268,23 @@ var english = map[string]string{
 	"MCP Server 的地址要以 https:// 开头":             "The MCP server address must start with https://",
 	"没有要改的工具":        "No tools to change",
 	"打开工具时要选只读或不可逆写": "Choose read-only or irreversible write when enabling a tool",
+
+	// 管理员控制台与 Coding Dance 伴侣接口（Wave 3）。
+	"管理员认证未配置":               "Admin authentication is not configured",
+	"登录失败次数过多，请 5 分钟后再试":     "Too many failed login attempts. Try again in 5 minutes.",
+	"请填写管理员邮箱和密码":           "Please enter admin email and password",
+	"管理员账号或密码错误":            "Invalid admin email or password",
+	"管理员权限不足":               "Admin permission required",
+	"候选不存在":                 "Candidate not found",
+	"该候选当前不可晋升，请确认状态为待审批且评测门禁已通过": "Candidate is not promotable (must be pending_approval with passing gate)",
+	"仅已晋升候选支持回滚":            "Only promoted candidates can be rolled back",
+	"缺少基线快照，无法回滚":           "Baseline snapshot is missing; cannot roll back",
+	"Runtime Registry 写服务未就绪或拒绝了发布请求": "Runtime Registry write endpoint is unavailable or rejected the publish request",
+	"候选内容不合法":               "Invalid candidate payload",
+	"Coding Dance 接口未认证或连接已停用": "Coding Dance integration is unauthorized or disabled",
+	"当前处于隐私静默模式（off），已阻止生成提示或分析": "Companion privacy mode is set to off; hints and history analysis are disabled",
+	"需要用户明确点击同意后才可显示提示或分析":   "Explicit user consent is required before revealing hints or analysis",
+	"提示令牌无效或已过期，请重新触发检查":     "Hint consent token is invalid or expired. Please run hint-check again.",
+	"提示等级只能是 L1、L2、L3 或 L4": "Hint level must be one of L1, L2, L3, or L4",
+	"请求参数不合法":               "Invalid request payload",
 }

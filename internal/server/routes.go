@@ -47,6 +47,10 @@ func (s *Server) Handler() http.Handler {
 	get(pub, "/config", s.handleConfig)
 	pub.POST("/login", s.handleLogin)
 	pub.POST("/logout", s.handleLogout)
+	s.adminRoutes(pub, r)
+	pub.POST("/integrations/coding-dance/v1/hint-check", s.handleCodingDanceHintCheck)
+	pub.POST("/integrations/coding-dance/v1/hint-reveal", s.handleCodingDanceHintReveal)
+	pub.POST("/integrations/coding-dance/v1/history-analyze", s.handleCodingDanceHistoryAnalyze)
 	// 第三方登录与账号关联（accounts.go）。
 	get(pub, "/auth/:provider/login", s.handleOAuthLogin)
 	get(pub, "/auth/:provider/callback", s.handleOAuthCallback)

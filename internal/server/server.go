@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ import (
 	"github.com/agentruntime/agent-runtime/libs/go-core/dev/localingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/providers/cache"
 	"github.com/agentruntime/agent-runtime/libs/go-core/providers/ingress"
+	"github.com/agentruntime/coding-agent/internal/adminops"
 	"github.com/agentruntime/coding-agent/internal/entry"
 	"github.com/agentruntime/coding-agent/internal/github"
 )
@@ -100,18 +102,39 @@ type Config struct {
 	// Worker 的 shell_run 在哪里跑（docker 或 host）与 docker 时的镜像；只用来在界面上说明环境。
 	Sandbox      string
 	SandboxImage string
+
+	// Admin configures the isolated #/admin observability and self-evolution governance console.
+	Admin AdminConfig
+	// CodingDanceToken authorizes real-time /api/integrations/coding-dance/v1/* companion calls.
+	CodingDanceToken string
+}
+
+// AdminConfig holds settings for the #/admin operator console.
+type AdminConfig struct {
+	Email              string
+	PasswordHash       string
+	AllowedUsers       []string
+	VictoriaMetricsURL string
+	GrafanaURL         string
+	GrafanaExternalURL string
+	RegistryURL        string
+	RegistryToken      string
+	EvolutionDSN       string
 }
 
 // Server 是 coding-web。
 type Server struct {
-	entryLeases  sync.Map
-	entryAdvance sync.Mutex
+	entryLeases    sync.Map
+	entryAdvance   sync.Mutex
 	// entryPrunedAt is guarded by entryAdvance.
-	entryPrunedAt time.Time
-	discovery     *discoveryService
-	cfg           Config
-	ingress       tokens
-	sessions      *sessions
+	entryPrunedAt  time.Time
+	discovery      *discoveryService
+	cfg            Config
+	ingress        tokens
+	sessions       *sessions
+	adminAuth      *adminops.AuthManager
+	adminTelemetry *adminops.TelemetryClient
+	adminEvolution *adminops.EvolutionManager
 	// github 是 GitHub App 一侧的进程内状态（G-03，githubrepo.go）。
 	github    githubState
 	store     *Store
@@ -200,13 +223,55 @@ func New(cfg Config) (*Server, error) {
 		}
 	}
 	api := NewTaskAPI(strings.TrimRight(cfg.TaskAPI, "/"))
+	adminAllowed := map[string]bool{}
+	for _, u := range cfg.Admin.AllowedUsers {
+		if clean := strings.TrimSpace(strings.ToLower(u)); clean != "" {
+			adminAllowed[clean] = true
+		}
+	}
+	adminAuth := adminops.NewAuthManager(adminops.AuthConfig{
+		Email:        cfg.Admin.Email,
+		PasswordHash: cfg.Admin.PasswordHash,
+		AllowedUsers: adminAllowed,
+		Now:          cfg.Now,
+	})
+	adminTelemetry := adminops.NewTelemetryClient(adminops.TelemetryConfig{
+		VictoriaMetricsURL: cfg.Admin.VictoriaMetricsURL,
+		GrafanaURL:         cfg.Admin.GrafanaURL,
+		GrafanaExternalURL: cfg.Admin.GrafanaExternalURL,
+		TaskAPIURL:         cfg.TaskAPI,
+	})
+	var evolRepo adminops.EvolutionRepo
+	if strings.TrimSpace(cfg.Admin.EvolutionDSN) != "" {
+		repoCtx, repoCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		pgRepo, pgErr := adminops.OpenPostgresRepo(repoCtx, cfg.Admin.EvolutionDSN)
+		repoCancel()
+		if pgErr != nil {
+			log.Printf("coding-web: Postgres evolution store unavailable, falling back to local file store: %v", pgErr)
+		} else {
+			evolRepo = pgRepo
+		}
+	}
+	if evolRepo == nil {
+		if fRepo, fErr := adminops.OpenFileRepo(filepath.Join(cfg.DataDir, "admin", "evolution_candidates.json")); fErr == nil {
+			evolRepo = fRepo
+		}
+	}
+	adminEvolution := adminops.NewEvolutionManager(
+		evolRepo,
+		adminops.NewRegistryAdminClient(cfg.Admin.RegistryURL, cfg.Admin.RegistryToken),
+	)
+
 	s := &Server{
-		discovery: newDiscoveryService(),
-		allowed:   allowed,
-		cfg:       cfg,
-		ingress:   tok,
-		sessions:  newSessions(cfg),
-		store:     NewStore(cfg.DataDir),
+		discovery:      newDiscoveryService(),
+		allowed:        allowed,
+		cfg:            cfg,
+		ingress:        tok,
+		sessions:       newSessions(cfg),
+		adminAuth:      adminAuth,
+		adminTelemetry: adminTelemetry,
+		adminEvolution: adminEvolution,
+		store:          NewStore(cfg.DataDir),
 		api:       api,
 		git:       Git{Bin: cfg.Git, HooksDir: hooks},
 		ws:        runtimeWorkspaces{api: api},

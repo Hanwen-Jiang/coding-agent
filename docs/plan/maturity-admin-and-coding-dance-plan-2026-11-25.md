@@ -48,3 +48,15 @@ Wave 1 的核心工具扩展（`repo_glob`、`repo_git`、`apply_patch`、`todo_
 - `L2`（切入点与思路线索）：指出关键约束、数据结构选择或容易忽略的边界，不写代码。
 - `L3`（伪代码 / 局部框架）：给出关键步骤骨架与复杂度提示，仍由用户补全实现。
 - `L4`（完整分析与对照示例）：展示完整修复思路、优化后对比与单元测试验证建议。
+
+---
+
+## 4. Wave 3 落地与验收记录（2026-11-26）
+
+- **后端运维与进化治理（`internal/adminops/*`、`internal/server/admin.go`、`cmd/coding-web/main.go`）**：
+  - 实现 `coding-web admin-hash` 标准输入子命令与加盐 `scrypt` 认证、IP 级防爆破限流、`cw_admin` 会话及 `CODING_ADMINS` RBAC 双路放行。
+  - 实现 VictoriaMetrics + Grafana + Task API + Registry 内部端口（`8092`）状态聚合，以及基于 `BindPlatform("evolution")`（迁移 `301`）的候选导入、审批晋升（`Promote`）与基线回滚（`Rollback`）。
+- **独立 `#/admin` 前端与双语/CSP 约束（`internal/web/static/{index.html,admin-ui.css,admin-ui.js,entry-ui.js,i18n.js}`）**：
+  - 保持现有工作区 `app.js` 零侵入；全部 `style-src 'self'; script-src 'self'` 无内联脚本样式；`ZH`/`EN` 各 `1076` 键完整对齐；后端 `TestEveryMessageHasEnglish` 全绿。
+- **`<coding-dance>` 双通道（`internal/entry/codingdance/*`、`internal/server/coding_dance.go`）**：
+  - 注册 `coding_dance` 入口适配器并暴露 `/api/integrations/coding-dance/v1/{hint-check,hint-reveal,history-analyze}`，HMAC `consent_token` 与 `L1`–`L4` 渐进提示全部通过 `kind_test.go` 与 `TestWave3CodingDanceCompanionAPI`。

@@ -71,7 +71,7 @@ export function createEntryUI({api, h, t, lang, icon, copy, state, openSession, 
         c.webhook_url ? h("div",{class:"entry-url"},h("code",{},c.webhook_url),h("button",{class:"btn ghost xs",onclick:()=>copy(c.webhook_url)},t("common.copy"))) : null,
         h("div",{class:"entry-actions"},h("button",{class:"btn sm",onclick:()=>editConnection(c,host)},tr("edit")),
           h("button",{class:"btn ghost sm",onclick:()=>openHistory(c)},tr("history")),
-          ["alert","email"].includes(c.kind)?h("button",{class:"btn ghost sm",onclick:async e=>{
+          ["alert","email","coding_dance"].includes(c.kind)?h("button",{class:"btn ghost sm",onclick:async e=>{
             const button=e.currentTarget,epoch=generation; // read before the await: currentTarget is cleared afterwards
             if(!(await ask(tr("rotateConfirm"),false)))return;
             button.disabled=true;

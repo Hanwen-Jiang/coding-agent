@@ -81,6 +81,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -91,17 +92,36 @@ import (
 
 	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/jwtingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/adapters/oteltelemetry"
+	"github.com/agentruntime/coding-agent/internal/adminops"
 	"github.com/agentruntime/coding-agent/internal/github"
 	"github.com/agentruntime/coding-agent/internal/server"
 )
+
+func runAdminHash() int {
+	raw, err := io.ReadAll(io.LimitReader(os.Stdin, 4096))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "admin-hash: %v\n", err)
+		return 1
+	}
+	pw := strings.TrimRight(string(raw), "\r\n")
+	hash, err := adminops.HashPassword(pw)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "admin-hash: %v\n", err)
+		return 1
+	}
+	fmt.Println(hash)
+	return 0
+}
 
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "github-replay":
 			os.Exit(githubReplay(os.Args[2:]))
+		case "admin-hash":
+			os.Exit(runAdminHash())
 		default:
-			log.Fatalf("不认识的子命令 %s（只有 github-replay <delivery>）", os.Args[1])
+			log.Fatalf("不认识的子命令 %s（支持 github-replay <delivery>、admin-hash）", os.Args[1])
 		}
 	}
 	cfg := server.Config{
@@ -122,7 +142,19 @@ func main() {
 		Sandbox:      os.Getenv("CODING_SANDBOX"),
 		SandboxImage: os.Getenv("CODING_SANDBOX_IMAGE"),
 
-		NetworkSecrets: os.Getenv("CODING_NETWORK_SECRETS") == "1",
+		NetworkSecrets:   os.Getenv("CODING_NETWORK_SECRETS") == "1",
+		CodingDanceToken: os.Getenv("CODING_DANCE_API_TOKEN"),
+		Admin: server.AdminConfig{
+			Email:              os.Getenv("CODING_ADMIN_EMAIL"),
+			PasswordHash:       os.Getenv("CODING_ADMIN_PASSWORD_HASH"),
+			AllowedUsers:       strings.FieldsFunc(os.Getenv("CODING_ADMINS"), func(r rune) bool { return r == ',' }),
+			VictoriaMetricsURL: os.Getenv("CODING_ADMIN_VICTORIAMETRICS_URL"),
+			GrafanaURL:         os.Getenv("CODING_ADMIN_GRAFANA_URL"),
+			GrafanaExternalURL: os.Getenv("CODING_ADMIN_GRAFANA_EXTERNAL_URL"),
+			RegistryURL:        os.Getenv("CODING_ADMIN_REGISTRY_URL"),
+			RegistryToken:      os.Getenv("CODING_ADMIN_REGISTRY_TOKEN"),
+			EvolutionDSN:       os.Getenv("CODING_EVOLUTION_DSN"),
+		},
 	}
 	signup, err := server.SignupRulesFromEnv(os.Getenv)
 	if err != nil {

@@ -1,0 +1,267 @@
+/* Admin Observability & Self-Evolution Console (#/admin) */
+
+body.admin-active #app {
+  display: none;
+}
+
+.admin-shell {
+  min-height: 100vh;
+  background: var(--bg, #f6f7f9);
+  color: var(--ink, #14181f);
+  padding: 24px clamp(16px, 3vw, 40px) 48px;
+  font-family: var(--sans, system-ui, -apple-system, sans-serif);
+}
+
+.admin-header {
+  max-width: 1240px;
+  margin: 0 auto 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line, rgba(20, 24, 31, 0.1));
+}
+
+.admin-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.admin-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+}
+
+.admin-badge.ok {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
+.admin-badge.warn {
+  background: rgba(245, 158, 11, 0.15);
+  color: #b45309;
+}
+
+.admin-badge.err {
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
+}
+
+.admin-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-btn {
+  appearance: none;
+  border: 1px solid var(--line, rgba(20, 24, 31, 0.14));
+  background: var(--surface, #ffffff);
+  color: inherit;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.admin-btn:hover:not(:disabled) {
+  background: var(--hover, rgba(20, 24, 31, 0.04));
+}
+
+.admin-btn.primary {
+  background: #18181b;
+  color: #ffffff;
+  border-color: #18181b;
+}
+
+.admin-btn.danger {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #dc2626;
+}
+
+.admin-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.admin-main {
+  max-width: 1240px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.admin-login-card {
+  max-width: 420px;
+  margin: 56px auto;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, rgba(20, 24, 31, 0.1));
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.05);
+}
+
+.admin-login-card h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.admin-muted {
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  margin: 0 0 14px;
+}
+
+.admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.admin-field label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted, #475569);
+}
+
+.admin-field input {
+  border: 1px solid var(--line, rgba(20, 24, 31, 0.16));
+  border-radius: 8px;
+  padding: 9px 11px;
+  font-size: 14px;
+  background: var(--surface, #ffffff);
+  color: inherit;
+}
+
+.admin-alert {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.admin-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--line, rgba(20, 24, 31, 0.1));
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.admin-card h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.admin-stat-value {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 4px 0 6px;
+}
+
+.admin-spark {
+  width: 100%;
+  height: 44px;
+  display: block;
+}
+
+.admin-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.admin-diff {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.admin-diff-line.add {
+  color: #4ade80;
+}
+
+.admin-diff-line.del {
+  color: #f87171;
+}
+
+.admin-diff-line.hunk {
+  color: #60a5fa;
+}
+
+.admin-cand-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-cand-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted, #475569);
+}
+
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-btn.active {
+  background: rgba(37, 99, 235, 0.12);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: #1d4ed8;
+}

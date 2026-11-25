@@ -15,6 +15,7 @@ import (
 
 	"github.com/agentruntime/coding-agent/internal/entry"
 	"github.com/agentruntime/coding-agent/internal/entry/alert"
+	"github.com/agentruntime/coding-agent/internal/entry/codingdance"
 	entrymail "github.com/agentruntime/coding-agent/internal/entry/email"
 	"github.com/agentruntime/coding-agent/internal/entry/githubcomment"
 	"github.com/agentruntime/coding-agent/internal/entry/schedule"
@@ -25,7 +26,7 @@ func (s *Server) entryKinds() []entry.Kind {
 	if s.cfg.GitHubApp != nil {
 		bot = s.cfg.GitHubApp.Slug
 	}
-	return []entry.Kind{githubcomment.Kind{BotSlug: bot}, schedule.Kind{}, alert.Kind{}, entrymail.Kind{VerifiedSender: s.verifiedEntrySender}}
+	return []entry.Kind{githubcomment.Kind{BotSlug: bot}, schedule.Kind{}, alert.Kind{}, entrymail.Kind{VerifiedSender: s.verifiedEntrySender}, codingdance.Kind{}}
 }
 func (s *Server) entryKind(name string) entry.Kind {
 	for _, k := range s.entryKinds() {
@@ -117,7 +118,7 @@ func (s *Server) entryDTO(c entry.Connection) entryConnectionDTO {
 	for _, out := range c.Sinks {
 		d.Sinks = append(d.Sinks, entryDestinationDTO{Kind: out.Sink, Address: out.Address, Phases: out.Phases})
 	}
-	if c.Kind == "alert" || c.Kind == "email" {
+	if c.Kind == "alert" || c.Kind == "email" || c.Kind == "coding_dance" {
 		d.WebhookURL = strings.TrimRight(s.cfg.PublicURL, "/") + "/api/webhooks/entry/" + c.ID
 	}
 	return d
@@ -246,6 +247,8 @@ func (s *Server) handleEntrySave(c *gin.Context, id identity) {
 			err = alert.Validate(conn.Config)
 		case "email":
 			err = entrymail.Validate(conn.Config)
+		case "coding_dance":
+			err = codingdance.Validate(conn.Config)
 		}
 	}
 	if err != nil {
@@ -302,7 +305,7 @@ func (s *Server) handleEntrySave(c *gin.Context, id identity) {
 		}
 	}
 	secret := ""
-	if c.Request.Method == http.MethodPost && (conn.Kind == "alert" || conn.Kind == "email") {
+	if c.Request.Method == http.MethodPost && (conn.Kind == "alert" || conn.Kind == "email" || conn.Kind == "coding_dance") {
 		secret, conn.SecretHash = entry.NewSecret()
 	}
 	if err = s.cfg.EntryStore.PutConnection(c.Request.Context(), conn); err != nil {
@@ -339,7 +342,7 @@ func (s *Server) handleEntryRotate(c *gin.Context, id identity) {
 		entryError(c, err)
 		return
 	}
-	if conn.Kind != "alert" && conn.Kind != "email" {
+	if conn.Kind != "alert" && conn.Kind != "email" && conn.Kind != "coding_dance" {
 		entryError(c, entry.ErrInvalid)
 		return
 	}
@@ -451,7 +454,7 @@ func (s *Server) handleEntryWebhook(c *gin.Context) {
 		return
 	}
 	conn, err := s.cfg.EntryStore.LookupConnection(c.Request.Context(), c.Param("connection"))
-	if err != nil || conn.Config["deleted"] == true || conn.Kind != "alert" && conn.Kind != "email" {
+	if err != nil || conn.Config["deleted"] == true || (conn.Kind != "alert" && conn.Kind != "email" && conn.Kind != "coding_dance") {
 		c.Status(401)
 		return
 	}
@@ -465,6 +468,8 @@ func (s *Server) handleEntryWebhook(c *gin.Context) {
 	limit := int64(alert.MaxBody)
 	if conn.Kind == "email" {
 		limit = entrymail.MaxBody
+	} else if conn.Kind == "coding_dance" {
+		limit = codingdance.MaxBody
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, limit))
 	if err != nil {
@@ -493,6 +498,9 @@ func (s *Server) handleEntryWebhook(c *gin.Context) {
 			c.Status(503)
 			return
 		}
+	}
+	if conn.Kind == "coding_dance" && s.adminTelemetry != nil {
+		s.adminTelemetry.Companion.WebhookTriggers.Add(int64(len(ts)))
 	}
 	s.metrics().Count("coding.entry.webhooks", 1, map[string]string{"kind": conn.Kind, "result": "accepted"})
 	c.Status(202)
