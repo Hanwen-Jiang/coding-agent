@@ -17,7 +17,10 @@ type TelemetryConfig struct {
 	VictoriaMetricsURL string
 	GrafanaURL         string
 	GrafanaExternalURL string
+	GrafanaUser        string
+	GrafanaPassword    string
 	TaskAPIURL         string
+	CrawlerURL         string
 }
 
 type CompanionMetrics struct {
@@ -64,6 +67,7 @@ type TelemetrySummary struct {
 	VictoriaMetrics  map[string]any     `json:"victoria_metrics"`
 	Grafana          map[string]any     `json:"grafana"`
 	TaskAPI          map[string]any     `json:"task_api"`
+	Crawler          map[string]any     `json:"crawler"`
 	Series           []MetricSeries     `json:"series"`
 	Dashboards       []GrafanaDashboard `json:"dashboards"`
 	CompanionMetrics map[string]int64   `json:"companion_metrics"`
@@ -88,6 +92,7 @@ func (t *TelemetryClient) Summary(ctx context.Context) TelemetrySummary {
 		VictoriaMetrics:  map[string]any{"configured": strings.TrimSpace(t.cfg.VictoriaMetricsURL) != "", "available": false},
 		Grafana:          map[string]any{"configured": strings.TrimSpace(t.cfg.GrafanaURL) != "", "available": false, "external_url": strings.TrimSpace(t.cfg.GrafanaExternalURL)},
 		TaskAPI:          map[string]any{"configured": strings.TrimSpace(t.cfg.TaskAPIURL) != "", "healthy": false},
+		Crawler:          map[string]any{"configured": strings.TrimSpace(t.cfg.CrawlerURL) != "", "available": false},
 		Series:           []MetricSeries{},
 		Dashboards:       []GrafanaDashboard{},
 		CompanionMetrics: t.Companion.Snapshot(),
@@ -115,6 +120,9 @@ func (t *TelemetryClient) Summary(ctx context.Context) TelemetrySummary {
 	}
 	if gfBase := strings.TrimRight(strings.TrimSpace(t.cfg.GrafanaURL), "/"); gfBase != "" {
 		t.populateGrafana(ctx, gfBase, &out)
+	}
+	if crBase := strings.TrimRight(strings.TrimSpace(t.cfg.CrawlerURL), "/"); crBase != "" {
+		t.populateCrawler(ctx, crBase, &out)
 	}
 	return out
 }
@@ -260,7 +268,7 @@ func (t *TelemetryClient) populateGrafana(ctx context.Context, base string, out 
 		Title string `json:"title"`
 		URL   string `json:"url"`
 	}
-	if t.getJSON(ctx, base+"/api/search?type=dash-db&limit=20", &boards) {
+	if t.getJSONWithAuth(ctx, base+"/api/search?type=dash-db&limit=20", t.cfg.GrafanaUser, t.cfg.GrafanaPassword, &boards) {
 		extBase := strings.TrimRight(strings.TrimSpace(t.cfg.GrafanaExternalURL), "/")
 		for _, b := range boards {
 			link := b.URL
@@ -272,10 +280,31 @@ func (t *TelemetryClient) populateGrafana(ctx context.Context, base string, out 
 	}
 }
 
+func (t *TelemetryClient) populateCrawler(ctx context.Context, base string, out *TelemetrySummary) {
+	var status map[string]any
+	if !t.getJSON(ctx, base+"/v1/status", &status) {
+		out.Crawler["error"] = "unreachable"
+		return
+	}
+	out.Crawler["available"] = true
+	for _, k := range []string{"upstream_search", "headless_configured", "internal_allow_count", "cache_entries", "metrics"} {
+		if v, ok := status[k]; ok {
+			out.Crawler[k] = v
+		}
+	}
+}
+
 func (t *TelemetryClient) getJSON(ctx context.Context, target string, out any) bool {
+	return t.getJSONWithAuth(ctx, target, "", "", out)
+}
+
+func (t *TelemetryClient) getJSONWithAuth(ctx context.Context, target, user, pass string, out any) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return false
+	}
+	if strings.TrimSpace(user) != "" && pass != "" {
+		req.SetBasicAuth(strings.TrimSpace(user), pass)
 	}
 	resp, err := t.http.Do(req)
 	if err != nil {

@@ -1129,6 +1129,10 @@ const ZH = {
   "admin.rollback": "回滚版本",
   "admin.approvedBy": "审批人",
   "admin.noCandidates": "当前过滤条件下暂无自进化候选记录。",
+  "admin.crawlerGateway": "纯净爬虫网关",
+  "admin.cacheHits": "缓存命中",
+  "admin.blockedReq": "已拦截越权/SSRF",
+  "admin.dashboards": "Grafana 看板",
 };
 
 const EN = {
@@ -2255,6 +2259,10 @@ const EN = {
   "admin.rollback": "Rollback",
   "admin.approvedBy": "Approved by",
   "admin.noCandidates": "No evolution candidates match the current filter.",
+  "admin.crawlerGateway": "Clean Crawler Gateway",
+  "admin.cacheHits": "Cache hits",
+  "admin.blockedReq": "Blocked SSRF/Policy",
+  "admin.dashboards": "Grafana dashboards",
 };
 
 // LANGS 按各自的语言写名字：不认识当前界面语言的人也能找到自己的。

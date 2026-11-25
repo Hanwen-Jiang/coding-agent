@@ -117,9 +117,12 @@ type AdminConfig struct {
 	VictoriaMetricsURL string
 	GrafanaURL         string
 	GrafanaExternalURL string
+	GrafanaUser        string
+	GrafanaPassword    string
 	RegistryURL        string
 	RegistryToken      string
 	EvolutionDSN       string
+	CrawlerURL         string
 }
 
 // Server 是 coding-web。
@@ -239,7 +242,10 @@ func New(cfg Config) (*Server, error) {
 		VictoriaMetricsURL: cfg.Admin.VictoriaMetricsURL,
 		GrafanaURL:         cfg.Admin.GrafanaURL,
 		GrafanaExternalURL: cfg.Admin.GrafanaExternalURL,
+		GrafanaUser:        cfg.Admin.GrafanaUser,
+		GrafanaPassword:    cfg.Admin.GrafanaPassword,
 		TaskAPIURL:         cfg.TaskAPI,
+		CrawlerURL:         cfg.Admin.CrawlerURL,
 	})
 	var evolRepo adminops.EvolutionRepo
 	if strings.TrimSpace(cfg.Admin.EvolutionDSN) != "" {

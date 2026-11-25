@@ -187,6 +187,8 @@ function renderOverview() {
   const vm = tel.victoria_metrics || {};
   const gf = tel.grafana || {};
   const api = tel.task_api || {};
+  const cr = tel.crawler || {};
+  const crM = cr.metrics || {};
   const comp = tel.companion_metrics || {};
   const reg = ov.registry || {};
   const allCandidates = ov.candidates || [];
@@ -214,7 +216,14 @@ function renderOverview() {
       { class: "admin-card" },
       el("h3", {}, "Grafana"),
       el("div", { class: "admin-stat-value" }, gf.available ? `v${gf.version || "ready"}` : t("admin.offline")),
-      el("span", { class: badgeClass(String(!!gf.available)) }, gf.database || "observability")
+      el("p", { class: "admin-muted" }, `${t("admin.dashboards")}: ${(tel.dashboards || []).length} · ${gf.database || "observability"}`)
+    ),
+    el(
+      "div",
+      { class: "admin-card" },
+      el("h3", {}, t("admin.crawlerGateway")),
+      el("div", { class: "admin-stat-value" }, cr.available ? `${cr.upstream_search || "ok"}` : t("admin.offline")),
+      el("p", { class: "admin-muted" }, `${t("admin.cacheHits")}: ${crM.cache_hits || 0} · ${t("admin.blockedReq")}: ${crM.blocked_requests || 0}`)
     ),
     el(
       "div",

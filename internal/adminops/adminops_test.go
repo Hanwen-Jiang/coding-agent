@@ -119,8 +119,20 @@ func TestTelemetrySummaryQueriesVMGrafanaTaskAPI(t *testing.T) {
 		case "/api/health":
 			_, _ = w.Write([]byte(`{"database":"ok","version":"11.0.0"}`))
 		case "/api/search":
+			u, p, ok := r.BasicAuth()
+			if !ok || u != "admin" || p != "gf-secret" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 			_ = json.NewEncoder(w).Encode([]map[string]any{
-				{"uid": "ar-overview", "title": "Agent Runtime Overview", "url": "/d/ar-overview"},
+				{"uid": "ar-maturity-ops", "title": "Agent Runtime Maturity, Evolution & Crawler", "url": "/d/ar-maturity-ops"},
+			})
+		case "/v1/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":              true,
+				"upstream_search": "ddg_lite",
+				"cache_entries":   3,
+				"metrics":         map[string]any{"cache_hits": 2, "blocked_requests": 1},
 			})
 		default:
 			http.NotFound(w, r)
@@ -132,7 +144,10 @@ func TestTelemetrySummaryQueriesVMGrafanaTaskAPI(t *testing.T) {
 		VictoriaMetricsURL: srv.URL,
 		GrafanaURL:         srv.URL,
 		GrafanaExternalURL: "https://grafana.example.com",
+		GrafanaUser:        "admin",
+		GrafanaPassword:    "gf-secret",
 		TaskAPIURL:         srv.URL,
+		CrawlerURL:         srv.URL,
 	})
 	client.Companion.HintChecks.Add(4)
 	client.Companion.HintsRevealed.Add(2)
@@ -147,8 +162,11 @@ func TestTelemetrySummaryQueriesVMGrafanaTaskAPI(t *testing.T) {
 	if up, _ := summary.VictoriaMetrics["targets_up"].(float64); up != 2 {
 		t.Fatalf("expected 2 up targets, got %#v", summary.VictoriaMetrics)
 	}
-	if len(summary.Dashboards) != 1 || summary.Dashboards[0].UID != "ar-overview" {
+	if len(summary.Dashboards) != 1 || summary.Dashboards[0].UID != "ar-maturity-ops" {
 		t.Fatalf("unexpected dashboards: %#v", summary.Dashboards)
+	}
+	if avail, _ := summary.Crawler["available"].(bool); !avail || summary.Crawler["upstream_search"] != "ddg_lite" {
+		t.Fatalf("unexpected crawler summary: %#v", summary.Crawler)
 	}
 	if summary.CompanionMetrics["hint_checks"] != 4 || summary.CompanionMetrics["hints_revealed"] != 2 {
 		t.Fatalf("unexpected companion metrics: %#v", summary.CompanionMetrics)

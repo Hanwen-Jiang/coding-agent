@@ -151,9 +151,12 @@ func main() {
 			VictoriaMetricsURL: os.Getenv("CODING_ADMIN_VICTORIAMETRICS_URL"),
 			GrafanaURL:         os.Getenv("CODING_ADMIN_GRAFANA_URL"),
 			GrafanaExternalURL: os.Getenv("CODING_ADMIN_GRAFANA_EXTERNAL_URL"),
+			GrafanaUser:        os.Getenv("CODING_ADMIN_GRAFANA_USER"),
+			GrafanaPassword:    os.Getenv("CODING_ADMIN_GRAFANA_PASSWORD"),
 			RegistryURL:        os.Getenv("CODING_ADMIN_REGISTRY_URL"),
 			RegistryToken:      os.Getenv("CODING_ADMIN_REGISTRY_TOKEN"),
 			EvolutionDSN:       os.Getenv("CODING_EVOLUTION_DSN"),
+			CrawlerURL:         os.Getenv("CODING_ADMIN_CRAWLER_URL"),
 		},
 	}
 	signup, err := server.SignupRulesFromEnv(os.Getenv)
