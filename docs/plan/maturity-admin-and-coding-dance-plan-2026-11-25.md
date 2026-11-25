@@ -20,9 +20,9 @@ Wave 1 的核心工具扩展（`repo_glob`、`repo_git`、`apply_patch`、`todo_
 
 ### 2.2 后端 BFF 聚合接口（`/api/admin/v1/*`）
 1. `GET /api/admin/v1/telemetry/summary`：聚合 OTel Trace 错误率、P95 工具延时、VictoriaMetrics Worker QPS 与沙箱冷启动分布，并返回配好权限的 Grafana 深度面板链接。
-2. `GET /api/admin/v1/evolution/candidates`：读取 `agent-runtime` 中 `_system_evolution` 隔离租户产出的 `candidate_eval` Skill / Prompt 更新包，展示基线 vs 候选 Benchmark Matrix（SWE-bench / DocEval）对比分数与完整 Unified Diff。
-3. `POST /api/admin/v1/evolution/candidates/{id}/promote`：经管理员显式确认后将候选项提升为平台默认版本（支持按租户灰度比例发布）。
-4. `POST /api/admin/v1/evolution/candidates/{id}/rollback`：一键回滚至上一个已签名稳定版本并写入审计日志。
+2. `GET /api/admin/v1/evolution/candidates`：读取 `agent-runtime` 中 `sys-evolution` 隔离租户与平台作用域 `EvolutionStore`（`evolution_candidates`）产出的 `pending_approval` / `promoted` / `rolled_back` Skill/Prompt 更新包，展示基线 vs 候选 Matrix（SWE / DocEval）对比分数与完整 Unified Diff。
+3. `POST /api/admin/v1/evolution/candidates/{id}/promote`：经管理员显式确认后调用 `EvolutionStore.approve_and_promote`，将 `cand-*` 候选项提升为平台默认版本（并保留基线快照）。
+4. `POST /api/admin/v1/evolution/candidates/{id}/rollback`：调用 `EvolutionStore.rollback` 一键回滚至上一个已记录基线版本并写入审计日志。
 
 ---
 
