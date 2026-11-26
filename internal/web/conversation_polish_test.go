@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -62,6 +63,8 @@ func TestConversationPolishUXAndScrollBehavior(t *testing.T) {
 	for _, scenario := range []struct{ language, viewport string }{{"zh", "1440,900"}, {"en", "390,744"}} {
 		t.Run(scenario.language+scenario.viewport, func(t *testing.T) {
 			updates := make(chan params, 8)
+			var feedbackMu sync.Mutex
+			var feedbackVotes []string
 			extra := map[string]any{
 				"/api/projects":        []params{{"id": "p", "name": "Workspace", "source": "empty"}},
 				"/api/sessions":        []params{{"id": "s1", "project_id": "p", "title": "Streaming session"}, {"id": "s2", "project_id": "p", "title": "Completed session"}},
@@ -120,6 +123,20 @@ func TestConversationPolishUXAndScrollBehavior(t *testing.T) {
 					}
 					w.WriteHeader(http.StatusNoContent)
 				}),
+				"POST " + baseS2 + "/tasks/t2/feedback": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var req struct {
+						Vote string `json:"vote"`
+					}
+					if json.NewDecoder(r.Body).Decode(&req) != nil {
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					feedbackMu.Lock()
+					feedbackVotes = append(feedbackVotes, req.Vote)
+					feedbackMu.Unlock()
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(params{"ok": true, "vote": req.Vote})
+				}),
 			}
 			args, _ := json.Marshal(params{"cmd": longCmd})
 			raw := runAccountProbe(t, scenario.language, "const C="+string(args)+";\n"+conversationPolishProbe, params{}, extra, scenario.viewport)
@@ -128,6 +145,12 @@ func TestConversationPolishUXAndScrollBehavior(t *testing.T) {
 			}
 			if err := json.Unmarshal(raw, &result); err != nil || len(result.Errors) > 0 {
 				t.Fatalf("conversation polish: %v %s", err, raw)
+			}
+			feedbackMu.Lock()
+			gotVotes := append([]string(nil), feedbackVotes...)
+			feedbackMu.Unlock()
+			if len(gotVotes) != 1 || gotVotes[0] != "up" {
+				t.Fatalf("expected [up] persisted to /tasks/t2/feedback, got %v", gotVotes)
 			}
 		})
 	}

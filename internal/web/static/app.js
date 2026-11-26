@@ -1650,6 +1650,9 @@ async function openSession(pid, sid) {
       if (sbase() !== base) return;
       if(settings && settingsGeneration===taskSettingsGeneration){state.session.task_settings=settings;installTaskSettings(settings);}
       state.tasks = tasks.slice().reverse();
+      for (const item of state.tasks) {
+        if (item?.id && (item.feedback === "up" || item.feedback === "down")) state.answerFeedback.set(item.id, item.feedback);
+      }
     } catch (ex) { report(ex); }
   }
   renderApp();
@@ -3762,16 +3765,18 @@ function result(task, r) {
       h("span", { class: "grow" }),
       text ? inlineCopyButton(text, t("common.copy"), { extraClass: "result-copy" }) : null,
       text ? (() => {
-        const currentVote = state.answerFeedback.get(task.id) || "";
+        const currentVote = state.answerFeedback.get(task.id) || task.feedback || "";
         const group = h("span", { class: "result-feedback-group" });
         const toggleVote = (vote) => {
-          const next = state.answerFeedback.get(task.id) === vote ? "" : vote;
+          const next = (state.answerFeedback.get(task.id) || task.feedback || "") === vote ? "" : vote;
+          task.feedback = next;
           if (next) state.answerFeedback.set(task.id, next);
           else state.answerFeedback.delete(task.id);
           for (const btn of group.querySelectorAll(".result-feedback")) {
             btn.setAttribute("aria-pressed", String(btn.getAttribute("data-feedback") === next));
           }
           window.dispatchEvent(new CustomEvent("coding:answer-feedback", { detail: { taskId: task.id, vote: next } }));
+          if (sbase()) api("POST", `${sbase()}/tasks/${task.id}/feedback`, { vote: next }).catch(() => {});
         };
         group.append(
           h("button", { type: "button", class: "btn ghost xs result-feedback", "data-feedback": "up", "aria-pressed": String(currentVote === "up"), title: t("feedback.up"), "aria-label": t("feedback.up"), onclick: () => toggleVote("up") }, "👍"),

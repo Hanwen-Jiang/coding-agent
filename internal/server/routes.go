@@ -168,6 +168,7 @@ func (s *Server) Handler() http.Handler {
 	task.POST("/message", a(s.handleEditQueued))
 	task.POST("/message/result", a(s.handleQueuedResult))
 	task.POST("/cancel", a(s.handleCancel))
+	task.POST("/feedback", a(s.handleTaskFeedback))
 	get(task, "/artifacts", a(s.handleListArtifacts))
 	get(task, "/artifacts/:artifact", a(s.handleArtifactDownload))
 

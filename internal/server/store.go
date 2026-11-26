@@ -173,6 +173,8 @@ type TaskRecord struct {
 	Usage   json.RawMessage `json:"usage,omitempty"`
 	// Settled 表示任务已结束、上面的计量已经取过，之后不再查 Runtime。
 	Settled bool `json:"settled,omitempty"`
+	// Feedback records user thumbs-up/down ("up", "down", or "") for quality tracking.
+	Feedback string `json:"feedback,omitempty"`
 }
 
 func terminal(status string) bool {

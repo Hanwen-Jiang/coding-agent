@@ -293,4 +293,6 @@ var english = map[string]string{
 	"自进化运行模式只能是 fixture 或 gateway": "Evolution mode must be fixture or gateway",
 	"预算超过单次触发上限":            "Budget exceeds the configured per-run cap",
 	"触发自进化运行失败":             "Failed to trigger self-evolution run",
+	"vote 必须是 up、down 或空字符串": "vote must be up, down, or empty",
+	"feedback note 过长":      "Feedback note is too long",
 }
