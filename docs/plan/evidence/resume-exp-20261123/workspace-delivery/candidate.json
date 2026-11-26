@@ -1,0 +1,764 @@
+{
+  "started_utc": "2026-11-23T03:37:23.495772+00:00",
+  "finished_utc": "2026-11-23T03:37:40.843123+00:00",
+  "platform": "macOS-27.0-arm64-arm-64bit",
+  "binary_sha256": "418c566190b612ec57e45a85cfcd3d3a72bdc292b76d447c2de9272c58324ff8",
+  "cohort_sha256": "fb55308f7f174b7a83d5ba1a066739a0ce89a0920ded6cbe0e17022714cc91c5",
+  "harness_sha256": "a517f059f5d1f211feba9da0ca65113523de580e786da382e11c0f0a14df9127",
+  "passed": 28,
+  "total": 28,
+  "cases": [
+    {
+      "id": "workspace-eval-single-01",
+      "scenario": "single",
+      "replicas": 1,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.0,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-duplicate-post-2-01",
+      "scenario": "duplicate-post-2",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        202
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.8,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-duplicate-get-4-01",
+      "scenario": "duplicate-get-4",
+      "replicas": 4,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200,
+        200,
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.88,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-mixed-4-01",
+      "scenario": "mixed-4",
+      "replicas": 4,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200,
+        202,
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.88,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-two-independent-01",
+      "scenario": "two-independent",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 2,
+      "runtime_start_calls": 2,
+      "runtime_unique_mutations": 2,
+      "project_count": 2,
+      "replay_http_status": [],
+      "conflict_status": null,
+      "final_http_status": [
+        201,
+        201
+      ],
+      "replay_batch_ms": 9.01,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": true,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-process-handoff-01",
+      "scenario": "process-handoff",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 2,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 1.91,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": null,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-same-key-conflict-01",
+      "scenario": "same-key-conflict",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [],
+      "conflict_status": 409,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.53,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": true,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-single-02",
+      "scenario": "single",
+      "replicas": 1,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.0,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-duplicate-post-2-02",
+      "scenario": "duplicate-post-2",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        202
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.7,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-duplicate-get-4-02",
+      "scenario": "duplicate-get-4",
+      "replicas": 4,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200,
+        200,
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.84,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-mixed-4-02",
+      "scenario": "mixed-4",
+      "replicas": 4,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200,
+        202,
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 1.13,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-two-independent-02",
+      "scenario": "two-independent",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 2,
+      "runtime_start_calls": 2,
+      "runtime_unique_mutations": 2,
+      "project_count": 2,
+      "replay_http_status": [],
+      "conflict_status": null,
+      "final_http_status": [
+        201,
+        201
+      ],
+      "replay_batch_ms": 8.92,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": true,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-process-handoff-02",
+      "scenario": "process-handoff",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 2,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 1.84,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": null,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-same-key-conflict-02",
+      "scenario": "same-key-conflict",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [],
+      "conflict_status": 409,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.75,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": true,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-single-03",
+      "scenario": "single",
+      "replicas": 1,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.0,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-duplicate-post-2-03",
+      "scenario": "duplicate-post-2",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        202
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.7,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-duplicate-get-4-03",
+      "scenario": "duplicate-get-4",
+      "replicas": 4,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200,
+        200,
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 1.02,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-mixed-4-03",
+      "scenario": "mixed-4",
+      "replicas": 4,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200,
+        202,
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 1.01,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-two-independent-03",
+      "scenario": "two-independent",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 2,
+      "runtime_start_calls": 2,
+      "runtime_unique_mutations": 2,
+      "project_count": 2,
+      "replay_http_status": [],
+      "conflict_status": null,
+      "final_http_status": [
+        201,
+        201
+      ],
+      "replay_batch_ms": 8.98,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": true,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-process-handoff-03",
+      "scenario": "process-handoff",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 2,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 1.85,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": null,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-same-key-conflict-03",
+      "scenario": "same-key-conflict",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [],
+      "conflict_status": 409,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 2.86,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": true,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-single-04",
+      "scenario": "single",
+      "replicas": 1,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.0,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-duplicate-post-2-04",
+      "scenario": "duplicate-post-2",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        202
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 0.55,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-duplicate-get-4-04",
+      "scenario": "duplicate-get-4",
+      "replicas": 4,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200,
+        200,
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 5.48,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-mixed-4-04",
+      "scenario": "mixed-4",
+      "replicas": 4,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200,
+        202,
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 46.09,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-two-independent-04",
+      "scenario": "two-independent",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 2,
+      "runtime_start_calls": 2,
+      "runtime_unique_mutations": 2,
+      "project_count": 2,
+      "replay_http_status": [],
+      "conflict_status": null,
+      "final_http_status": [
+        201,
+        201
+      ],
+      "replay_batch_ms": 8.12,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": true,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-process-handoff-04",
+      "scenario": "process-handoff",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 2,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [
+        200
+      ],
+      "conflict_status": null,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 2.3,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": null,
+        "distinct_keys_overlap": null,
+        "conflict": null,
+        "fast_http": true
+      },
+      "pass": true
+    },
+    {
+      "id": "workspace-eval-same-key-conflict-04",
+      "scenario": "same-key-conflict",
+      "replicas": 2,
+      "max_concurrent_status_calls_one_key": 1,
+      "max_concurrent_distinct_keys": 1,
+      "runtime_start_calls": 1,
+      "runtime_unique_mutations": 1,
+      "project_count": 1,
+      "replay_http_status": [],
+      "conflict_status": 409,
+      "final_http_status": [
+        201
+      ],
+      "replay_batch_ms": 1.1,
+      "checks": {
+        "user_result": true,
+        "one_project_per_key": true,
+        "one_poll_owner": true,
+        "distinct_keys_overlap": null,
+        "conflict": true,
+        "fast_http": true
+      },
+      "pass": true
+    }
+  ]
+}

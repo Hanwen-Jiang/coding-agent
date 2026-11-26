@@ -506,3 +506,25 @@ func TestAnInterruptedPushIsNotRetried(t *testing.T) {
 		t.Fatalf("不重推：%d %q %s", len(f.pushes()), f.lastReply(), f.triggerState(2001))
 	}
 }
+
+type pushWithLostReply struct{ *fakeWorkspaces }
+
+func (w pushWithLostReply) Push(ctx context.Context, id identity, ws, branch string, auth GitAuth) (string, error) {
+	// The external write happened; only its acknowledgement was lost.
+	_, _ = w.fakeWorkspaces.Push(ctx, id, ws, branch, auth)
+	return "", context.DeadlineExceeded
+}
+
+func TestLostPushAcknowledgementDoesNotRepeatTheWrite(t *testing.T) {
+	f := newTriggerFixture(t)
+	f.srv.ws = pushWithLostReply{f.ws}
+	f.comment(2001, "octo-cat", 42, "@coding-agent-link fix rounding")
+	f.advance()
+	f.finish("TASK_STATUS_DONE", 0.1)
+	f.advance()
+	f.advance()
+	if len(f.submitted()) != 1 || len(f.pushes()) != 1 || len(f.pulls()) != 0 || f.triggerState(2001) != "failed" {
+		t.Fatalf("tasks=%d external writes=%d PRs=%d state=%s",
+			len(f.submitted()), len(f.pushes()), len(f.pulls()), f.triggerState(2001))
+	}
+}

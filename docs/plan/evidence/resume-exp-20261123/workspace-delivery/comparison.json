@@ -1,0 +1,48 @@
+{
+  "baseline": {
+    "cases": 28,
+    "passed": 16,
+    "duplicate_scenarios": 12,
+    "duplicate_scenarios_single_runner": 0,
+    "sum_per_operation_peak": 40,
+    "max_same_operation_peak": 4,
+    "total_fake_runtime_unique_mutations": 32,
+    "completed_user_operations": 32,
+    "total_local_projects": 32,
+    "duplicate_replay_batch_p95_ms": 1.17,
+    "timeout_or_harness_error": 0
+  },
+  "candidate": {
+    "cases": 28,
+    "passed": 28,
+    "duplicate_scenarios": 12,
+    "duplicate_scenarios_single_runner": 12,
+    "sum_per_operation_peak": 12,
+    "max_same_operation_peak": 1,
+    "total_fake_runtime_unique_mutations": 32,
+    "completed_user_operations": 32,
+    "total_local_projects": 32,
+    "duplicate_replay_batch_p95_ms": 46.09,
+    "timeout_or_harness_error": 0
+  },
+  "baseline_commit": "0cd2c890d214a53a3768568b7d80103eb0fd7341",
+  "go": "go version go1.26.1 darwin/arm64",
+  "sources": {
+    "internal/server/workspace_http.go": {
+      "before": "d102beba26b9965fe6ceb1d567fba01534891858f7225a2fb44c4c94356bab99",
+      "after": "831f0779888b5b8a2be4049f8bee94401761416b13ad480baf6dfb45bfeb85bf"
+    },
+    "internal/server/server.go": {
+      "before": "2e4c428226747c021e81656cad59dd1bc57ddd5db972ff939f77264b3e696322",
+      "after": "be80eb87b88c7a862f489939b5f2dea621875350f7f4c9201f68a5f625dd49b7"
+    },
+    "internal/server/metadata_lock_unix.go": {
+      "before": "9dc7abcab0487bb275537d54c54c7117f30c540fa416d91896f076f5bf5f689e",
+      "after": "15b5bc7cce20fa78c981fded8e4a61e7cc40d029c87cdf1c52cb27b315d1baca"
+    },
+    "internal/server/metadata_lock_windows.go": {
+      "before": "5c454a4354d6d4e13c2b2e7e2285bb1f55463518aef9e70b150fcdc2637e1648",
+      "after": "21efde22b71e16151fbd12c8f14e68a7943ac144bfb07e6f18e0736583008166"
+    }
+  }
+}

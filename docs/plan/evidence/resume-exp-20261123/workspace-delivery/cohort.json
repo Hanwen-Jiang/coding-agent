@@ -1,0 +1,8 @@
+{
+  "baseline_commit": "0cd2c890d214a53a3768568b7d80103eb0fd7341",
+  "repetitions": 4,
+  "quiet_window_seconds": 0.4,
+  "scenarios": ["single", "duplicate-post-2", "duplicate-get-4", "mixed-4", "two-independent", "process-handoff", "same-key-conflict"],
+  "contract": "All accepted operations must produce exactly one project and one downstream durable mutation per distinct key. Duplicate observers must not create overlapping backend polls for one operation. Distinct keys must both enter downstream before release. After forced owner exit another authenticated process must finish the original ID. A changed payload with the same key must return HTTP 409.",
+  "decision": "Adopt only if all 28 cases pass, including all 12 duplicate-observer cases, both before and after comparisons use the exact same cohort, and existing workspace tests pass."
+}

@@ -92,3 +92,48 @@ func TestTasksTheBatchCannotServeAreReplayedInBrowser(t *testing.T) {
 		t.Errorf("events_unavailable 的任务退回逐个回放：%v", site.seen(""))
 	}
 }
+
+// Exercise the second recovery path: an established stream expires, the snapshot
+// is unavailable, and the session endpoint still has the persisted events.
+func TestExpiredStreamRecoversAtBatchCursorWithoutReplayingFinishedTasks(t *testing.T) {
+	const probe = `
+const out = {errors: [], steps: {}};
+let opened = 0;
+const NativeSource = window.EventSource;
+window.EventSource = class extends NativeSource {
+  constructor(url, options) {
+    super(url, options);
+    if (String(url).includes("/tasks/t1/events")) this.addEventListener("open", () => opened++);
+  }
+};
+const wait = async fn => {
+  const end = performance.now() + 8000;
+  while (!fn() && performance.now() < end) await new Promise(r => setTimeout(r, 25));
+  if (!fn()) throw Error("stream did not recover");
+};
+try {
+  await wait(() => opened === 1);
+  await fetch("/__push", {method: "POST", body: JSON.stringify({name:"resnapshot_required",value:{}})});
+  await wait(() => opened >= 2);
+  await wait(() => [...document.querySelectorAll(".answer")].some(a => a.textContent.includes("你好！")));
+} catch (err) { out.errors.push(String(err)); }
+await fetch("/__result", {method:"POST",body:JSON.stringify(out)});
+`
+	reply := params{"tasks": []params{
+		{"task_id": "t0", "found": true, "finished": true, "next_after_event_id": "3",
+			"events": []params{finishedWith(3, "t0", "你好！")}},
+		{"task_id": "t1", "found": true, "next_after_event_id": "5",
+			"events": []params{batchEvent(5, "t1", "task_accepted", params{})}},
+	}}
+	site, result := runStreamProbe(t, probe, nil, func(s *streamSite) { s.sessionEvents = reply })
+	if len(result.Errors) != 0 {
+		t.Fatal(result.Errors)
+	}
+	completed, active := site.seen("/tasks/t0/events"), site.seen("/tasks/t1/events")
+	t.Logf("snapshot requests=%d batch requests=%d finished-task streams=%d active-task streams=%v",
+		len(site.seen("/snapshot")), len(site.seen("/sessions/s1/events")), len(completed), active)
+	if len(site.seen("/snapshot")) != 2 || len(site.seen("/sessions/s1/events")) != 2 || len(completed) != 0 ||
+		len(active) != 2 || !strings.Contains(active[1], "last_event_id=5") {
+		t.Fatal("expected one batch recovery, no finished-task replay, and resumption at event 5")
+	}
+}

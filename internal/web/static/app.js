@@ -3790,10 +3790,12 @@ function scheduleTurn(id) {
 // paintFromSnapshot 用会话快照（WEB-SNAP，Runtime 的 N-19）画首屏：快照里有的任务带着它的事件与游标接上，没有的进行中任务从头接；
 // 取不到快照（老的 Runtime 没有这个端点）时返回 false，由调用方照旧逐个回放。
 async function paintFromSnapshot(base) {
+  const view = state.runs;
   let snap;
   historyTraffic.requests++;
-  try { snap = await api("GET", base + "/snapshot"); } catch { return false; }
-  if (sbase() !== base || !snap || !Array.isArray(snap.tasks)) return false;
+  try { snap = await api("GET", base + "/snapshot"); } catch { /* fall back if the view is still active */ }
+  if (sbase() !== base || state.runs !== view) return true;
+  if (!snap || !Array.isArray(snap.tasks)) return false;
   const byId = new Map(snap.tasks.map((s) => [s.task_id, s]));
   const truncated=[],through=new Map();
   for (const t of state.tasks.slice(-REPLAY_LIMIT)) {
@@ -3810,22 +3812,28 @@ async function paintFromSnapshot(base) {
   }
   if(truncated.length){
     const left=await paintFromEvents(base,truncated,{merge:true,through});
-    if(sbase()!==base)return true;
+    if(sbase()!==base || state.runs!==view)return true;
     // Older servers without paged history can still replay the persisted stream.
     for(const task of left||truncated)loadRun(task,true);
   }
   return true;
 }
 
-let resnapshotting = false;
+let recoveringView = null;
 async function resnapshot(base) {
-  if (resnapshotting || sbase() !== base) return;
-  resnapshotting = true;
+  // resetSessionState creates a new run map even when returning to the same URL.
+  const view = state.runs;
+  if (recoveringView === view || sbase() !== base) return;
+  recoveringView = view;
   try {
     closeStreams();
-    if (!(await paintFromSnapshot(base))) for (const t of state.tasks.slice(-REPLAY_LIMIT)) loadRun(t, true);
+    if (await paintFromSnapshot(base) || state.runs !== view || sbase() !== base) return;
+    const recent = state.tasks.slice(-REPLAY_LIMIT);
+    const remaining = await paintFromEvents(base, recent);
+    if (state.runs !== view || sbase() !== base) return;
+    for (const task of remaining ?? recent) loadRun(task, true);
   } finally {
-    resnapshotting = false;
+    if (recoveringView === view) recoveringView = null;
   }
 }
 
@@ -3835,23 +3843,25 @@ const historyTraffic = { requests: 0 };
 
 async function replayTasks() {
   const base = sbase();
+  const view = state.runs;
   const started = performance.now();
   const before = historyTraffic.requests;
-  if (await paintFromSnapshot(base)) return reportHistoryLoad(base, "snapshot", started, before);
-  if (sbase() !== base) return;
+  const fromSnapshot = await paintFromSnapshot(base);
+  if (sbase() !== base || state.runs !== view) return;
+  if (fromSnapshot) return reportHistoryLoad(base, "snapshot", started, before);
   const recent = state.tasks.slice(-REPLAY_LIMIT);
   // 取不到快照时先批量取事件（HIST-01）；Runtime 给不了的任务（或整个端点用不了时全部）才逐个回放。
   const left = await paintFromEvents(base, recent);
-  if (sbase() !== base) return;
+  if (sbase() !== base || state.runs !== view) return;
   const replay = left || recent;
   // 先接上进行中的（实时），再从最新的往前一个一个重放已结束的（浏览器对同一主机的连接数有限）：打开会话先看到最后的对话，
   // 更早的在上面陆续补上；停在底部时 renderTurn 一直跟到底。
   for (const t of replay) if (!TERMINAL.has(t.status)) loadRun(t);
   for (const t of replay.slice().reverse()) {
-    if (sbase() !== base) return;
+    if (sbase() !== base || state.runs !== view) return;
     if (TERMINAL.has(t.status)) await loadRun(t);
   }
-  reportHistoryLoad(base, left ? "events" : "replay", started, before);
+  if (state.runs === view) reportHistoryLoad(base, left ? "events" : "replay", started, before);
 }
 
 // paintFromEvents 用批量取的事件（HIST-01，Runtime 的 ListSessionEvents）画历史：每个任务从头取，有 more 的拿 next_after_event_id
@@ -3859,6 +3869,7 @@ async function replayTasks() {
 // （不存在、events_unavailable、没取完）；第一次就取不到（老的 Runtime 或 coding-web）时返回 null，由调用方全部逐个回放。
 async function paintFromEvents(base, recent, {merge=false,through=null}={}) {
   if (!recent.length) return [];
+  const view = state.runs;
   const cursors = new Map(recent.map((t) => [t.id, 0]));
   const events = new Map(recent.map((t) => [t.id, []]));
   const done = new Map();
@@ -3868,7 +3879,7 @@ async function paintFromEvents(base, recent, {merge=false,through=null}={}) {
     try {
       page = await api("POST", base + "/events", { cursors: [...cursors].map(([task_id, after_event_id]) => ({ task_id, after_event_id })) });
     } catch { /* 下面按取不到处理 */ }
-    if (sbase() !== base) return [];
+    if (state.runs !== view || sbase() !== base) return [];
     if (!page || !Array.isArray(page.tasks)) {
       if (!round) return null;
       break; // 翻页中途取不到：没取完的逐个回放
