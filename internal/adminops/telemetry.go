@@ -15,12 +15,24 @@ import (
 
 type TelemetryConfig struct {
 	VictoriaMetricsURL string
+	AlertmanagerURL    string
 	GrafanaURL         string
 	GrafanaExternalURL string
 	GrafanaUser        string
 	GrafanaPassword    string
 	TaskAPIURL         string
 	CrawlerURL         string
+	CDRunnerURL        string
+	CDAPIURL           string
+}
+
+type AlertItem struct {
+	Name     string `json:"name"`
+	Severity string `json:"severity,omitempty"`
+	State    string `json:"state"`
+	Service  string `json:"service,omitempty"`
+	Summary  string `json:"summary,omitempty"`
+	Since    string `json:"since,omitempty"`
 }
 
 type CompanionMetrics struct {
@@ -68,6 +80,8 @@ type TelemetrySummary struct {
 	Grafana          map[string]any     `json:"grafana"`
 	TaskAPI          map[string]any     `json:"task_api"`
 	Crawler          map[string]any     `json:"crawler"`
+	CodingDanceInfra map[string]any     `json:"coding_dance_infra,omitempty"`
+	Alerts           []AlertItem        `json:"alerts"`
 	Series           []MetricSeries     `json:"series"`
 	Dashboards       []GrafanaDashboard `json:"dashboards"`
 	CompanionMetrics map[string]int64   `json:"companion_metrics"`
@@ -93,6 +107,7 @@ func (t *TelemetryClient) Summary(ctx context.Context) TelemetrySummary {
 		Grafana:          map[string]any{"configured": strings.TrimSpace(t.cfg.GrafanaURL) != "", "available": false, "external_url": strings.TrimSpace(t.cfg.GrafanaExternalURL)},
 		TaskAPI:          map[string]any{"configured": strings.TrimSpace(t.cfg.TaskAPIURL) != "", "healthy": false},
 		Crawler:          map[string]any{"configured": strings.TrimSpace(t.cfg.CrawlerURL) != "", "available": false},
+		Alerts:           []AlertItem{},
 		Series:           []MetricSeries{},
 		Dashboards:       []GrafanaDashboard{},
 		CompanionMetrics: t.Companion.Snapshot(),
@@ -124,6 +139,8 @@ func (t *TelemetryClient) Summary(ctx context.Context) TelemetrySummary {
 	if crBase := strings.TrimRight(strings.TrimSpace(t.cfg.CrawlerURL), "/"); crBase != "" {
 		t.populateCrawler(ctx, crBase, &out)
 	}
+	t.populateAlerts(ctx, &out)
+	t.populateCodingDanceInfra(ctx, &out)
 	return out
 }
 
@@ -292,6 +309,106 @@ func (t *TelemetryClient) populateCrawler(ctx context.Context, base string, out 
 			out.Crawler[k] = v
 		}
 	}
+}
+
+func (t *TelemetryClient) populateAlerts(ctx context.Context, out *TelemetrySummary) {
+	seen := map[string]bool{}
+	add := func(it AlertItem) {
+		if it.Name == "" {
+			return
+		}
+		key := it.Name + "\x00" + it.Service + "\x00" + it.State
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out.Alerts = append(out.Alerts, it)
+	}
+
+	if amBase := strings.TrimRight(strings.TrimSpace(t.cfg.AlertmanagerURL), "/"); amBase != "" {
+		var amAlerts []struct {
+			Labels      map[string]string `json:"labels"`
+			Annotations map[string]string `json:"annotations"`
+			StartsAt    string            `json:"startsAt"`
+			Status      struct {
+				State string `json:"state"`
+			} `json:"status"`
+		}
+		if t.getJSON(ctx, amBase+"/api/v2/alerts?active=true", &amAlerts) {
+			for _, a := range amAlerts {
+				state := a.Status.State
+				if state == "" {
+					state = "active"
+				}
+				add(AlertItem{
+					Name:     a.Labels["alertname"],
+					Severity: a.Labels["severity"],
+					State:    state,
+					Service:  a.Labels["service"],
+					Summary:  a.Annotations["summary"],
+					Since:    a.StartsAt,
+				})
+			}
+		}
+	}
+
+	if vmBase := strings.TrimRight(strings.TrimSpace(t.cfg.VictoriaMetricsURL), "/"); vmBase != "" {
+		var vmResp struct {
+			Status string `json:"status"`
+			Data   struct {
+				Alerts []struct {
+					Labels      map[string]string `json:"labels"`
+					Annotations map[string]string `json:"annotations"`
+					State       string            `json:"state"`
+					ActiveAt    string            `json:"activeAt"`
+				} `json:"alerts"`
+			} `json:"data"`
+		}
+		if t.getJSON(ctx, vmBase+"/api/v1/alerts", &vmResp) && vmResp.Status == "success" {
+			for _, a := range vmResp.Data.Alerts {
+				add(AlertItem{
+					Name:     a.Labels["alertname"],
+					Severity: a.Labels["severity"],
+					State:    a.State,
+					Service:  a.Labels["service"],
+					Summary:  a.Annotations["summary"],
+					Since:    a.ActiveAt,
+				})
+			}
+		}
+	}
+}
+
+func (t *TelemetryClient) populateCodingDanceInfra(ctx context.Context, out *TelemetrySummary) {
+	runnerURL := strings.TrimRight(strings.TrimSpace(t.cfg.CDRunnerURL), "/")
+	apiURL := strings.TrimRight(strings.TrimSpace(t.cfg.CDAPIURL), "/")
+	if runnerURL == "" && apiURL == "" {
+		return
+	}
+	info := map[string]any{}
+	if runnerURL != "" {
+		var status map[string]any
+		entry := map[string]any{"configured": true, "available": false}
+		if t.getJSON(ctx, runnerURL+"/v1/status", &status) {
+			entry["available"] = true
+			entry["status"] = status
+		}
+		info["cd_runner"] = entry
+	}
+	if apiURL != "" {
+		entry := map[string]any{"configured": true, "healthy": false}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL+"/healthz", nil)
+		if err == nil {
+			resp, err := t.http.Do(req)
+			if err == nil {
+				_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+				resp.Body.Close()
+				entry["healthy"] = resp.StatusCode == http.StatusOK
+			}
+		}
+		info["cd_api"] = entry
+	}
+	out.CodingDanceInfra = info
 }
 
 func (t *TelemetryClient) getJSON(ctx context.Context, target string, out any) bool {

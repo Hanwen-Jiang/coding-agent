@@ -5,8 +5,13 @@ name: image
 
 on:
   push:
+    branches: ["main"]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 镜像标签（默认 main-<short_sha>）
+        required: false
 
 permissions:
   contents: read
@@ -35,8 +40,16 @@ jobs:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
           OWNER: ${{ github.repository_owner }}
+          INPUT_TAG: ${{ inputs.tag }}
+          SHA: ${{ github.sha }}
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          if [ -n "${INPUT_TAG}" ]; then
+            tag="${INPUT_TAG}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+          else
+            tag="main-${SHA:0:7}"
+          fi
           image="ghcr.io/${OWNER,,}/coding-web:${tag}"
           echo "${TOKEN}" | docker login ghcr.io -u "${ACTOR}" --password-stdin
           DOCKER_BUILDKIT=1 docker build --platform linux/amd64 -f coding-agent/deploy/Dockerfile -t "${image}" .

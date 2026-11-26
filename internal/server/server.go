@@ -107,37 +107,47 @@ type Config struct {
 	Admin AdminConfig
 	// CodingDanceToken authorizes real-time /api/integrations/coding-dance/v1/* companion calls.
 	CodingDanceToken string
+	// MemoryURL configures agent-runtime MemoryService gRPC address for cross-problem companion memory.
+	MemoryURL string
 }
 
 // AdminConfig holds settings for the #/admin operator console.
 type AdminConfig struct {
-	Email              string
-	PasswordHash       string
-	AllowedUsers       []string
-	VictoriaMetricsURL string
-	GrafanaURL         string
-	GrafanaExternalURL string
-	GrafanaUser        string
-	GrafanaPassword    string
-	RegistryURL        string
-	RegistryToken      string
-	EvolutionDSN       string
-	CrawlerURL         string
+	Email                 string
+	PasswordHash          string
+	AllowedUsers          []string
+	VictoriaMetricsURL    string
+	AlertmanagerURL       string
+	GrafanaURL            string
+	GrafanaExternalURL    string
+	GrafanaUser           string
+	GrafanaPassword       string
+	RegistryURL           string
+	RegistryToken         string
+	EvolutionDSN          string
+	EvolutionRunnerURL    string
+	EvolutionRunnerToken  string
+	EvolutionMaxBudgetUSD float64
+	CrawlerURL            string
+	CDRunnerURL           string
+	CDAPIURL              string
 }
 
 // Server 是 coding-web。
 type Server struct {
-	entryLeases    sync.Map
-	entryAdvance   sync.Mutex
+	entryLeases     sync.Map
+	entryAdvance    sync.Mutex
 	// entryPrunedAt is guarded by entryAdvance.
-	entryPrunedAt  time.Time
-	discovery      *discoveryService
-	cfg            Config
-	ingress        tokens
-	sessions       *sessions
-	adminAuth      *adminops.AuthManager
-	adminTelemetry *adminops.TelemetryClient
-	adminEvolution *adminops.EvolutionManager
+	entryPrunedAt   time.Time
+	discovery       *discoveryService
+	cfg             Config
+	ingress         tokens
+	sessions        *sessions
+	adminAuth       *adminops.AuthManager
+	adminTelemetry  *adminops.TelemetryClient
+	adminEvolution  *adminops.EvolutionManager
+	adminRunner     *adminops.EvolutionRunnerClient
+	companionMemory CompanionMemory
 	// github 是 GitHub App 一侧的进程内状态（G-03，githubrepo.go）。
 	github    githubState
 	store     *Store
@@ -240,12 +250,15 @@ func New(cfg Config) (*Server, error) {
 	})
 	adminTelemetry := adminops.NewTelemetryClient(adminops.TelemetryConfig{
 		VictoriaMetricsURL: cfg.Admin.VictoriaMetricsURL,
+		AlertmanagerURL:    cfg.Admin.AlertmanagerURL,
 		GrafanaURL:         cfg.Admin.GrafanaURL,
 		GrafanaExternalURL: cfg.Admin.GrafanaExternalURL,
 		GrafanaUser:        cfg.Admin.GrafanaUser,
 		GrafanaPassword:    cfg.Admin.GrafanaPassword,
 		TaskAPIURL:         cfg.TaskAPI,
 		CrawlerURL:         cfg.Admin.CrawlerURL,
+		CDRunnerURL:        cfg.Admin.CDRunnerURL,
+		CDAPIURL:           cfg.Admin.CDAPIURL,
 	})
 	var evolRepo adminops.EvolutionRepo
 	if strings.TrimSpace(cfg.Admin.EvolutionDSN) != "" {
@@ -267,16 +280,23 @@ func New(cfg Config) (*Server, error) {
 		evolRepo,
 		adminops.NewRegistryAdminClient(cfg.Admin.RegistryURL, cfg.Admin.RegistryToken),
 	)
+	adminRunner := adminops.NewEvolutionRunnerClient(
+		cfg.Admin.EvolutionRunnerURL,
+		cfg.Admin.EvolutionRunnerToken,
+		cfg.Admin.EvolutionMaxBudgetUSD,
+	)
 
 	s := &Server{
-		discovery:      newDiscoveryService(),
-		allowed:        allowed,
-		cfg:            cfg,
-		ingress:        tok,
-		sessions:       newSessions(cfg),
-		adminAuth:      adminAuth,
-		adminTelemetry: adminTelemetry,
-		adminEvolution: adminEvolution,
+		discovery:       newDiscoveryService(),
+		allowed:         allowed,
+		cfg:             cfg,
+		ingress:         tok,
+		sessions:        newSessions(cfg),
+		adminAuth:       adminAuth,
+		adminTelemetry:  adminTelemetry,
+		adminEvolution:  adminEvolution,
+		adminRunner:     adminRunner,
+		companionMemory: newCompanionMemory(cfg.MemoryURL),
 		store:          NewStore(cfg.DataDir),
 		api:       api,
 		git:       Git{Bin: cfg.Git, HooksDir: hooks},

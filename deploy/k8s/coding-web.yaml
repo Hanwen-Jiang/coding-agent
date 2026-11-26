@@ -33,6 +33,9 @@ spec:
       labels: {app.kubernetes.io/name: coding-web, app.kubernetes.io/part-of: coding-agent}
     spec:
       automountServiceAccountToken: false
+      # Optional GHCR pull secret when deploying private images:
+      # imagePullSecrets:
+      #   - name: ghcr-pull-secret
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -79,6 +82,32 @@ spec:
             # 再从 coding-oauth 删掉那一项。
             - {name: CODING_GITHUB_APP_SLUG, value: coding-agent-link}
             - {name: CODING_GITHUB_APP_PRIVATE_KEY_FILE, value: /etc/coding/github-app/private-key.pem}
+            # Wave 3 / Wave 4 / P1-P3 Admin Console & Companion integrations:
+            - name: CODING_ADMIN_EMAIL
+              valueFrom: {secretKeyRef: {name: coding-admin, key: admin-email}}
+            - name: CODING_ADMIN_PASSWORD_HASH
+              valueFrom: {secretKeyRef: {name: coding-admin, key: admin-password-hash}}
+            - name: CODING_ADMIN_REGISTRY_TOKEN
+              valueFrom: {secretKeyRef: {name: coding-admin, key: registry-token}}
+            - name: CODING_ADMIN_GRAFANA_USER
+              valueFrom: {secretKeyRef: {name: coding-admin, key: grafana-user}}
+            - name: CODING_ADMIN_GRAFANA_PASSWORD
+              valueFrom: {secretKeyRef: {name: coding-admin, key: grafana-password}}
+            - name: CODING_DANCE_API_TOKEN
+              valueFrom: {secretKeyRef: {name: coding-admin, key: coding-dance-token}}
+            - name: CODING_EVOLUTION_DSN
+              valueFrom: {secretKeyRef: {name: coding-github-db, key: dsn}}
+            - {name: CODING_ADMIN_VICTORIAMETRICS_URL, value: "http://vm-victoria-metrics-single-server.observability.svc:8428"}
+            - {name: CODING_ADMIN_GRAFANA_URL, value: "http://grafana.observability.svc:80"}
+            - {name: CODING_ADMIN_REGISTRY_URL, value: "http://ar-agent-runtime-registry:8092"}
+            - {name: CODING_ADMIN_CRAWLER_URL, value: "http://ar-agent-runtime-crawler-gateway:8096"}
+            - {name: CODING_ADMIN_EVOLUTION_RUNNER_URL, value: "http://ar-agent-runtime-evolution-runner:8099"}
+            - name: CODING_ADMIN_EVOLUTION_RUNNER_TOKEN
+              valueFrom: {secretKeyRef: {name: coding-admin, key: evolution-runner-token, optional: true}}
+            - {name: CODING_ADMIN_ALERTMANAGER_URL, value: "http://vm-alertmanager.observability.svc:9093"}
+            - {name: CODING_MEMORY_URL, value: "http://ar-agent-runtime-memory:50061"}
+            - {name: CODING_ADMIN_CD_RUNNER_URL, value: ""}
+            - {name: CODING_ADMIN_CD_API_URL, value: ""}
           # 接入点：CODING_ENTRY_DSN 未设时沿用 CODING_GITHUB_DSN。
           # coding-entry 可含 CODING_ENTRY_DSN；必须指向 GitHub 收件箱同一个 Postgres 库。
           # SMTP 出口可在同一个 Secret 配 CODING_SMTP_ADDR、CODING_SMTP_FROM、

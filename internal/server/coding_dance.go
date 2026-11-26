@@ -586,6 +586,27 @@ func (s *Server) handleCodingDanceHistoryAnalyze(c *gin.Context) {
 		}
 	}
 
+	memoryStatus := "disabled"
+	memoryInsights := []MemoryInsight{}
+	if s.companionMemory != nil && caller.tenantID != "" && caller.token != "" {
+		tagList := make([]string, 0, len(weakTags))
+		for _, item := range weakTags {
+			tagList = append(tagList, item.Tag)
+		}
+		memCtx, memCancel := ctxTimeout(c.Request, 4*time.Second)
+		recalled, recErr := s.companionMemory.RecallWeakTags(memCtx, caller.tenantID, emptyFallback(caller.userID, "companion"), caller.token, tagList)
+		if recErr == nil && recalled != nil {
+			memoryInsights = recalled
+		}
+		saveErr := s.companionMemory.RecordWeakTags(memCtx, caller.tenantID, emptyFallback(caller.userID, "companion"), caller.token, tagFailures, errBreakdown)
+		memCancel()
+		if recErr != nil && saveErr != nil {
+			memoryStatus = "unavailable"
+		} else {
+			memoryStatus = "synced"
+		}
+	}
+
 	writeJSON(c, http.StatusOK, map[string]any{
 		"summary": map[string]any{
 			"total_submissions": total,
@@ -594,9 +615,12 @@ func (s *Server) handleCodingDanceHistoryAnalyze(c *gin.Context) {
 			"avg_runtime_ms":    avgRuntime,
 			"error_breakdown":   errBreakdown,
 		},
-		"weak_tags":       weakTags,
-		"recent_commits":  recentCommits,
-		"recommendations": recommendations,
-		"suggested_drills": drills,
+		"weak_tags":            weakTags,
+		"persistent_weak_tags": tagFailures,
+		"memory_status":        memoryStatus,
+		"memory_insights":      memoryInsights,
+		"recent_commits":       recentCommits,
+		"recommendations":      recommendations,
+		"suggested_drills":     drills,
 	})
 }

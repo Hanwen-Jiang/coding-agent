@@ -86,6 +86,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -144,19 +145,26 @@ func main() {
 
 		NetworkSecrets:   os.Getenv("CODING_NETWORK_SECRETS") == "1",
 		CodingDanceToken: os.Getenv("CODING_DANCE_API_TOKEN"),
+		MemoryURL:        os.Getenv("CODING_MEMORY_URL"),
 		Admin: server.AdminConfig{
-			Email:              os.Getenv("CODING_ADMIN_EMAIL"),
-			PasswordHash:       os.Getenv("CODING_ADMIN_PASSWORD_HASH"),
-			AllowedUsers:       strings.FieldsFunc(os.Getenv("CODING_ADMINS"), func(r rune) bool { return r == ',' }),
-			VictoriaMetricsURL: os.Getenv("CODING_ADMIN_VICTORIAMETRICS_URL"),
-			GrafanaURL:         os.Getenv("CODING_ADMIN_GRAFANA_URL"),
-			GrafanaExternalURL: os.Getenv("CODING_ADMIN_GRAFANA_EXTERNAL_URL"),
-			GrafanaUser:        os.Getenv("CODING_ADMIN_GRAFANA_USER"),
-			GrafanaPassword:    os.Getenv("CODING_ADMIN_GRAFANA_PASSWORD"),
-			RegistryURL:        os.Getenv("CODING_ADMIN_REGISTRY_URL"),
-			RegistryToken:      os.Getenv("CODING_ADMIN_REGISTRY_TOKEN"),
-			EvolutionDSN:       os.Getenv("CODING_EVOLUTION_DSN"),
-			CrawlerURL:         os.Getenv("CODING_ADMIN_CRAWLER_URL"),
+			Email:                 os.Getenv("CODING_ADMIN_EMAIL"),
+			PasswordHash:          os.Getenv("CODING_ADMIN_PASSWORD_HASH"),
+			AllowedUsers:          strings.FieldsFunc(os.Getenv("CODING_ADMINS"), func(r rune) bool { return r == ',' }),
+			VictoriaMetricsURL:    os.Getenv("CODING_ADMIN_VICTORIAMETRICS_URL"),
+			AlertmanagerURL:       os.Getenv("CODING_ADMIN_ALERTMANAGER_URL"),
+			GrafanaURL:            os.Getenv("CODING_ADMIN_GRAFANA_URL"),
+			GrafanaExternalURL:    os.Getenv("CODING_ADMIN_GRAFANA_EXTERNAL_URL"),
+			GrafanaUser:           os.Getenv("CODING_ADMIN_GRAFANA_USER"),
+			GrafanaPassword:       os.Getenv("CODING_ADMIN_GRAFANA_PASSWORD"),
+			RegistryURL:           os.Getenv("CODING_ADMIN_REGISTRY_URL"),
+			RegistryToken:         os.Getenv("CODING_ADMIN_REGISTRY_TOKEN"),
+			EvolutionDSN:          os.Getenv("CODING_EVOLUTION_DSN"),
+			EvolutionRunnerURL:    os.Getenv("CODING_ADMIN_EVOLUTION_RUNNER_URL"),
+			EvolutionRunnerToken:  os.Getenv("CODING_ADMIN_EVOLUTION_RUNNER_TOKEN"),
+			EvolutionMaxBudgetUSD: parseEnvFloat("CODING_ADMIN_EVOLUTION_MAX_BUDGET_USD", 1.0),
+			CrawlerURL:            os.Getenv("CODING_ADMIN_CRAWLER_URL"),
+			CDRunnerURL:           os.Getenv("CODING_ADMIN_CD_RUNNER_URL"),
+			CDAPIURL:              os.Getenv("CODING_ADMIN_CD_API_URL"),
 		},
 	}
 	signup, err := server.SignupRulesFromEnv(os.Getenv)
@@ -359,4 +367,16 @@ func readKeys(cfg *server.Config, getenv func(string) string) error {
 	}
 	cfg.GitHubApp = app
 	return nil
+}
+
+func parseEnvFloat(name string, fallback float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }

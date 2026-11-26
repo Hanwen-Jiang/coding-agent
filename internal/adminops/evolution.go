@@ -31,30 +31,62 @@ var (
 	ErrRegistryUnavailable    = errors.New("registry publish endpoint unavailable or rejected")
 )
 
-var evolutionMigrations = []relational.Migration{{
-	Version: 301,
-	Name:    "evolution_candidates",
-	Statements: []string{
-		`CREATE TABLE evolution_candidates (
-			candidate_id TEXT PRIMARY KEY,
-			target_kind TEXT NOT NULL,
-			target_name TEXT NOT NULL,
-			status TEXT NOT NULL,
-			baseline_version TEXT NOT NULL,
-			baseline_document TEXT NOT NULL,
-			candidate_document TEXT NOT NULL,
-			unified_diff TEXT NOT NULL,
-			cluster_summary TEXT NOT NULL,
-			matrix_report TEXT NOT NULL,
-			staged_skill_name TEXT NOT NULL,
-			promoted_version TEXT NOT NULL,
-			rollback_version TEXT NOT NULL,
-			approved_by TEXT NOT NULL,
-			created_at BIGINT NOT NULL,
-			updated_at BIGINT NOT NULL
-		)`,
+var evolutionMigrations = []relational.Migration{
+	{
+		Version: 301,
+		Name:    "evolution_candidates",
+		Statements: []string{
+			`CREATE TABLE evolution_candidates (
+				candidate_id TEXT PRIMARY KEY,
+				target_kind TEXT NOT NULL,
+				target_name TEXT NOT NULL,
+				status TEXT NOT NULL,
+				baseline_version TEXT NOT NULL,
+				baseline_document TEXT NOT NULL,
+				candidate_document TEXT NOT NULL,
+				unified_diff TEXT NOT NULL,
+				cluster_summary TEXT NOT NULL,
+				matrix_report TEXT NOT NULL,
+				staged_skill_name TEXT NOT NULL,
+				promoted_version TEXT NOT NULL,
+				rollback_version TEXT NOT NULL,
+				approved_by TEXT NOT NULL,
+				created_at BIGINT NOT NULL,
+				updated_at BIGINT NOT NULL
+			)`,
+		},
 	},
-}}
+	{
+		Version: 302,
+		Name:    "evolution_audit_log",
+		Statements: []string{
+			`CREATE TABLE evolution_audit_log (
+				audit_id TEXT PRIMARY KEY,
+				candidate_id TEXT NOT NULL,
+				action TEXT NOT NULL,
+				actor TEXT NOT NULL,
+				target_name TEXT NOT NULL,
+				before_version TEXT NOT NULL,
+				after_version TEXT NOT NULL,
+				reason TEXT NOT NULL,
+				created_at BIGINT NOT NULL
+			)`,
+		},
+	},
+}
+
+// AuditEntry records an operator governance action (import, promote, rollback, trigger_run).
+type AuditEntry struct {
+	AuditID       string `json:"audit_id"`
+	CandidateID   string `json:"candidate_id,omitempty"`
+	Action        string `json:"action"`
+	Actor         string `json:"actor"`
+	TargetName    string `json:"target_name"`
+	BeforeVersion string `json:"before_version,omitempty"`
+	AfterVersion  string `json:"after_version,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	CreatedAt     int64  `json:"created_at"`
+}
 
 // CandidateRecord mirrors agentruntime_learning.evolution.store.CandidateRecord.
 type CandidateRecord struct {
@@ -89,6 +121,8 @@ type EvolutionRepo interface {
 	List(ctx context.Context, status string) ([]CandidateRecord, error)
 	Get(ctx context.Context, id string) (CandidateRecord, error)
 	Upsert(ctx context.Context, rec CandidateRecord) (CandidateRecord, error)
+	RecordAudit(ctx context.Context, entry AuditEntry) error
+	ListAudit(ctx context.Context, limit int) ([]AuditEntry, error)
 	Close() error
 }
 
@@ -272,6 +306,55 @@ func (r *PostgresRepo) Upsert(ctx context.Context, rec CandidateRecord) (Candida
 	return r.Get(ctx, rec.CandidateID)
 }
 
+func (r *PostgresRepo) RecordAudit(ctx context.Context, entry AuditEntry) error {
+	if strings.TrimSpace(entry.AuditID) == "" {
+		entry.AuditID = newAuditID()
+	}
+	if entry.CreatedAt == 0 {
+		entry.CreatedAt = time.Now().UTC().UnixMilli()
+	}
+	return r.store.Transaction(ctx, relational.TxOptions{}, func(ctx context.Context, tx relational.Tx) error {
+		_, err := tx.Execute(ctx, `INSERT INTO evolution_audit_log (
+			audit_id, candidate_id, action, actor, target_name, before_version, after_version, reason, created_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+			entry.AuditID, entry.CandidateID, entry.Action, entry.Actor, entry.TargetName,
+			entry.BeforeVersion, entry.AfterVersion, entry.Reason, entry.CreatedAt,
+		)
+		return err
+	})
+}
+
+func (r *PostgresRepo) ListAudit(ctx context.Context, limit int) ([]AuditEntry, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	var out []AuditEntry
+	err := r.store.Transaction(ctx, relational.TxOptions{ReadOnly: true}, func(ctx context.Context, tx relational.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT audit_id, candidate_id, action, actor, target_name, before_version, after_version, reason, created_at
+			FROM evolution_audit_log ORDER BY created_at DESC, audit_id DESC LIMIT $1`, int64(limit))
+		if err != nil {
+			return err
+		}
+		str := func(row relational.Row, k string) string { s, _ := row[k].(string); return s }
+		out = make([]AuditEntry, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, AuditEntry{
+				AuditID:       str(row, "audit_id"),
+				CandidateID:   str(row, "candidate_id"),
+				Action:        str(row, "action"),
+				Actor:         str(row, "actor"),
+				TargetName:    str(row, "target_name"),
+				BeforeVersion: str(row, "before_version"),
+				AfterVersion:  str(row, "after_version"),
+				Reason:        str(row, "reason"),
+				CreatedAt:     asInt64(row["created_at"]),
+			})
+		}
+		return nil
+	})
+	return out, err
+}
+
 // --- FileRepo fallback for dev / unit tests ---
 
 type FileRepo struct {
@@ -391,10 +474,88 @@ func (f *FileRepo) Upsert(_ context.Context, rec CandidateRecord) (CandidateReco
 	return rec, nil
 }
 
+func (f *FileRepo) auditPath() string {
+	return filepath.Join(filepath.Dir(f.path), "evolution_audit.json")
+}
+
+func (f *FileRepo) readAuditLocked() ([]AuditEntry, error) {
+	data, err := os.ReadFile(f.auditPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return []AuditEntry{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return []AuditEntry{}, nil
+	}
+	var rows []AuditEntry
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (f *FileRepo) RecordAudit(_ context.Context, entry AuditEntry) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rows, err := f.readAuditLocked()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(entry.AuditID) == "" {
+		entry.AuditID = newAuditID()
+	}
+	if entry.CreatedAt == 0 {
+		entry.CreatedAt = time.Now().UTC().UnixMilli()
+	}
+	if len(rows) > 0 && entry.CreatedAt <= rows[len(rows)-1].CreatedAt {
+		entry.CreatedAt = rows[len(rows)-1].CreatedAt + 1
+	}
+	rows = append(rows, entry)
+	b, err := json.MarshalIndent(rows, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := f.auditPath() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, f.auditPath())
+}
+
+func (f *FileRepo) ListAudit(_ context.Context, limit int) ([]AuditEntry, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rows, err := f.readAuditLocked()
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].CreatedAt != rows[j].CreatedAt {
+			return rows[i].CreatedAt > rows[j].CreatedAt
+		}
+		return rows[i].AuditID > rows[j].AuditID
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
 func newCandidateID() string {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
 	return "cand_" + hex.EncodeToString(b)
+}
+
+func newAuditID() string {
+	b := make([]byte, 6)
+	_, _ = rand.Read(b)
+	return "aud_" + hex.EncodeToString(b)
 }
 
 // --- RegistryAdminClient (Connect HTTP+JSON over internal Registry port 8092) ---
@@ -546,6 +707,130 @@ func (c *RegistryAdminClient) call(ctx context.Context, method, bearer string, r
 	return json.Unmarshal(data, respBody)
 }
 
+// --- EvolutionRunnerClient controls on-demand self-evolution cycles ---
+
+var ErrRunnerUnavailable = errors.New("evolution runner service unavailable or rejected request")
+
+type EvolutionRunnerClient struct {
+	baseURL      string
+	token        string
+	maxBudgetUSD float64
+	http         *http.Client
+}
+
+func NewEvolutionRunnerClient(baseURL, token string, maxBudgetUSD float64) *EvolutionRunnerClient {
+	if maxBudgetUSD <= 0 {
+		maxBudgetUSD = 1.0
+	}
+	return &EvolutionRunnerClient{
+		baseURL:      strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		token:        strings.TrimSpace(token),
+		maxBudgetUSD: maxBudgetUSD,
+		http:         &http.Client{Timeout: 8 * time.Second},
+	}
+}
+
+func (c *EvolutionRunnerClient) Configured() bool {
+	return c != nil && c.baseURL != ""
+}
+
+func (c *EvolutionRunnerClient) MaxBudgetUSD() float64 {
+	if c == nil || c.maxBudgetUSD <= 0 {
+		return 1.0
+	}
+	return c.maxBudgetUSD
+}
+
+func (c *EvolutionRunnerClient) ListRuns(ctx context.Context) ([]map[string]any, error) {
+	if !c.Configured() {
+		return []map[string]any{}, nil
+	}
+	var out struct {
+		Runs []map[string]any `json:"runs"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/runs", nil, &out); err != nil {
+		return nil, err
+	}
+	if out.Runs == nil {
+		return []map[string]any{}, nil
+	}
+	return out.Runs, nil
+}
+
+func (c *EvolutionRunnerClient) GetRun(ctx context.Context, runID string) (map[string]any, error) {
+	if !c.Configured() {
+		return nil, ErrRunnerUnavailable
+	}
+	var out map[string]any
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/runs/"+strings.TrimSpace(runID), nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *EvolutionRunnerClient) TriggerRun(ctx context.Context, mode string, budgetUSD float64, minSupport int) (map[string]any, error) {
+	if !c.Configured() {
+		return nil, ErrRunnerUnavailable
+	}
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		mode = "fixture"
+	}
+	if mode != "fixture" && mode != "gateway" {
+		return nil, fmt.Errorf("%w: mode must be fixture or gateway", ErrRunnerUnavailable)
+	}
+	if budgetUSD < 0 || budgetUSD > c.MaxBudgetUSD() {
+		return nil, fmt.Errorf("%w: budget_usd must be between 0 and %.2f", ErrRunnerUnavailable, c.MaxBudgetUSD())
+	}
+	if minSupport <= 0 {
+		minSupport = 2
+	}
+	var out map[string]any
+	err := c.doJSON(ctx, http.MethodPost, "/v1/runs", map[string]any{
+		"mode":        mode,
+		"budget_usd":  budgetUSD,
+		"min_support": minSupport,
+	}, &out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *EvolutionRunnerClient) doJSON(ctx context.Context, method, path string, body, out any) error {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, rdr)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrRunnerUnavailable, err)
+	}
+	defer res.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("%w: http %d: %s", ErrRunnerUnavailable, res.StatusCode, strings.TrimSpace(string(data)))
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(data, out)
+}
+
 // --- EvolutionManager coordinates store + optional Registry promotion/rollback ---
 
 type EvolutionManager struct {
@@ -592,7 +877,40 @@ func (m *EvolutionManager) Import(ctx context.Context, rec CandidateRecord) (Can
 	if rec.TargetKind == "" {
 		rec.TargetKind = "skill"
 	}
-	return m.repo.Upsert(ctx, rec)
+	saved, err := m.repo.Upsert(ctx, rec)
+	if err == nil {
+		_ = m.repo.RecordAudit(ctx, AuditEntry{
+			CandidateID:   saved.CandidateID,
+			Action:        "import",
+			Actor:         emptyStr(saved.ApprovedBy, "evolution-pipeline"),
+			TargetName:    saved.TargetName,
+			BeforeVersion: saved.BaselineVersion,
+			AfterVersion:  saved.Status,
+			Reason:        saved.StagedSkillName,
+		})
+	}
+	return saved, err
+}
+
+func emptyStr(v, d string) string {
+	if strings.TrimSpace(v) == "" {
+		return d
+	}
+	return v
+}
+
+func (m *EvolutionManager) ListAudit(ctx context.Context, limit int) ([]AuditEntry, error) {
+	if m == nil || m.repo == nil {
+		return []AuditEntry{}, nil
+	}
+	return m.repo.ListAudit(ctx, limit)
+}
+
+func (m *EvolutionManager) RecordAudit(ctx context.Context, entry AuditEntry) error {
+	if m == nil || m.repo == nil {
+		return nil
+	}
+	return m.repo.RecordAudit(ctx, entry)
 }
 
 func (m *EvolutionManager) RegistryOverview(ctx context.Context) RegistryOverview {
@@ -628,7 +946,19 @@ func (m *EvolutionManager) Promote(ctx context.Context, candidateID, adminActor 
 	rec.Status = "promoted"
 	rec.PromotedVersion = version
 	rec.ApprovedBy = adminActor
-	return m.repo.Upsert(ctx, rec)
+	saved, err := m.repo.Upsert(ctx, rec)
+	if err == nil {
+		_ = m.repo.RecordAudit(ctx, AuditEntry{
+			CandidateID:   saved.CandidateID,
+			Action:        "promote",
+			Actor:         adminActor,
+			TargetName:    saved.TargetName,
+			BeforeVersion: saved.BaselineVersion,
+			AfterVersion:  saved.PromotedVersion,
+			Reason:        "admin console promote",
+		})
+	}
+	return saved, err
 }
 
 func (m *EvolutionManager) Rollback(ctx context.Context, candidateID, adminActor, reason string) (CandidateRecord, error) {
@@ -656,7 +986,20 @@ func (m *EvolutionManager) Rollback(ctx context.Context, candidateID, adminActor
 			return CandidateRecord{}, err
 		}
 	}
+	prevVer := rec.PromotedVersion
 	rec.Status = "rolled_back"
 	rec.RollbackVersion = version
-	return m.repo.Upsert(ctx, rec)
+	saved, err := m.repo.Upsert(ctx, rec)
+	if err == nil {
+		_ = m.repo.RecordAudit(ctx, AuditEntry{
+			CandidateID:   saved.CandidateID,
+			Action:        "rollback",
+			Actor:         adminActor,
+			TargetName:    saved.TargetName,
+			BeforeVersion: prevVer,
+			AfterVersion:  saved.RollbackVersion,
+			Reason:        strings.TrimSpace(reason),
+		})
+	}
+	return saved, err
 }

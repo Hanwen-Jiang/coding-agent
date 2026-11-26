@@ -9,6 +9,10 @@ let state = {
   statusFilter: "",
   error: "",
   busyID: "",
+  runBusy: false,
+  runMode: "fixture",
+  runBudget: "0.0",
+  expandedRun: null,
 };
 
 function isAdminRoute() {
@@ -191,8 +195,38 @@ function renderOverview() {
   const crM = cr.metrics || {};
   const comp = tel.companion_metrics || {};
   const reg = ov.registry || {};
+  const alerts = tel.alerts || [];
+  const cdInfra = tel.coding_dance_infra || null;
+  const runnerState = ov.runner || {};
+  const auditEntries = ov.audit || [];
   const allCandidates = ov.candidates || [];
   const filtered = state.statusFilter ? allCandidates.filter((c) => c.status === state.statusFilter) : allCandidates;
+
+  const alertsCard = el(
+    "div",
+    { class: "admin-card" },
+    el("h3", {}, `${t("admin.alertsTitle")} (${alerts.length})`),
+    alerts.length === 0
+      ? el("span", { class: "admin-badge ok" }, t("admin.noAlerts"))
+      : el(
+          "div",
+          {},
+          ...alerts.map((al) =>
+            el(
+              "div",
+              { class: "admin-alert-row" },
+              el(
+                "div",
+                { class: "admin-title-group" },
+                el("span", { class: badgeClass(al.severity === "critical" || al.state === "firing" ? "err" : "warn") }, `${al.severity || "warn"} · ${al.state || "active"}`),
+                el("strong", {}, al.name || "alert"),
+                al.service ? el("span", { class: "admin-badge" }, al.service) : null
+              ),
+              el("span", { class: "admin-muted" }, al.summary || al.since || "")
+            )
+          )
+        )
+  );
 
   const metricCards = el(
     "div",
@@ -394,7 +428,174 @@ function renderOverview() {
     candidateCards.length > 0 ? el("div", { class: "admin-main" }, ...candidateCards) : el("p", { class: "admin-muted" }, t("admin.noCandidates"))
   );
 
-  return el("div", { class: "admin-main" }, metricCards, seriesSection, regSection, evolutionCard);
+  const cdCard = cdInfra
+    ? el(
+        "div",
+        { class: "admin-card" },
+        el("h3", {}, t("admin.cdInfra")),
+        el(
+          "div",
+          { class: "admin-pill-row" },
+          cdInfra.cd_runner ? el("span", { class: badgeClass(String(!!cdInfra.cd_runner.available)) }, `cd-runner: ${cdInfra.cd_runner.available ? "ready" : t("admin.offline")}`) : null,
+          cdInfra.cd_api ? el("span", { class: badgeClass(String(!!cdInfra.cd_api.healthy)) }, `cd-api: ${cdInfra.cd_api.healthy ? "healthy" : t("admin.offline")}`) : null
+        )
+      )
+    : null;
+
+  let modeSelect, budgetInput;
+  const runs = runnerState.runs || [];
+  const runsCard = el(
+    "div",
+    { class: "admin-card" },
+    el(
+      "div",
+      { class: "admin-toolbar" },
+      el("h3", {}, `${t("admin.runsTitle")} (${runs.length})`),
+      runnerState.configured
+        ? el(
+            "form",
+            {
+              class: "admin-inline-form",
+              onSubmit: async (e) => {
+                e.preventDefault();
+                state.runBusy = true;
+                state.error = "";
+                render();
+                try {
+                  state.runMode = modeSelect.value;
+                  state.runBudget = budgetInput.value;
+                  await requestJSON("POST", "/api/admin/v1/evolution/runs", {
+                    mode: state.runMode,
+                    budget_usd: Number(state.runBudget || 0),
+                    min_support: 2,
+                  });
+                  await refreshData();
+                } catch (err) {
+                  state.error = err.message || String(err);
+                } finally {
+                  state.runBusy = false;
+                  render();
+                }
+              },
+            },
+            el("label", { for: "admin-run-mode" }, t("admin.runMode")),
+            (modeSelect = el(
+              "select",
+              { id: "admin-run-mode", value: state.runMode },
+              el("option", { value: "fixture", selected: state.runMode === "fixture" }, "fixture ($0.00)"),
+              el("option", { value: "gateway", selected: state.runMode === "gateway" }, "gateway")
+            )),
+            el("label", { for: "admin-run-budget" }, t("admin.runBudget")),
+            (budgetInput = el("input", {
+              id: "admin-run-budget",
+              type: "number",
+              step: "0.05",
+              min: "0",
+              max: String(runnerState.max_budget_usd || 1.0),
+              value: state.runBudget,
+            })),
+            el("button", { type: "submit", class: "admin-btn primary", disabled: state.runBusy }, t("admin.triggerRun"))
+          )
+        : el("span", { class: "admin-muted" }, t("admin.runnerDisabled"))
+    ),
+    runs.length > 0
+      ? el(
+          "table",
+          { class: "admin-table" },
+          el(
+            "thead",
+            {},
+            el("tr", {}, el("th", {}, "Run ID"), el("th", {}, t("admin.runMode")), el("th", {}, "Budget"), el("th", {}, "Status"), el("th", {}, "Action"))
+          ),
+          el(
+            "tbody",
+            {},
+            ...runs.map((r) =>
+              el(
+                "tr",
+                {},
+                el("td", {}, r.run_id || "-"),
+                el("td", {}, r.mode || "-"),
+                el("td", {}, `$${Number(r.budget_usd || 0).toFixed(2)}`),
+                el("td", {}, el("span", { class: badgeClass(r.status === "completed" ? "ok" : r.status === "failed" ? "err" : "warn") }, r.status || "unknown")),
+                el(
+                  "td",
+                  {},
+                  el(
+                    "button",
+                    {
+                      type: "button",
+                      class: "admin-btn",
+                      onClick: async () => {
+                        try {
+                          state.expandedRun = await requestJSON("GET", `/api/admin/v1/evolution/runs/${encodeURIComponent(r.run_id)}`);
+                          render();
+                        } catch (err) {
+                          state.error = err.message || String(err);
+                          render();
+                        }
+                      },
+                    },
+                    t("admin.viewLogs")
+                  )
+                )
+              )
+            )
+          )
+        )
+      : el("p", { class: "admin-muted" }, t("admin.noRuns")),
+    state.expandedRun
+      ? el(
+          "pre",
+          { class: "admin-logs" },
+          `[${state.expandedRun.run_id}] ${state.expandedRun.status}\n` + (state.expandedRun.logs || []).join("\n")
+        )
+      : null
+  );
+
+  const auditCard = el(
+    "div",
+    { class: "admin-card" },
+    el("h3", {}, `${t("admin.auditTitle")} (${auditEntries.length})`),
+    auditEntries.length > 0
+      ? el(
+          "table",
+          { class: "admin-table" },
+          el(
+            "thead",
+            {},
+            el(
+              "tr",
+              {},
+              el("th", {}, t("admin.auditTime")),
+              el("th", {}, t("admin.auditAction")),
+              el("th", {}, t("admin.auditActor")),
+              el("th", {}, t("admin.auditTarget")),
+              el("th", {}, t("admin.auditTransition")),
+              el("th", {}, t("admin.auditReason"))
+            )
+          ),
+          el(
+            "tbody",
+            {},
+            ...auditEntries.map((ae) =>
+              el(
+                "tr",
+                {},
+                el("td", {}, ae.created_at ? new Date(ae.created_at).toISOString().replace("T", " ").slice(0, 19) : "-"),
+                el("td", {}, el("span", { class: "admin-badge" }, ae.action || "-")),
+                el("td", {}, ae.actor || "-"),
+                el("td", {}, ae.target_name || "-"),
+                el("td", {}, `${ae.before_version || "-"} -> ${ae.after_version || "-"}`),
+                el("td", {}, ae.reason || "-")
+              )
+            )
+          )
+        )
+      : el("p", { class: "admin-muted" }, t("admin.noAudit"))
+  );
+
+  return el("div", { class: "admin-main" }, metricCards, alertsCard, cdCard, seriesSection, regSection, runsCard, evolutionCard, auditCard);
 }
 
 function render() {

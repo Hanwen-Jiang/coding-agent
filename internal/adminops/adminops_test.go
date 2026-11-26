@@ -261,4 +261,113 @@ func TestEvolutionManagerPromoteAndRollback(t *testing.T) {
 	if !ov.Available || len(ov.PlatformSkills) != 1 || ov.SysEvolutionPolicy["version"] != "1" {
 		t.Fatalf("unexpected registry overview: %+v", ov)
 	}
+
+	audits, err := mgr.ListAudit(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListAudit: %v", err)
+	}
+	if len(audits) != 3 {
+		t.Fatalf("expected 3 audit entries (import, promote, rollback), got %d: %+v", len(audits), audits)
+	}
+	if audits[0].Action != "rollback" || audits[0].BeforeVersion != "2" || audits[0].AfterVersion != "3" {
+		t.Fatalf("unexpected latest audit entry: %+v", audits[0])
+	}
+}
+
+func TestTelemetryAlertsAndCodingDanceInfra(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v2/alerts":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"labels":      map[string]string{"alertname": "AgentRuntimeCrawlerErrors", "severity": "warning", "service": "crawler-gateway"},
+					"annotations": map[string]string{"summary": "Crawler upstream 5xx elevated"},
+					"startsAt":    "2026-11-26T08:00:00Z",
+					"status":      map[string]string{"state": "active"},
+				},
+			})
+		case "/api/v1/alerts":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "success",
+				"data": map[string]any{
+					"alerts": []map[string]any{
+						{
+							"labels":      map[string]string{"alertname": "AgentRuntimeBudgetHigh", "severity": "critical", "service": "model-gateway"},
+							"annotations": map[string]string{"summary": "Budget burn high"},
+							"state":       "firing",
+							"activeAt":    "2026-11-26T08:05:00Z",
+						},
+					},
+				},
+			})
+		case "/v1/status":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "mode": "firecracker"})
+		case "/healthz":
+			_, _ = w.Write([]byte("ok"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	client := NewTelemetryClient(TelemetryConfig{
+		VictoriaMetricsURL: srv.URL,
+		AlertmanagerURL:    srv.URL,
+		CDRunnerURL:        srv.URL,
+		CDAPIURL:           srv.URL,
+	})
+	sum := client.Summary(context.Background())
+	if len(sum.Alerts) != 2 {
+		t.Fatalf("expected 2 deduplicated alerts, got %+v", sum.Alerts)
+	}
+	if sum.CodingDanceInfra == nil || sum.CodingDanceInfra["cd_runner"].(map[string]any)["available"] != true || sum.CodingDanceInfra["cd_api"].(map[string]any)["healthy"] != true {
+		t.Fatalf("unexpected coding-dance infra status: %+v", sum.CodingDanceInfra)
+	}
+}
+
+func TestEvolutionRunnerClientTriggerAndBudgetCap(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer runner-tok" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"runs": []map[string]any{{"run_id": "evol-1", "status": "completed", "mode": "fixture"}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/runs/evol-1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"run_id": "evol-1", "status": "completed", "logs": []string{"line1", "line2"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/runs":
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"run_id": "evol-2", "status": "running", "mode": "gateway",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewEvolutionRunnerClient(srv.URL, "runner-tok", 0.5)
+	ctx := context.Background()
+	if _, err := c.TriggerRun(ctx, "gateway", 0.9, 2); err == nil {
+		t.Fatal("expected over-budget run trigger to fail locally")
+	}
+	started, err := c.TriggerRun(ctx, "gateway", 0.25, 2)
+	if err != nil || started["run_id"] != "evol-2" {
+		t.Fatalf("TriggerRun failed: %v (%+v)", err, started)
+	}
+	runs, err := c.ListRuns(ctx)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("ListRuns failed: %v (%+v)", err, runs)
+	}
+	detail, err := c.GetRun(ctx, "evol-1")
+	if err != nil || len(detail["logs"].([]any)) != 2 {
+		t.Fatalf("GetRun failed: %v (%+v)", err, detail)
+	}
 }

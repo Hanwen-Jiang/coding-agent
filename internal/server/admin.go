@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -94,6 +95,10 @@ func (s *Server) adminRoutes(pub *gin.RouterGroup, r *gin.Engine) {
 	adm := r.Group("/api/admin/v1", s.requireAdmin())
 	get(adm, "/overview", s.handleAdminOverview)
 	get(adm, "/telemetry/summary", s.handleAdminTelemetrySummary)
+	get(adm, "/audit", s.handleAdminListAudit)
+	get(adm, "/evolution/runs", s.handleAdminListRuns)
+	get(adm, "/evolution/runs/:id", s.handleAdminGetRun)
+	adm.POST("/evolution/runs", s.handleAdminTriggerRun)
 	get(adm, "/evolution/candidates", s.handleAdminListCandidates)
 	get(adm, "/evolution/candidates/:id", s.handleAdminGetCandidate)
 	adm.POST("/evolution/candidates/import", s.handleAdminImportCandidate)
@@ -212,19 +217,134 @@ func (s *Server) handleAdminOverview(c *gin.Context) {
 		summary = s.adminTelemetry.Summary(ctx)
 	}
 	candidates := []adminops.CandidateRecord{}
+	auditEntries := []adminops.AuditEntry{}
 	var regOverview adminops.RegistryOverview
 	if s.adminEvolution != nil {
 		if rows, err := s.adminEvolution.List(ctx, ""); err == nil {
 			candidates = rows
 		}
+		if entries, err := s.adminEvolution.ListAudit(ctx, 20); err == nil {
+			auditEntries = entries
+		}
 		regOverview = s.adminEvolution.RegistryOverview(ctx)
+	}
+	runnerState := map[string]any{
+		"configured":     s.adminRunner != nil && s.adminRunner.Configured(),
+		"max_budget_usd": s.adminRunner.MaxBudgetUSD(),
+		"runs":           []map[string]any{},
+	}
+	if s.adminRunner != nil && s.adminRunner.Configured() {
+		if runs, err := s.adminRunner.ListRuns(ctx); err == nil {
+			runnerState["runs"] = runs
+		} else {
+			runnerState["error"] = "unreachable"
+		}
 	}
 	writeJSON(c, http.StatusOK, map[string]any{
 		"admin":      map[string]any{"email": admin.Email, "kind": admin.Kind},
 		"telemetry":  summary,
 		"registry":   regOverview,
 		"candidates": candidates,
+		"audit":      auditEntries,
+		"runner":     runnerState,
 	})
+}
+
+func (s *Server) handleAdminListAudit(c *gin.Context) {
+	ctx, cancel := ctxTimeout(c.Request, 6*time.Second)
+	defer cancel()
+	entries, err := s.adminEvolution.ListAudit(ctx, 50)
+	if err != nil {
+		writeErr(c, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(c, http.StatusOK, map[string]any{"entries": entries})
+}
+
+func (s *Server) handleAdminListRuns(c *gin.Context) {
+	if s.adminRunner == nil || !s.adminRunner.Configured() {
+		writeJSON(c, http.StatusOK, map[string]any{
+			"configured":     false,
+			"max_budget_usd": 1.0,
+			"runs":           []map[string]any{},
+		})
+		return
+	}
+	ctx, cancel := ctxTimeout(c.Request, 8*time.Second)
+	defer cancel()
+	runs, err := s.adminRunner.ListRuns(ctx)
+	if err != nil {
+		writeMsg(c, http.StatusBadGateway, "自进化执行器不可达")
+		return
+	}
+	writeJSON(c, http.StatusOK, map[string]any{
+		"configured":     true,
+		"max_budget_usd": s.adminRunner.MaxBudgetUSD(),
+		"runs":           runs,
+	})
+}
+
+func (s *Server) handleAdminGetRun(c *gin.Context) {
+	if s.adminRunner == nil || !s.adminRunner.Configured() {
+		writeMsg(c, http.StatusServiceUnavailable, "自进化执行器未配置")
+		return
+	}
+	ctx, cancel := ctxTimeout(c.Request, 8*time.Second)
+	defer cancel()
+	rec, err := s.adminRunner.GetRun(ctx, c.Param("id"))
+	if err != nil {
+		writeMsg(c, http.StatusNotFound, "运行记录不存在")
+		return
+	}
+	writeJSON(c, http.StatusOK, rec)
+}
+
+func (s *Server) handleAdminTriggerRun(c *gin.Context) {
+	if s.adminRunner == nil || !s.adminRunner.Configured() {
+		writeMsg(c, http.StatusServiceUnavailable, "自进化执行器未配置")
+		return
+	}
+	admin, _ := getAdmin(c)
+	var req struct {
+		Mode       string  `json:"mode"`
+		BudgetUSD  float64 `json:"budget_usd"`
+		MinSupport int     `json:"min_support"`
+	}
+	if !readJSON(c, &req) {
+		return
+	}
+	mode := strings.TrimSpace(req.Mode)
+	if mode == "" {
+		mode = "fixture"
+	}
+	if mode != "fixture" && mode != "gateway" {
+		writeMsg(c, http.StatusBadRequest, "自进化运行模式只能是 fixture 或 gateway")
+		return
+	}
+	if req.BudgetUSD < 0 || req.BudgetUSD > s.adminRunner.MaxBudgetUSD() {
+		writeMsg(c, http.StatusBadRequest, "预算超过单次触发上限")
+		return
+	}
+	ctx, cancel := ctxTimeout(c.Request, 10*time.Second)
+	defer cancel()
+	rec, err := s.adminRunner.TriggerRun(ctx, mode, req.BudgetUSD, req.MinSupport)
+	if err != nil {
+		writeMsg(c, http.StatusBadGateway, "触发自进化运行失败")
+		return
+	}
+	runID, _ := rec["run_id"].(string)
+	if s.adminEvolution != nil {
+		_ = s.adminEvolution.RecordAudit(ctx, adminops.AuditEntry{
+			CandidateID:   runID,
+			Action:        "trigger_run",
+			Actor:         admin.Email,
+			TargetName:    fmt.Sprintf("evolution:%s", mode),
+			BeforeVersion: "manual",
+			AfterVersion:  fmt.Sprintf("budget=$%.2f", req.BudgetUSD),
+			Reason:        "admin console trigger",
+		})
+	}
+	writeJSON(c, http.StatusAccepted, rec)
 }
 
 func (s *Server) handleAdminListCandidates(c *gin.Context) {

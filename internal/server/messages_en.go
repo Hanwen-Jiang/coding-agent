@@ -287,4 +287,10 @@ var english = map[string]string{
 	"提示令牌无效或已过期，请重新触发检查":     "Hint consent token is invalid or expired. Please run hint-check again.",
 	"提示等级只能是 L1、L2、L3 或 L4": "Hint level must be one of L1, L2, L3, or L4",
 	"请求参数不合法":               "Invalid request payload",
+	"自进化执行器未配置":             "Self-evolution runner is not configured",
+	"自进化执行器不可达":             "Self-evolution runner is unreachable",
+	"运行记录不存在":               "Evolution run record not found",
+	"自进化运行模式只能是 fixture 或 gateway": "Evolution mode must be fixture or gateway",
+	"预算超过单次触发上限":            "Budget exceeds the configured per-run cap",
+	"触发自进化运行失败":             "Failed to trigger self-evolution run",
 }
