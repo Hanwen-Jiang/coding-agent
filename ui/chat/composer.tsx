@@ -17,6 +17,9 @@ interface ComposerSnapshot {
  label: string;
  sendLabel: string;
  menuLabel: string;
+ hasNewOutput?: boolean;
+ newOutputLabel?: string;
+ scrollToBottomLabel?: string;
 }
 export interface ComposerProps {
  model: {
@@ -35,6 +38,7 @@ export interface ComposerProps {
  onKeyDown: (event: KeyboardEvent) => void;
  onSend: () => void;
  onMenu: (anchor: HTMLElement) => void;
+ onScrollToBottom?: () => void;
 }
 
 // These are the remaining application-owned approval/status controls. The
@@ -66,7 +70,7 @@ function ComposerView(props: ComposerProps) {
  useEffect(()=>{
   const scroller=document.querySelector<HTMLElement>('.main .scroll');
   if(!scroller)return;
-  const check=()=>{setShowScrollDown(scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight>140);};
+  const check=()=>{setShowScrollDown(scroller.scrollHeight-scroller.clientHeight>80&&scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight>80);};
   check();
   scroller.addEventListener('scroll',check,{passive:true});
   const observer=new ResizeObserver(check);
@@ -90,7 +94,13 @@ function ComposerView(props: ComposerProps) {
   onDrop={event=>{if(event.dataTransfer.types.includes('Files')){event.preventDefault();dragDepth.current=0;setDragging(false);props.onFiles(Array.from(event.dataTransfer.files));}}}
   onPaste={event=>{if(event.clipboardData.files.length){event.preventDefault();props.onFiles(Array.from(event.clipboardData.files));}}}>
   <input ref={fileInput} type="file" className="composer-file-input" multiple hidden aria-label={state.uploadLabels?.add} onChange={event=>{props.onFiles(Array.from(event.target.files||[]));event.target.value='';}}/>
-  {showScrollDown&&<button type="button" className="scroll-to-bottom" aria-label={document.documentElement.lang.startsWith('zh')?'滚动到底部':'Scroll to bottom'} onClick={()=>{const s=document.querySelector<HTMLElement>('.main .scroll');s?.scrollTo({top:s.scrollHeight,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});}}><Icon name="chevDown" size="xs"/></button>}
+  {showScrollDown&&<button type="button" className="scroll-to-bottom" data-unread={state.hasNewOutput?'true':undefined}
+   aria-label={state.hasNewOutput?(state.newOutputLabel||state.scrollToBottomLabel):(state.scrollToBottomLabel||(document.documentElement.lang.startsWith('zh')?'滚动到底部':'Scroll to bottom'))}
+   title={state.scrollToBottomLabel||(document.documentElement.lang.startsWith('zh')?'滚动到底部':'Scroll to bottom')}
+   onClick={()=>{const s=document.querySelector<HTMLElement>('.main .scroll');s?.scrollTo({top:s.scrollHeight,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});props.onScrollToBottom?.();}}>
+   {state.hasNewOutput&&<><span className="scroll-unread-dot" aria-hidden="true"/><span className="scroll-unread-label">{state.newOutputLabel}</span></>}
+   <Icon name="chevDown" size="xs"/>
+  </button>}
   <PromptInput.Shell>
    <div ref={body} className={'composer'+(state.mode==='waiting'?' waiting':'')}>
     <ControlSlot node={props.slots.status}/><ControlSlot node={props.slots.ask}/>

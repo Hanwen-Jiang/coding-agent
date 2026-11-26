@@ -1,28 +1,47 @@
-import React, {useEffect,useRef,useState} from 'react';
+import React, {useEffect,useMemo,useRef,useState} from 'react';
 import {Button} from '@heroui/react';
 import {ChainOfThought} from '@heroui-pro/react/chain-of-thought';
 import {ChatTool} from '@heroui-pro/react/chat-tool';
 import {ChatMessage} from '@heroui-pro/react/chat-message';
+import {CodeBlock} from '@heroui-pro/react/code-block';
 import {Markdown} from '@heroui-pro/react/markdown';
 import {ChatLoader} from '@heroui-pro/react/chat-loader';
+import type {Components} from 'react-markdown';
 import {Icon} from './icon';
 
 type Step = {id:string;label:string;target:string;detail:string;error:string;tool:string;state:'input-available'|'output-error'|'output-available';time:string;duration:string};
 type Plan = {title:string;agentsTitle:string;steps:Array<{id:string;title:string;status:string;statusLabel:string;current:boolean}>;agents:Array<{id:string;name:string;state:string;statusLabel:string;label:string;last:string}>};
 type Group = {kind:'tools';id:string;reveal?:number;title:string;current:string;running:boolean;steps:Step[];plan?:Plan};
 type Note = {kind:'progress';id:string;message:string;source:string};
-export type ConversationProps = {parts:Array<Group|Note>;labels:{more:string;less:string;command:string;target:string;failed:string;plan:string}};
+export type ConversationProps = {parts:Array<Group|Note>;labels:{more:string;less:string;command:string;target:string;failed:string;plan:string;copy?:string;copied?:string;copyFailed?:string;jumpFailed?:string}};
 
 function publicHref(href?:string) {
  try {const url=new URL(href || '',location.href);return href&&['http:','https:','mailto:'].includes(url.protocol)?url.href:undefined;}catch{return undefined;}
 }
-function ProgressNote({part}:{part:Note}) {
+function CopyInline({text,label,copiedLabel,failedLabel,className='btn ghost xs code-block__copy-button'}:{text:string;label?:string;copiedLabel?:string;failedLabel?:string;className?:string}) {
+ const [state,setState]=useState<'ready'|'copied'|'failed'>('ready');
+ const timer=useRef<ReturnType<typeof setTimeout>|null>(null);
+ useEffect(()=>()=>{if(timer.current)clearTimeout(timer.current);},[]);
+ const lbl=label||'Copy';
+ return <button type="button" className={className} data-copied={state==='copied'?'true':undefined} aria-label={lbl} aria-live="polite" onClick={async()=>{
+  try{await navigator.clipboard.writeText(text);setState('copied');}catch{setState('failed');}
+  if(timer.current)clearTimeout(timer.current);timer.current=setTimeout(()=>setState('ready'),2000);
+ }}><Icon name={state==='copied'?'check':'copy'} size="xs"/><span>{state==='copied'?(copiedLabel||lbl):state==='failed'?(failedLabel||lbl):lbl}</span></button>;
+}
+function ProgressNote({part,labels}:{part:Note;labels:ConversationProps['labels']}) {
+ const components=useMemo<Components>(()=>({
+  a:({href,children})=><a href={publicHref(href)} target="_blank" rel="noopener noreferrer">{children}</a>,
+  img:({src,alt})=>{const safe=publicHref(src);return safe?<img src={safe} alt={alt||''} loading="lazy" referrerPolicy="no-referrer"/>:<span>{alt}</span>;},
+  table:({children})=><div className="md-table-wrap"><table>{children}</table></div>,
+  code:({children,className,node})=>{
+   if(node?.position?.start.line===node?.position?.end.line)return <code>{children}</code>;
+   const language=/language-([\w+-]+)/.exec(className||'')?.[1]||'plaintext';
+   const code=String(children||'').replace(/\n$/,'');
+   return <CodeBlock><CodeBlock.Header><span className="code-block__lang"><Icon name="code" size="xs"/><span>{language}</span></span><CopyInline text={code} label={labels.copy} copiedLabel={labels.copied} failedLabel={labels.copyFailed}/></CodeBlock.Header><CodeBlock.Code code={code} language={language}/></CodeBlock>;
+  },
+ }),[labels.copy,labels.copied,labels.copyFailed]);
  return <ChatMessage.Assistant className="progress-message" data-public-progress={part.source}>
-  <ChatMessage.Body><ChatMessage.Content><Markdown id={'progress-'+part.id} components={{
-   a:({href,children})=><a href={publicHref(href)} target="_blank" rel="noopener noreferrer">{children}</a>,
-   img:({alt})=><span>{alt}</span>,
-   table:({children})=><div className="md-table-wrap"><table>{children}</table></div>,
-  }}>{part.message}</Markdown></ChatMessage.Content></ChatMessage.Body>
+  <ChatMessage.Body><ChatMessage.Content><Markdown id={'progress-'+part.id} components={components}>{part.message}</Markdown></ChatMessage.Content></ChatMessage.Body>
  </ChatMessage.Assistant>;
 }
 function animateOnce(element:HTMLElement|null,keyframes:Keyframe[],duration:number) {
@@ -32,13 +51,13 @@ function animateOnce(element:HTMLElement|null,keyframes:Keyframe[],duration:numb
  preference.addEventListener('change',stopMotion);
  return()=>{animation?.cancel();preference.removeEventListener('change',stopMotion);};
 }
-function ProgressParagraph({part}:{part:Note}) {
+function ProgressParagraph({part,labels}:{part:Note;labels:ConversationProps['labels']}) {
  const element=useRef<HTMLDivElement>(null);
  // Animate only on React mount; SSE can move this same host without replaying.
  useEffect(()=>animateOnce(element.current,[
   {opacity:0,transform:'translateY(5px)'},{opacity:1,transform:'translateY(0)'},
  ],220),[]);
- return <div ref={element} className="progress-note-island"><ProgressNote part={part}/></div>;
+ return <div ref={element} className="progress-note-island"><ProgressNote part={part} labels={labels}/></div>;
 }
 function PlanView({plan}:{plan:Plan}) {
  if(!plan.steps.length&&!plan.agents.length)return null;
@@ -79,7 +98,7 @@ function ToolRow({step,labels}:{step:Step;labels:ConversationProps['labels']}) {
    </span>
   </ChatTool.Trigger>
   <ChatTool.Content>
-   {step.target&&<ChatTool.Args label={step.tool==='shell_run'?labels.command:labels.target}><pre className="execution-code">{step.target}</pre></ChatTool.Args>}
+   {step.target&&<ChatTool.Args label={step.tool==='shell_run'?labels.command:labels.target}><div className="execution-code-wrap"><pre className="execution-code">{step.target}</pre>{labels.copy&&<CopyInline text={step.target} label={labels.copy} copiedLabel={labels.copied} failedLabel={labels.copyFailed} className="btn ghost xs execution-code-copy"/>}</div></ChatTool.Args>}
    {step.error&&<ChatTool.Error label={labels.failed} errorText={step.error}/>}
    {(step.detail||step.time)&&<div className="execution-meta">{step.detail&&<span>{step.detail}</span>}<time>{step.time}</time></div>}
   </ChatTool.Content>
@@ -93,6 +112,7 @@ function ToolGroup({part,labels}:{part:Group;labels:ConversationProps['labels']}
  // never create another scroll viewport inside the conversation.
  const visible=all?part.steps:part.steps.slice(0,8);
  const failures=part.steps.filter(step=>step.state==='output-error');
+ const hiddenFailures=!all&&part.steps.slice(8).some(step=>step.state==='output-error');
  return <div className="progress-island">
   <div className={'worklog pro-worklog'+(expanded?' open':'')} data-pro-component="ChainOfThought" data-running={part.running?'true':undefined}>
    <ChainOfThought isExpanded={expanded} onExpandedChange={setExpanded}>
@@ -102,7 +122,7 @@ function ToolGroup({part,labels}:{part:Group;labels:ConversationProps['labels']}
     <ChainOfThought.Content className="execution-content">
      {part.plan&&<PlanView plan={part.plan}/>}
      {part.steps.length>0&&<div className="worklog-steps">{visible.map(step=><ToolRow key={step.id} step={step} labels={labels}/>)}</div>}
-     {part.steps.length>8&&<Button className="execution-more" size="sm" variant="ghost" onPress={()=>setAll(!all)}>{all?labels.less:labels.more.replace('{n}',String(part.steps.length-8))}</Button>}
+     {part.steps.length>8&&<div className="execution-actions"><Button className="execution-more" size="sm" variant="ghost" onPress={()=>setAll(!all)}>{all?labels.less:labels.more.replace('{n}',String(part.steps.length-8))}</Button>{hiddenFailures&&labels.jumpFailed&&<Button className="flow-jump-failed" size="sm" variant="ghost" onPress={()=>setAll(true)}>{labels.jumpFailed}</Button>}</div>}
     </ChainOfThought.Content>
    </ChainOfThought>
    {part.running&&part.current&&<div className="execution-current" role="status"><ChatLoader.Dots size="sm" aria-hidden="true"/><span data-current-label="" className="ag-shimmer">{part.current}</span></div>}
@@ -111,6 +131,6 @@ function ToolGroup({part,labels}:{part:Group;labels:ConversationProps['labels']}
 }
 export function Conversation({parts,labels}:ConversationProps) {
  return <div className="conversation-flow" data-pro-component="Conversation">{parts.map(part=>part.kind==='progress'
-  ?<ProgressParagraph key={part.id} part={part}/>
+  ?<ProgressParagraph key={part.id} part={part} labels={labels}/>
   :<ToolGroup key={part.id} part={part} labels={labels}/>)}</div>;
 }

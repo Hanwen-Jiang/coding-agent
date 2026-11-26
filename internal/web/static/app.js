@@ -76,6 +76,8 @@ const state = {
   collectionDrafts:new Map(),
   sourcePolicies: new Map(),
   uploadDrafts: new Map(),
+  composerDrafts: new Map(),
+  scrollAutoFollow: true,
   artifacts: new Map(), // taskId → { list, failed }：任务交付的文件（N-18），结束后取一次
   revealWorklog: new Map(), // taskId → explicit reveal request version
   open: new Set(), // 展开的工作过程
@@ -230,6 +232,38 @@ function toast(text, isError = false) {
 
 function copy(text) {
   navigator.clipboard.writeText(text).then(() => toast(t("common.copied")), () => toast(t("common.copyFailed"), true));
+}
+
+function inlineCopyButton(text, label, { iconOnly = false, extraClass = "" } = {}) {
+  let timer = null;
+  const reset = (btn) => {
+    btn.dataset.copied = "";
+    btn.setAttribute("aria-label", label);
+    btn.title = label;
+    btn.replaceChildren(icon("copy", "xs"), ...(iconOnly ? [] : [label]));
+  };
+  const btn = h("button", {
+    type: "button",
+    class: ("btn ghost xs " + (iconOnly ? "icon-only " : "") + extraClass).trim(),
+    title: label,
+    "aria-label": label,
+    "aria-live": "polite",
+    onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.dataset.copied = "true";
+        btn.setAttribute("aria-label", t("common.copied"));
+        btn.title = t("common.copied");
+        btn.replaceChildren(icon("check", "xs"), ...(iconOnly ? [] : [t("common.copied")]));
+      } catch {
+        toast(t("common.copyFailed"), true);
+        return;
+      }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { if (btn.isConnected) reset(btn); }, 2000);
+    },
+  }, icon("copy", "xs"), ...(iconOnly ? [] : [label]));
+  return btn;
 }
 
 function fmtTime(iso) {
@@ -1561,6 +1595,23 @@ function setHash(hash) {
   if (location.hash !== hash) location.hash = hash;
 }
 
+function saveComposerDraft() {
+  if (!state.project || state.view !== "session" || !ui.input) return;
+  const key = personalChoiceKey();
+  const value = ui.input.value;
+  if (value) state.composerDrafts.set(key, value);
+  else state.composerDrafts.delete(key);
+}
+
+function restoreComposerDraft() {
+  const draft = state.composerDrafts.get(personalChoiceKey());
+  if (draft && ui.input) {
+    ui.input.value = draft;
+    autosize();
+    refreshSend();
+  }
+}
+
 function resetSessionState() {
   taskSettingsGeneration++;
   closePop();
@@ -1572,6 +1623,7 @@ function resetSessionState() {
   state.artifacts = new Map();
   state.guidance = new Map();
   state.queuedEdit = null;
+  state.scrollAutoFollow = true;
   state.changes = null;
   state.repos = [];
   state.repoName = "";
@@ -1580,6 +1632,7 @@ function resetSessionState() {
 }
 
 async function openSession(pid, sid) {
+  saveComposerDraft();
   resetSessionState();
   state.view = "session";
   state.project = findProject(pid);
@@ -1598,6 +1651,7 @@ async function openSession(pid, sid) {
     } catch (ex) { report(ex); }
   }
   renderApp();
+  restoreComposerDraft();
   if (state.session) {
     entryUI.refreshIndex();
     await loadWorkspaceRepos();
@@ -1612,6 +1666,7 @@ async function openSession(pid, sid) {
 
 // openDraft 打开工作区里的新会话草稿：第一条消息发出时才真正开会话（复制工作副本）。
 function openDraft(pid) {
+  saveComposerDraft();
   resetSessionState();
   state.view = "session";
   state.project = findProject(pid);
@@ -1620,12 +1675,14 @@ function openDraft(pid) {
   state.sideOpen = false;
   setHash(`#/w/${pid}/new`);
   renderApp();
+  restoreComposerDraft();
   void loadSourcePolicy();
   if (ui.input) ui.input.focus();
   loadWorkspaceRepos();
 }
 
 function go(view) {
+  saveComposerDraft();
   if(view === "activity") entryUI.refreshIndex();
   resetSessionState();
   state.view = view;
@@ -1636,6 +1693,7 @@ function go(view) {
 }
 
 function goSettings(section = "personal") {
+  saveComposerDraft();
   resetSessionState();
   state.view = "settings";
   state.settingsSection = ["personal", "skills", "mcp", "entry"].includes(section) ? section : "personal";
@@ -1714,6 +1772,17 @@ function renderApp() {
   ui.side = h("aside", { class: "side" });
   ui.topbar = h("header", { class: "topbar" });
   ui.scroll = h("div", { class: "scroll", id: "thread" });
+  ui.scroll.addEventListener("scroll", () => {
+    const dist = ui.scroll.scrollHeight - ui.scroll.scrollTop - ui.scroll.clientHeight;
+    if (dist <= 80) {
+      if (!state.scrollAutoFollow) {
+        state.scrollAutoFollow = true;
+        ui.composerModel?.update({ hasNewOutput: false });
+      }
+    } else if (state.scrollAutoFollow) {
+      state.scrollAutoFollow = false;
+    }
+  }, { passive: true });
   const composing = state.view === "session" && !!state.project;
   ui.dock = composing ? dock() : null;
   if (!composing) { ui.composer = null; ui.input = null; }
@@ -3125,7 +3194,8 @@ function liveInfo(task) {
 function renderThread(stick = false) {
   const thread = ui.scroll;
   if (!thread || state.view !== "session") return;
-  const nearBottom = stick || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
+  if (stick) state.scrollAutoFollow = true;
+  const nearBottom = stick || state.scrollAutoFollow || (thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80);
   const landing = !!state.project && !state.tasks.length && !pendingTurnShown();
   ui.main?.classList.toggle("main-landing", landing);
   // Move the existing composer, never recreate it: drafts, focus and approvals
@@ -3137,7 +3207,10 @@ function renderThread(stick = false) {
   else content = [state.tasks.map(turn), pendingTurn()];
   keepScroll(thread, () => thread.replaceChildren(h("div", { class: "thread" }, content)));
   if (landing && ui.dock) thread.querySelector(".start-composer-slot").append(ui.dock);
-  if (nearBottom) thread.scrollTop = thread.scrollHeight;
+  if (nearBottom) {
+    thread.scrollTop = thread.scrollHeight;
+    ui.composerModel?.update({ hasNewOutput: false });
+  }
 }
 
 function renderTurn(taskId) {
@@ -3145,9 +3218,12 @@ function renderTurn(taskId) {
   const t = state.tasks.find((x) => x.id === taskId);
   if (!old || !t) return renderThread();
   const thread = ui.scroll;
-  const nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
+  const nearBottom = state.scrollAutoFollow || (thread.scrollHeight - thread.scrollTop - thread.clientHeight < 80);
   old.replaceWith(turn(t));
-  if (nearBottom) thread.scrollTop = thread.scrollHeight;
+  if (nearBottom) {
+    thread.scrollTop = thread.scrollHeight;
+    ui.composerModel?.update({ hasNewOutput: false });
+  }
 }
 
 function scrollToTurn(id) {
@@ -3218,13 +3294,18 @@ function turn(task) {
   // 每来一个事件整轮重画：这里不带进场动画（只有刚发出的那一轮在“提交中”时升上来一次）。
   const queued = status === "TASK_STATUS_QUEUED";
   const editing = state.queuedEdit && state.queuedEdit.taskId === task.id;
+  const promptText = task.pending_message || task.message;
   return h("section", { class: "turn", id: "turn-" + task.id },
     h("div", { class: "msg-user" + (queued ? " queued-item" : ""), "data-task-id": queued ? task.id : null },
-      editing ? queuedEditor(task) : h("div", { class: "bubble" }, task.pending_message || task.message),
+      editing ? queuedEditor(task) : h("div", { class: "bubble" }, promptText),
       taskSourceAttachments(task),
       h("div", { class: "meta" }, fmtTime(task.created_at),
         task.sandbox === "read" ? h("span", { class: "chip info" }, icon("eye", "xs"), t("sandbox.read")) : null,
         task.model && task.model !== "balanced" ? h("span", { class: "chip" }, modelLabel(task.model)) : null,
+        !editing && promptText ? h("span", { class: "msg-user-actions" },
+          inlineCopyButton(promptText, t("msg.copyPrompt"), { iconOnly: true, extraClass: "msg-user-action msg-copy-prompt" }),
+          !queued ? h("button", { type: "button", class: "btn ghost xs icon-only msg-user-action msg-reuse-prompt", title: t("msg.reusePrompt"), "aria-label": t("msg.reusePrompt"), onclick: () => setComposer(promptText) }, icon("edit", "xs")) : null,
+        ) : null,
         queued && !editing ? h("button", { class: "btn ghost xs queued-edit", onclick: () => startQueuedEdit(task) }, icon("edit", "xs"), t("queued.edit")) : null),
     ),
     h("div", { class: "msg-agent" },
@@ -3412,7 +3493,7 @@ function worklog(task, events, running, finished) {
         return {id:call.id,label:toolText({...v,target:""},v.state!=="running"),target:String(v.target||""),detail:v.state==="failed"?info.detail.replace(errorText(v),"").trim():info.detail,error:v.state==="failed"?errorText(v):"",tool:String(v.tool||""),state:v.state==="failed"?"output-error":v.state==="running"?"input-available":"output-available",time:fmtClock(ev.time),duration:v.duration_ms!=null?fmtMs(num(v.duration_ms)):""};
       })};
   });
-  const labels={more:t("flow.more",{n:"{n}"}),less:t("flow.less"),command:t("flow.commandDetail"),target:t("flow.target"),failed:t("flow.failed"),plan:t("plan.title")};
+  const labels={more:t("flow.more",{n:"{n}"}),less:t("flow.less"),command:t("flow.commandDetail"),target:t("flow.target"),failed:t("flow.failed"),plan:t("plan.title"),copy:t("common.copy"),copied:t("common.copied"),copyFailed:t("common.copyFailed"),jumpFailed:t("flow.jumpFailed")};
   return proPresentation("conversation-"+task.id,"conversation-island","mountConversation",{parts:projected,labels},h("div",{class:"conversation-flow"},projected.map(part=>h("p",{class:"progress-note"},part.message||part.title))));
 }
 
@@ -3651,6 +3732,8 @@ function result(task, r) {
   const ok = r.status === "TASK_STATUS_DONE";
   const cost = taskCost(task);
   const rounds = r.rounds || task.rounds;
+  const finishedAt = state.runs.get(task.id)?.events?.find((e) => e.type === "task_finished")?.time;
+  const elapsedMs = finishedAt && task.created_at ? (new Date(finishedAt).getTime() - new Date(task.created_at).getTime()) : 0;
   const n = state.changes ? state.changes.files.length : 0;
   // 交付区先列文件，再给文字（N-18）。
   const files = artifactItems(task);
@@ -3661,9 +3744,11 @@ function result(task, r) {
     h("div", { class: "result-foot" },
       statusChip(r.status),
       rounds ? h("span", { class: "chip" }, t("rounds", { n: rounds })) : null,
+      elapsedMs >= 1000 ? h("span", { class: "chip" }, fmtDuration(elapsedMs)) : null,
       cost ? h("span", { class: "chip" }, fmtUSD(cost)) : null,
       h("span", { class: "grow" }),
-      text ? h("button", { class: "btn ghost xs", onclick: () => copy(text) }, icon("copy", "xs"), t("common.copy")) : null,
+      text ? inlineCopyButton(text, t("common.copy"), { extraClass: "result-copy" }) : null,
+      task.message ? h("button", { type: "button", class: "btn ghost xs result-reuse", title: t("msg.reusePrompt"), onclick: () => setComposer(task.message) }, icon("edit", "xs"), t("msg.reusePrompt")) : null,
       ok && n && task === state.tasks[state.tasks.length - 1] ? h("button", { class: "btn ghost xs", onclick: () => openDrawer("changes") }, icon("diff", "xs"), t("changes.review")) : null,
     ),
   );
@@ -3734,9 +3819,15 @@ function loadRun(t, force = false, seed = null) {
       }
       let data;
       try { data = JSON.parse(msg.data); } catch { return; }
+      const notifyUnread = () => {
+        if (!state.scrollAutoFollow && ui.scroll && ui.scroll.scrollHeight - ui.scroll.scrollTop - ui.scroll.clientHeight > 80) {
+          ui.composerModel?.update({ hasNewOutput: true });
+        }
+      };
       if (msg.type === "token_delta" || msg.type === "thinking_delta") {
         // 逐字增量（DELTA）没有 id：lastEventId 还是上一条持久事件的，不能拿来去重；不进 run.events，只拼草稿。
         if (!run.done) draftDelta(run, msg.type, (data.payload && data.payload.value) || {});
+        if (msg.type === "token_delta" && !run.done) notifyUnread();
         scheduleTurn(t.id);
         return;
       }
@@ -3748,6 +3839,7 @@ function loadRun(t, force = false, seed = null) {
       run.events.push(ev);
       if(type==="tool_status"&&ev.value.state==="running")run.drafts?.delete(draftNodeKey(run,ev.value));
       const replaying = TERMINAL.has(t.status) && !run.live;
+      if (!replaying && !QUIET.has(type)) notifyUnread();
       if (type === "task_finished") {
         t.status = ev.value.status || t.status;
         if (!state.closed.has(t.id)) state.open.delete(t.id);
@@ -4061,7 +4153,7 @@ function clearUploadDrafts() {
   sourceGeneration++;state.sending=false;state.pending=null;
   taskSettingsGeneration++;taskSettingsSave=null;pendingSettingsSubmissions.clear();
   for(const items of state.uploadDrafts.values())for(const item of items){item.controller?.abort();if(item.preview)URL.revokeObjectURL(item.preview);}
-  state.uploadDrafts.clear();state.collectionDrafts.clear();state.sourceLists.clear();state.sourcePolicies.clear();
+  state.uploadDrafts.clear();state.collectionDrafts.clear();state.sourceLists.clear();state.sourcePolicies.clear();state.composerDrafts.clear();
 }
 function refreshUploadUI() {
   const items=uploadItems();
@@ -4175,7 +4267,7 @@ function dock() {
   ui.composer = h("div", { class: "composer" }, ui.cStatus, ui.cAsk, h("div", { class: "c-row" }, ui.input), ui.cOpts,
     h("div",{class:"composer-toolbar"},h("div",{class:"composer-toolbar-controls"},ui.tools),ui.cRight), ui.cHelp);
   ui.barKey = "";
-  let snapshot={mode:"empty",placeholder:"",shortcuts:"",disabled:true,label:t("composer.aria"),sendLabel:t("composer.sendTitle"),menuLabel:t("composer.queueTitle")};
+  let snapshot={mode:"empty",placeholder:"",shortcuts:"",disabled:true,label:t("composer.aria"),sendLabel:t("composer.sendTitle"),menuLabel:t("composer.queueTitle"),hasNewOutput:false,newOutputLabel:t("scroll.newOutput"),scrollToBottomLabel:t("scroll.toBottom")};
   const listeners=new Set();
   const model={id:++composerInstance,mounted:false,getSnapshot:()=>snapshot,subscribe:(listener)=>{listeners.add(listener);return()=>listeners.delete(listener);},
     update:(patch)=>{const next={...snapshot,...patch};if(Object.keys(next).every(key=>next[key]===snapshot[key]))return;snapshot=next;for(const listener of listeners)listener();}};
@@ -4184,7 +4276,8 @@ function dock() {
     bind:(input,body,right,send)=>{if(ui.composerModel!==model)return;model.mounted=true;ui.input=input;ui.composer=body;ui.cRight=right;ui.send=send;autosize();updateComposer(true);},
     onInput:()=>{autosize();refreshSend();},onKeyDown:onComposerKey,onFiles:addSourceFiles,onRemoveUpload:removeUpload,onRetryUpload:retryUpload,onRemoveCollection:()=>{state.collectionDrafts.delete(personalChoiceKey());refreshUploadUI();},
     onSend:()=>{const current=phase();if(current.mode==="running")steer(current.current,"next_step");else submit();},
-    onMenu:(anchor)=>{const current=phase();openPop(anchor,(close)=>sendMenu(current,close));}};
+    onMenu:(anchor)=>{const current=phase();openPop(anchor,(close)=>sendMenu(current,close));},
+    onScrollToBottom:()=>{state.scrollAutoFollow=true;ui.composerModel?.update({hasNewOutput:false});}};
   const surface=proPresentation("composer", "composer-island", "mountComposer", props,ui.composer);
   return h("div", { class: "dock" }, h("div", { class: "dock-inner" }, ui.next, surface));
 }
@@ -4245,6 +4338,7 @@ async function steer(task, mode) {
   const item = { id: guidanceId(), text, mode, state: "sending" };
   guidanceOf(task.id).push(item);
   ui.input.value = "";
+  state.composerDrafts.delete(personalChoiceKey());
   autosize();
   refreshSend();
   redrawGuidance(task.id);
@@ -4493,7 +4587,8 @@ function updateComposer(force = false) {
     ui.next.replaceChildren(...nextSteps(ph));
   }
   ui.composerModel?.update({mode:ph.mode,placeholder:ui.input.placeholder,shortcuts:ui.cHelp.textContent,
-    label:t("composer.aria"),sendLabel:t(ph.mode==="running"?"hint.steer":"composer.sendTitle"),menuLabel:t("composer.queueTitle")});
+    label:t("composer.aria"),sendLabel:t(ph.mode==="running"?"hint.steer":"composer.sendTitle"),menuLabel:t("composer.queueTitle"),
+    newOutputLabel:t("scroll.newOutput"),scrollToBottomLabel:t("scroll.toBottom")});
   refreshUploadUI();
 }
 
@@ -4849,6 +4944,7 @@ async function submit(text) {
   refreshSend();
   // 消息先出现在对话里，下面说明在做什么：草稿要先开会话（复制工作副本，借沙箱），再提交。界面不等请求回来。
   state.pending = { message, phase: state.session ? "submit" : "session", started: new Date().toISOString(), project: state.project.id, session: state.session ? state.session.id : null };
+  state.composerDrafts.delete(submittedContext);
   if (text === undefined && ui.input) { ui.input.value = ""; autosize(); }
   renderThread(true);
   try {
@@ -4914,6 +5010,7 @@ async function reply(task, ask, option) {
   try {
     await api("POST", `${sbase()}/tasks/${task.id}/reply`, { question_id: ask.qid, option, guidance: ui.input.value.trim() });
     state.replied.add(ask.qid);
+    state.composerDrafts.delete(personalChoiceKey());
     ui.input.value = "";
     autosize();
     renderTurn(task.id);
