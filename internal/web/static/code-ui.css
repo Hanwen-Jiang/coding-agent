@@ -1024,3 +1024,42 @@ summary.diagnostic-event-title { cursor: pointer; }
 .entry-dialog [hidden] { display: none; }
 .entry-sink > .entry-check { margin: 12px 0; }
 .entry-dialog { background: var(--surface); color: var(--text); }
+
+/* Wave 2 polish: autocomplete menu, lightbox, TTFT shimmer, rich tool rows, answer feedback */
+.composer-preview-zoom { cursor: zoom-in; }
+.md-img-zoom { display: inline-block; padding: 0; border: 0; background: transparent; cursor: zoom-in; max-width: 100%; border-radius: 10px; }
+.md-img-zoom img { display: block; max-width: 100%; border-radius: 10px; }
+.image-lightbox-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 24px; background: rgb(15 17 22 / .72); backdrop-filter: blur(4px); }
+.image-lightbox-dialog { position: relative; max-width: min(92vw, 1080px); max-height: 88dvh; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); box-shadow: 0 24px 80px rgb(0 0 0 / .45); }
+.image-lightbox-close { position: absolute; top: 8px; right: 8px; }
+.image-lightbox-img { display: block; max-width: 100%; max-height: calc(88dvh - 64px); object-fit: contain; border-radius: 10px; }
+.image-lightbox-caption { font-size: 12px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.composer-ac-menu { position: absolute; left: 12px; right: 12px; bottom: calc(100% + 6px); z-index: 40; display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; padding: 6px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / .14); }
+.composer-ac-head { padding: 4px 8px 6px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.composer-ac-empty { padding: 8px 10px; font-size: 12px; color: var(--muted); }
+.composer-ac-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text); text-align: left; font-size: 12.5px; cursor: pointer; }
+.composer-ac-item:hover, .composer-ac-item.selected, .composer-ac-item[aria-selected="true"] { background: var(--accent-soft); color: var(--text); }
+.composer-ac-label { font-family: var(--font-mono); font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-ac-hint { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+
+.waiting-skeleton { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; width: min(360px, 100%); }
+.waiting-skeleton-bar { display: block; height: 10px; border-radius: 999px; background: linear-gradient(90deg, var(--surface-2) 0%, var(--line) 50%, var(--surface-2) 100%); background-size: 200% 100%; animation: ag-skeleton-shimmer 1.6s ease-in-out infinite; }
+.waiting-skeleton-bar.short { width: 68%; }
+@keyframes ag-skeleton-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .waiting-skeleton-bar { animation: none; } }
+
+.main .execution-open-file { position: absolute; top: 6px; right: 74px; min-height: 24px; height: 24px; padding: 0 7px; border-radius: 6px; font-size: 11px; color: var(--muted); background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid color-mix(in srgb, var(--line) 75%, transparent); }
+.main .execution-code-wrap:has(.execution-open-file) .execution-code { padding-right: 144px; }
+.main .execution-open-file:hover { color: var(--text); background: var(--surface); border-color: var(--line-2); }
+.main .flow-tool-section { margin-top: 8px; }
+.main .flow-tool-section-label { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.main .flow-tool-output, .main .flow-diff-preview { margin: 0; padding: 8px 10px; max-height: 220px; overflow: auto; border: 1px solid color-mix(in srgb, var(--line) 75%, transparent); border-radius: 8px; background: var(--surface-2); color: var(--text-2); font: 11.5px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.main .flow-diff-line { display: block; }
+.main .flow-diff-add { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.main .flow-diff-del { background: color-mix(in srgb, var(--err) 14%, transparent); color: var(--err); }
+.main .flow-diff-hunk { color: var(--accent); font-weight: 600; }
+
+.main .result-foot .result-feedback { min-height: 26px; padding: 0 7px; border-radius: 7px; color: var(--muted); font-size: 12px; }
+.main .result-foot .result-feedback[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+

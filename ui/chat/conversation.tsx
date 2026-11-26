@@ -8,12 +8,13 @@ import {Markdown} from '@heroui-pro/react/markdown';
 import {ChatLoader} from '@heroui-pro/react/chat-loader';
 import type {Components} from 'react-markdown';
 import {Icon} from './icon';
+import {ImageLightbox} from './lightbox';
 
-type Step = {id:string;label:string;target:string;detail:string;error:string;tool:string;state:'input-available'|'output-error'|'output-available';time:string;duration:string};
+type Step = {id:string;label:string;target:string;detail:string;error:string;output?:string;diff?:string;path?:string;tool:string;state:'input-available'|'output-error'|'output-available';time:string;duration:string};
 type Plan = {title:string;agentsTitle:string;steps:Array<{id:string;title:string;status:string;statusLabel:string;current:boolean}>;agents:Array<{id:string;name:string;state:string;statusLabel:string;label:string;last:string}>};
 type Group = {kind:'tools';id:string;reveal?:number;title:string;current:string;running:boolean;steps:Step[];plan?:Plan};
 type Note = {kind:'progress';id:string;message:string;source:string};
-export type ConversationProps = {parts:Array<Group|Note>;labels:{more:string;less:string;command:string;target:string;failed:string;plan:string;copy?:string;copied?:string;copyFailed?:string;jumpFailed?:string}};
+export type ConversationProps = {parts:Array<Group|Note>;onOpenFile?:(path:string)=>void;labels:{more:string;less:string;command:string;target:string;failed:string;plan:string;copy?:string;copied?:string;copyFailed?:string;jumpFailed?:string;output?:string;diff?:string;openFile?:string}};
 
 function publicHref(href?:string) {
  try {const url=new URL(href || '',location.href);return href&&['http:','https:','mailto:'].includes(url.protocol)?url.href:undefined;}catch{return undefined;}
@@ -29,9 +30,10 @@ function CopyInline({text,label,copiedLabel,failedLabel,className='btn ghost xs 
  }}><Icon name={state==='copied'?'check':'copy'} size="xs"/><span>{state==='copied'?(copiedLabel||lbl):state==='failed'?(failedLabel||lbl):lbl}</span></button>;
 }
 function ProgressNote({part,labels}:{part:Note;labels:ConversationProps['labels']}) {
+ const [zoom,setZoom]=useState<{src:string;alt:string}|null>(null);
  const components=useMemo<Components>(()=>({
   a:({href,children})=><a href={publicHref(href)} target="_blank" rel="noopener noreferrer">{children}</a>,
-  img:({src,alt})=>{const safe=publicHref(src);return safe?<img src={safe} alt={alt||''} loading="lazy" referrerPolicy="no-referrer"/>:<span>{alt}</span>;},
+  img:({src,alt})=>{const safe=publicHref(src);return safe?<button type="button" className="md-img-zoom" onClick={()=>setZoom({src:safe,alt:alt||''})} aria-label={alt||'Preview image'}><img src={safe} alt={alt||''} loading="lazy" referrerPolicy="no-referrer"/></button>:<span>{alt}</span>;},
   table:({children})=><div className="md-table-wrap"><table>{children}</table></div>,
   code:({children,className,node})=>{
    if(node?.position?.start.line===node?.position?.end.line)return <code>{children}</code>;
@@ -40,9 +42,9 @@ function ProgressNote({part,labels}:{part:Note;labels:ConversationProps['labels'
    return <CodeBlock><CodeBlock.Header><span className="code-block__lang"><Icon name="code" size="xs"/><span>{language}</span></span><CopyInline text={code} label={labels.copy} copiedLabel={labels.copied} failedLabel={labels.copyFailed}/></CodeBlock.Header><CodeBlock.Code code={code} language={language}/></CodeBlock>;
   },
  }),[labels.copy,labels.copied,labels.copyFailed]);
- return <ChatMessage.Assistant className="progress-message" data-public-progress={part.source}>
+ return <><ChatMessage.Assistant className="progress-message" data-public-progress={part.source}>
   <ChatMessage.Body><ChatMessage.Content><Markdown id={'progress-'+part.id} components={components}>{part.message}</Markdown></ChatMessage.Content></ChatMessage.Body>
- </ChatMessage.Assistant>;
+ </ChatMessage.Assistant>{zoom&&<ImageLightbox src={zoom.src} alt={zoom.alt} onClose={()=>setZoom(null)}/>}</>;
 }
 function animateOnce(element:HTMLElement|null,keyframes:Keyframe[],duration:number) {
  const preference=matchMedia('(prefers-reduced-motion: reduce)');
@@ -71,7 +73,14 @@ function PlanView({plan}:{plan:Plan}) {
   </div>)}</div>}
  </div>;
 }
-function ToolRow({step,labels}:{step:Step;labels:ConversationProps['labels']}) {
+function ToolDiffPreview({diff}:{diff:string}) {
+ const lines=diff.split('\n').slice(0,40);
+ return <pre className="flow-diff-preview">{lines.map((line,idx)=>{
+  const cls=line.startsWith('+')&&!line.startsWith('+++')?'flow-diff-line flow-diff-add':line.startsWith('-')&&!line.startsWith('---')?'flow-diff-line flow-diff-del':line.startsWith('@@')?'flow-diff-line flow-diff-hunk':'flow-diff-line';
+  return <span key={idx} className={cls}>{line}{'\n'}</span>;
+ })}</pre>;
+}
+function ToolRow({step,labels,onOpenFile}:{step:Step;labels:ConversationProps['labels'];onOpenFile?:(path:string)=>void}) {
  const previous=useRef(step.state);
  const status=useRef<HTMLSpanElement>(null);
  const [settled,setSettled]=useState(false);
@@ -98,13 +107,15 @@ function ToolRow({step,labels}:{step:Step;labels:ConversationProps['labels']}) {
    </span>
   </ChatTool.Trigger>
   <ChatTool.Content>
-   {step.target&&<ChatTool.Args label={step.tool==='shell_run'?labels.command:labels.target}><div className="execution-code-wrap"><pre className="execution-code">{step.target}</pre>{labels.copy&&<CopyInline text={step.target} label={labels.copy} copiedLabel={labels.copied} failedLabel={labels.copyFailed} className="btn ghost xs execution-code-copy"/>}</div></ChatTool.Args>}
+   {step.target&&<ChatTool.Args label={step.tool==='shell_run'?labels.command:labels.target}><div className="execution-code-wrap"><pre className="execution-code">{step.target}</pre>{labels.copy&&<CopyInline text={step.target} label={labels.copy} copiedLabel={labels.copied} failedLabel={labels.copyFailed} className="btn ghost xs execution-code-copy"/>}{step.path&&onOpenFile&&<button type="button" className="btn ghost xs execution-open-file" onClick={()=>onOpenFile(step.path!)}><Icon name="file" size="xs"/><span>{labels.openFile||'Open'}</span></button>}</div></ChatTool.Args>}
    {step.error&&<ChatTool.Error label={labels.failed} errorText={step.error}/>}
+   {step.output&&<div className="flow-tool-section"><div className="flow-tool-section-label">{labels.output||'Output'}</div><pre className="flow-tool-output">{step.output}</pre></div>}
+   {step.diff&&<div className="flow-tool-section"><div className="flow-tool-section-label">{labels.diff||'Diff'}</div><ToolDiffPreview diff={step.diff}/></div>}
    {(step.detail||step.time)&&<div className="execution-meta">{step.detail&&<span>{step.detail}</span>}<time>{step.time}</time></div>}
   </ChatTool.Content>
  </ChatTool>;
 }
-function ToolGroup({part,labels}:{part:Group;labels:ConversationProps['labels']}) {
+function ToolGroup({part,labels,onOpenFile}:{part:Group;labels:ConversationProps['labels'];onOpenFile?:(path:string)=>void}) {
  const [expanded,setExpanded]=useState(false);
  const [all,setAll]=useState(false);
  useEffect(()=>{if(part.reveal)setExpanded(true);},[part.reveal]);
@@ -121,7 +132,7 @@ function ToolGroup({part,labels}:{part:Group;labels:ConversationProps['labels']}
     </ChainOfThought.Trigger>
     <ChainOfThought.Content className="execution-content">
      {part.plan&&<PlanView plan={part.plan}/>}
-     {part.steps.length>0&&<div className="worklog-steps">{visible.map(step=><ToolRow key={step.id} step={step} labels={labels}/>)}</div>}
+     {part.steps.length>0&&<div className="worklog-steps">{visible.map(step=><ToolRow key={step.id} step={step} labels={labels} onOpenFile={onOpenFile}/>)}</div>}
      {part.steps.length>8&&<div className="execution-actions"><Button className="execution-more" size="sm" variant="ghost" onPress={()=>setAll(!all)}>{all?labels.less:labels.more.replace('{n}',String(part.steps.length-8))}</Button>{hiddenFailures&&labels.jumpFailed&&<Button className="flow-jump-failed" size="sm" variant="ghost" onPress={()=>setAll(true)}>{labels.jumpFailed}</Button>}</div>}
     </ChainOfThought.Content>
    </ChainOfThought>
@@ -129,8 +140,8 @@ function ToolGroup({part,labels}:{part:Group;labels:ConversationProps['labels']}
   </div>
  </div>;
 }
-export function Conversation({parts,labels}:ConversationProps) {
+export function Conversation({parts,labels,onOpenFile}:ConversationProps) {
  return <div className="conversation-flow" data-pro-component="Conversation">{parts.map(part=>part.kind==='progress'
   ?<ProgressParagraph key={part.id} part={part} labels={labels}/>
-  :<ToolGroup key={part.id} part={part} labels={labels}/>)}</div>;
+  :<ToolGroup key={part.id} part={part} labels={labels} onOpenFile={onOpenFile}/>)}</div>;
 }

@@ -92,8 +92,8 @@ try{
   $('[data-network-mode="'+(C.scope==='public'?'open':'allowlist')+'"]').click();
   check(!$('.network-duration-field').hidden,'grant duration missing');
   if(C.scope==='hosts'){
-   const hosts=$('.network-hosts-input');check(hosts.tagName==='TEXTAREA'&&hosts.rows>=3,'hosts need editable multiline field');
-   hosts.value='a.example.com\nb.example.com';check(hosts.getBoundingClientRect().width>220,'hosts input truncated');
+   const hostsBox=$('.network-hosts-input');const hosts=hostsBox&&hostsBox.tagName==='TEXTAREA'?hostsBox:hostsBox&&hostsBox.querySelector('textarea');check(hosts&&hosts.tagName==='TEXTAREA'&&hosts.rows>=3,'hosts need editable multiline field');
+   hosts.value='a.example.com\nb.example.com';hosts.dispatchEvent(new Event('input',{bubbles:true}));check(hosts.getBoundingClientRect().width>220,'hosts input truncated');
   }else check($('.network-hosts-field').hidden,'public mode does not need hosts');
   check([...$('.network-duration-field .network-duration').options].some(o=>o.value==='0')===C.unlimited,'unlimited must follow server support');
   $('.network-duration-field .network-duration').value=C.unlimited?'0':'30';

@@ -107,3 +107,40 @@ func TestAnyChangedFileChangesTheVersion(t *testing.T) {
 		t.Fatal("同样的文件版本号要相同（多副本时页面与资源对得上）")
 	}
 }
+
+var chunkRef = regexp.MustCompile(`"\./(chunk-[A-Za-z0-9_-]+\.js)(\?v=([0-9a-f]+))?"`)
+
+func TestSplitChunksVersionedAndServed(t *testing.T) {
+	_, page := get(t, "/")
+	refs := assetRef.FindAllSubmatch(page, -1)
+	if len(refs) == 0 || string(refs[0][3]) == "" {
+		t.Fatalf("missing build version in index.html")
+	}
+	version := string(refs[0][3])
+	res, chatUI := get(t, "/assets/chat-ui.js?v="+version)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("chat-ui.js status = %d", res.StatusCode)
+	}
+	if len(chatUI) >= 1_500_000 {
+		t.Fatalf("expected split chat-ui.js < 1.5MB, got %d bytes", len(chatUI))
+	}
+	chunks := chunkRef.FindAllSubmatch(chatUI, -1)
+	if len(chunks) == 0 {
+		t.Fatalf("expected dynamic ./chunk-*.js imports inside chat-ui.js")
+	}
+	seen := map[string]bool{}
+	for _, m := range chunks {
+		name := string(m[1])
+		if string(m[3]) != version {
+			t.Errorf("chunk %s missing ?v=%s in chat-ui.js: %s", name, version, m[0])
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		cres, _ := get(t, "/assets/"+name+"?v="+version)
+		if cres.StatusCode != http.StatusOK || !strings.Contains(cres.Header.Get("Cache-Control"), "immutable") {
+			t.Errorf("chunk %s not cleanly served with immutable cache: %d %s", name, cres.StatusCode, cres.Header.Get("Cache-Control"))
+		}
+	}
+}

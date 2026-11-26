@@ -5,6 +5,7 @@ import {Markdown} from '@heroui-pro/react/markdown';
 import {CodeBlock} from '@heroui-pro/react/code-block';
 import type {Components} from 'react-markdown';
 import {Icon} from './icon';
+import {ImageLightbox} from './lightbox';
 
 export interface AnswerProps {
  id: string;
@@ -37,9 +38,14 @@ function CopyCode({code,label,copiedLabel,failedLabel}: {code:string;label:strin
  }}><Icon name={state==='copied'?'check':'copy'} size="xs"/><span>{state==='copied'?copiedLabel:state==='failed'?failedLabel:label}</span></button>;
 }
 function Answer({id,text,streaming,copyLabel,copiedLabel,copyFailedLabel}: AnswerProps) {
+ const [zoom, setZoom] = useState<{src: string; alt: string} | null>(null);
  const components = React.useMemo<Components>(() => ({
   a: ({href,children}) => <a href={safeHref(href)} target="_blank" rel="noopener noreferrer">{children}</a>,
-  img: ({src,alt}) => <img src={safeHref(src)} alt={alt || ''} loading="lazy" referrerPolicy="no-referrer" />,
+  img: ({src,alt}) => {
+   const safe = safeHref(src);
+   if (!safe) return <span>{alt}</span>;
+   return <button type="button" className="md-img-zoom" onClick={() => setZoom({src: safe, alt: alt || ''})} aria-label={alt || 'Preview image'}><img src={safe} alt={alt || ''} loading="lazy" referrerPolicy="no-referrer" /></button>;
+  },
   table: ({children}) => <div className="md-table-wrap"><table>{children}</table></div>,
   code: ({children,className,node}) => {
    if (node?.position?.start.line === node?.position?.end.line) return <code>{children}</code>;
@@ -50,7 +56,7 @@ function Answer({id,text,streaming,copyLabel,copiedLabel,copyFailedLabel}: Answe
  }), [copyLabel,copiedLabel,copyFailedLabel]);
  return <AnswerBoundary text={text}><ChatMessage.Assistant data-pro-component="ChatMessage" data-streaming={String(streaming)}>
   <ChatMessage.Body><ChatMessage.Content><Markdown id={id} components={components}>{text}</Markdown></ChatMessage.Content></ChatMessage.Body>
- </ChatMessage.Assistant></AnswerBoundary>;
+ </ChatMessage.Assistant>{zoom && <ImageLightbox src={zoom.src} alt={zoom.alt} onClose={() => setZoom(null)} />}</AnswerBoundary>;
 }
 export function mountAnswer(container: HTMLElement, initial: AnswerProps): AnswerHandle {
  const root: Root = createRoot(container);
@@ -87,43 +93,101 @@ export function mountComposer(container:HTMLElement,props:ComposerProps) {
 
 export const mountConversation=(container:HTMLElement,props:ConversationProps)=>mountComponent(container,Conversation,props);
 
-import {RunDetails, type RunDetailsProps} from "./run-details";
-export const mountRunDetails=(container:HTMLElement,props:RunDetailsProps)=>mountComponent(container,RunDetails,props);
-
-import {ContextPanel,type ContextPanelProps} from "./context-panel";
-export const mountContextPanel=(container:HTMLElement,props:ContextPanelProps)=>mountComponent(container,ContextPanel,props);
-
-import {AppSidebar,type SidebarProps,type SidebarHandle} from './sidebar';
-// The sidebar keeps one React root for the whole signed-in session; the controller re-attaches its host on every route change.
-export function mountSidebar(container:HTMLElement,initial:SidebarProps):SidebarHandle {
- const root=createRoot(container);let disposed=false;const api:{current:any}={current:null};
- container.dataset.proMounted='true';
- const update=(props:SidebarProps)=>{if(!disposed)root.render(<AppSidebar {...props} api={api}/>);};
- update(initial);
- return {update,unmount:()=>{if(!disposed){disposed=true;root.unmount();delete container.dataset.proMounted;}},openMobile:()=>api.current?.setMobileOpen(true)};
+function mountLazy<P extends Record<string, any>>(
+ container: HTMLElement,
+ loader: () => Promise<Record<string, any>>,
+ exportName: string,
+ initial: P,
+) {
+ const root = createRoot(container);
+ let disposed = false;
+ let latest: P = initial;
+ let Loaded: React.ComponentType<P> | null = null;
+ container.dataset.proMounted = 'true';
+ const render = () => {
+  if (!disposed && Loaded) root.render(<Loaded {...(latest as any)} />);
+ };
+ loader().then(mod => {
+  Loaded = (mod[exportName] || mod.default) as React.ComponentType<P>;
+  render();
+ });
+ return {
+  update: (props: P) => {
+   latest = props;
+   render();
+  },
+  unmount: () => {
+   if (!disposed) {
+    disposed = true;
+    root.unmount();
+    delete container.dataset.proMounted;
+   }
+  },
+ };
 }
 
-import {CommandPalette,type CommandProps} from './command';
-export const mountCommand=(container:HTMLElement,props:CommandProps)=>mountComponent(container,CommandPalette,props);
+import {RunDetails, type RunDetailsProps} from './run-details';
+export const mountRunDetails = (container: HTMLElement, props: RunDetailsProps) =>
+ mountComponent(container, RunDetails, props);
 
-import {Dialogs,type DialogsProps} from './dialogs';
-export const mountDialogs=(container:HTMLElement,props:DialogsProps)=>mountComponent(container,Dialogs,props);
+import {ContextPanel, type ContextPanelProps} from './context-panel';
+export const mountContextPanel = (container: HTMLElement, props: ContextPanelProps) =>
+ mountComponent(container, ContextPanel, props);
 
-import {WorkspacesPage,ActivityPage,EnvironmentsPage,type WorkspacesProps,type ActivityProps,type EnvironmentsProps} from './pages';
-export const mountWorkspacesPage=(container:HTMLElement,props:WorkspacesProps)=>mountComponent(container,WorkspacesPage,props);
-export const mountActivityPage=(container:HTMLElement,props:ActivityProps)=>mountComponent(container,ActivityPage,props);
-export const mountEnvironmentsPage=(container:HTMLElement,props:EnvironmentsProps)=>mountComponent(container,EnvironmentsPage,props);
+import {AppSidebar, type SidebarProps, type SidebarHandle} from './sidebar';
+// The sidebar keeps one React root for the whole signed-in session; the controller re-attaches its host on every route change.
+export function mountSidebar(container: HTMLElement, initial: SidebarProps): SidebarHandle {
+ const root = createRoot(container);
+ let disposed = false;
+ const api: {current: any} = {current: null};
+ container.dataset.proMounted = 'true';
+ const update = (props: SidebarProps) => {
+  if (!disposed) root.render(<AppSidebar {...props} api={api} />);
+ };
+ update(initial);
+ return {
+  update,
+  unmount: () => {
+   if (!disposed) {
+    disposed = true;
+    root.unmount();
+    delete container.dataset.proMounted;
+   }
+  },
+  openMobile: () => api.current?.setMobileOpen(true),
+ };
+}
+
+import type {CommandProps} from './command';
+export const mountCommand = (container: HTMLElement, props: CommandProps) =>
+ mountLazy(container, () => import('./command'), 'CommandPalette', props);
+
+import type {DialogsProps} from './dialogs';
+export const mountDialogs = (container: HTMLElement, props: DialogsProps) =>
+ mountLazy(container, () => import('./dialogs'), 'Dialogs', props);
+
+import type {WorkspacesProps, ActivityProps, EnvironmentsProps} from './pages';
+export const mountWorkspacesPage = (container: HTMLElement, props: WorkspacesProps) =>
+ mountLazy(container, () => import('./pages'), 'WorkspacesPage', props);
+export const mountActivityPage = (container: HTMLElement, props: ActivityProps) =>
+ mountLazy(container, () => import('./pages'), 'ActivityPage', props);
+export const mountEnvironmentsPage = (container: HTMLElement, props: EnvironmentsProps) =>
+ mountLazy(container, () => import('./pages'), 'EnvironmentsPage', props);
 
 export {mountTopbarMenu} from './topbar-menu';
 
-import {SettingsTabs,type SettingsProps} from './settings';
-export const mountSettings=(container:HTMLElement,props:SettingsProps)=>mountComponent(container,SettingsTabs,props);
-import {StatusPanel,type StatusPanelProps} from './status-panel';
-export const mountStatusPanel=(container:HTMLElement,props:StatusPanelProps)=>mountComponent(container,StatusPanel,props);
+import type {SettingsProps} from './settings';
+export const mountSettings = (container: HTMLElement, props: SettingsProps) =>
+ mountLazy(container, () => import('./settings'), 'SettingsTabs', props);
+import type {StatusPanelProps} from './status-panel';
+export const mountStatusPanel = (container: HTMLElement, props: StatusPanelProps) =>
+ mountLazy(container, () => import('./status-panel'), 'StatusPanel', props);
 export {mountModalHost} from './modal-host';
 export {mountField} from './fields';
-import {WorkspaceDrawer,type WorkspaceDrawerProps} from './workspace-drawer';
-export const mountWorkspaceDrawer=(container:HTMLElement,props:WorkspaceDrawerProps)=>mountComponent(container,WorkspaceDrawer,props);
+import type {WorkspaceDrawerProps} from './workspace-drawer';
+export const mountWorkspaceDrawer = (container: HTMLElement, props: WorkspaceDrawerProps) =>
+ mountLazy(container, () => import('./workspace-drawer'), 'WorkspaceDrawer', props);
 
-import {FileWorkbench,type FileWorkbenchProps} from './file-workbench';
-export const mountFileWorkbench=(container:HTMLElement,props:FileWorkbenchProps)=>mountComponent(container,FileWorkbench,props);
+import type {FileWorkbenchProps} from './file-workbench';
+export const mountFileWorkbench = (container: HTMLElement, props: FileWorkbenchProps) =>
+ mountLazy(container, () => import('./file-workbench'), 'FileWorkbench', props);

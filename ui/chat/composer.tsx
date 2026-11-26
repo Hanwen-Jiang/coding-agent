@@ -1,10 +1,12 @@
-import React, {useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore} from 'react';
+import React, {useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {PromptInput} from '@heroui-pro/react/prompt-input';
 import {Button} from '@heroui/react';
 import {ChatAttachment} from '@heroui-pro/react/chat-attachment';
 import {Icon} from './icon';
+import {ImageLightbox} from './lightbox';
 
 type Upload = {id:string;name:string;size_bytes:number;mime_type:string;preview_url?:string;status:string;error?:string;version_label?:string};
+export type SlashCommand = {id:string;label:string;description?:string;insert?:string};
 interface ComposerSnapshot {
  attachments?:Upload[];
  collectionLabel?:string;
@@ -20,6 +22,9 @@ interface ComposerSnapshot {
  hasNewOutput?: boolean;
  newOutputLabel?: string;
  scrollToBottomLabel?: string;
+ commands?: SlashCommand[];
+ mentionFiles?: string[];
+ autocompleteLabels?: {commandsTitle?: string; filesTitle?: string; empty?: string};
 }
 export interface ComposerProps {
  model: {
@@ -39,6 +44,7 @@ export interface ComposerProps {
  onSend: () => void;
  onMenu: (anchor: HTMLElement) => void;
  onScrollToBottom?: () => void;
+ onSlashCommand?: (id: string) => void;
 }
 
 // These are the remaining application-owned approval/status controls. The
@@ -59,6 +65,8 @@ function ComposerView(props: ComposerProps) {
  const dragDepth=useRef(0);
  const [dragging,setDragging]=useState(false);
  const [showScrollDown,setShowScrollDown]=useState(false);
+ const [zoom,setZoom]=useState<{src:string;alt:string}|null>(null);
+ const [acState,setAcState]=useState<{trigger:'/'|'@';query:string;start:number;end:number;index:number}|null>(null);
  const input=useRef<HTMLTextAreaElement>(null);
  const body=useRef<HTMLDivElement>(null);
  const right=useRef<HTMLDivElement>(null);
@@ -67,16 +75,65 @@ function ComposerView(props: ComposerProps) {
  const initial=useRef(props.input.value);
  const wasFocused=useRef(document.activeElement===props.input);
  const initialSelection=useRef([props.input.selectionStart,props.input.selectionEnd]);
+
+ const acItems=useMemo(()=>{
+  if(!acState)return [];
+  const q=acState.query.toLowerCase();
+  if(acState.trigger==='/'){
+   const cmds=state.commands||[];
+   return cmds.filter(c=>c.id.toLowerCase().includes(q)||c.label.toLowerCase().includes(q)).slice(0,8).map(c=>({
+    id:c.id,label:c.label,hint:c.description||'',kind:'command' as const,insert:c.insert||c.id,
+   }));
+  }
+  const files=state.mentionFiles||[];
+  return files.filter(f=>f.toLowerCase().includes(q)).slice(0,8).map(f=>({
+   id:f,label:'@'+f,hint:'',kind:'file' as const,insert:'@'+f+' ',
+  }));
+ },[acState,state.commands,state.mentionFiles]);
+
+ const refreshAutocomplete=(el:HTMLTextAreaElement|null)=>{
+  if(!el){setAcState(null);return;}
+  const pos=el.selectionStart??el.value.length;
+  const before=el.value.slice(0,pos);
+  const m=/(?:^|\s)([/@])([^\s]*)$/.exec(before);
+  if(!m){setAcState(null);return;}
+  const trigger=m[1] as '/'|'@';
+  const query=m[2]||'';
+  const start=pos-m[1].length-query.length;
+  setAcState(prev=>({trigger,query,start,end:pos,index:prev&&prev.trigger===trigger&&prev.start===start?prev.index:0}));
+ };
+
+ const applyAutocomplete=(item:{id:string;kind:'command'|'file';insert:string})=>{
+  const el=input.current;
+  if(!el||!acState){setAcState(null);return;}
+  if(item.kind==='command'&&props.onSlashCommand&&!item.insert.endsWith(' ')){
+   el.value='';
+   el.dispatchEvent(new Event('input',{bubbles:true}));
+   setAcState(null);
+   props.onSlashCommand(item.id);
+   return;
+  }
+  const v=el.value;
+  const next=v.slice(0,acState.start)+item.insert+v.slice(acState.end);
+  el.value=next;
+  const cursor=acState.start+item.insert.length;
+  el.setSelectionRange(cursor,cursor);
+  el.dispatchEvent(new Event('input',{bubbles:true}));
+  setAcState(null);
+  el.focus();
+ };
  useEffect(()=>{
   const scroller=document.querySelector<HTMLElement>('.main .scroll');
   if(!scroller)return;
   const check=()=>{setShowScrollDown(scroller.scrollHeight-scroller.clientHeight>80&&scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight>80);};
+  let raf=0;
+  const scheduleCheck=()=>{if(!raf)raf=requestAnimationFrame(()=>{raf=0;check();});};
   check();
   scroller.addEventListener('scroll',check,{passive:true});
-  const observer=new ResizeObserver(check);
+  const observer=new ResizeObserver(scheduleCheck);
   observer.observe(scroller);
   if(scroller.firstElementChild)observer.observe(scroller.firstElementChild);
-  return()=>{scroller.removeEventListener('scroll',check);observer.disconnect();};
+  return()=>{if(raf)cancelAnimationFrame(raf);scroller.removeEventListener('scroll',check);observer.disconnect();};
  },[]);
  useLayoutEffect(()=>{
   const previous=props.input;
@@ -107,14 +164,30 @@ function ComposerView(props: ComposerProps) {
     {state.collectionLabel&&<div className="composer-attachments" data-knowledge-collection><span className="composer-attachment"><span>{state.collectionLabel}</span><Button size="sm" variant="ghost" isIconOnly aria-label={state.uploadLabels?.remove} onPress={props.onRemoveCollection}>×</Button></span></div>}
     {!!state.attachments?.length&&<div className="composer-attachments" aria-live="polite">{state.attachments.map(file=><div key={file.id} className="composer-attachment" data-upload-id={file.id} data-upload-state={file.status}>
      <ChatAttachment className="composer-attachment-file" mediaType="document" name={file.name} size={file.size_bytes}>
-      {file.preview_url?<ChatAttachment.Preview><img className="composer-attachment-preview" src={file.preview_url} alt=""/></ChatAttachment.Preview>:<ChatAttachment.Preview/>}
+      {file.preview_url?<ChatAttachment.Preview><img className="composer-attachment-preview composer-preview-zoom" role="button" tabIndex={0} src={file.preview_url} alt={file.name} onClick={()=>setZoom({src:file.preview_url!,alt:file.name})} onKeyDown={ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();setZoom({src:file.preview_url!,alt:file.name});}}}/></ChatAttachment.Preview>:<ChatAttachment.Preview/>}
       <ChatAttachment.Info><ChatAttachment.Name/>{file.version_label&&<small className="upload-version">{file.version_label}</small>}<span className="upload-state">{file.status==='uploading'?state.uploadLabels?.uploading:file.status==='ready'?state.uploadLabels?.ready:file.status==='error'?file.error:state.uploadLabels?.pending}</span></ChatAttachment.Info>
      </ChatAttachment>
      {file.status==='error'&&<Button size="sm" variant="ghost" className="upload-retry" onPress={()=>props.onRetryUpload(file.id)}>{state.uploadLabels?.retry}</Button>}
      <Button size="sm" variant="ghost" isIconOnly className="upload-remove" isDisabled={file.status==='uploading'} aria-label={`${state.uploadLabels?.remove}: ${file.name}`} onPress={()=>props.onRemoveUpload(file.id)}>×</Button>
     </div>)}</div>}
     {dragging&&<div className="composer-drop-hint">{state.uploadLabels?.drop}</div>}
+    {acState&&(acItems.length>0||acState.trigger==='@')&&<div className="composer-ac-menu" role="listbox" aria-label={acState.trigger==='/'?(state.autocompleteLabels?.commandsTitle||'Commands'):(state.autocompleteLabels?.filesTitle||'Files')}>
+     <div className="composer-ac-head">{acState.trigger==='/'?(state.autocompleteLabels?.commandsTitle||'Commands'):(state.autocompleteLabels?.filesTitle||'Files')}</div>
+     {acItems.length===0?<div className="composer-ac-empty">{state.autocompleteLabels?.empty||'No matching files'}</div>:acItems.map((item,idx)=>{
+      const selected=idx===(acState.index%acItems.length);
+      return <button key={item.kind+':'+item.id} type="button" role="option" aria-selected={selected} className={'composer-ac-item'+(selected?' selected':'')} onMouseDown={ev=>{ev.preventDefault();applyAutocomplete(item);}}>
+       <span className="composer-ac-label">{item.label}</span>
+       {item.hint&&<span className="composer-ac-hint">{item.hint}</span>}
+      </button>;
+     })}
+    </div>}
     <PromptInput.Content className="composer-editor"><div className="c-row" onKeyDownCapture={event=>{
+     if(acState&&acItems.length>0){
+      if(event.key==='ArrowDown'){event.preventDefault();event.stopPropagation();setAcState({...acState,index:(acState.index+1)%acItems.length});return;}
+      if(event.key==='ArrowUp'){event.preventDefault();event.stopPropagation();setAcState({...acState,index:(acState.index-1+acItems.length)%acItems.length});return;}
+      if((event.key==='Enter'||event.key==='Tab')&&!event.shiftKey&&!event.nativeEvent.isComposing){event.preventDefault();event.stopPropagation();applyAutocomplete(acItems[acState.index%acItems.length]);return;}
+     }
+     if(acState&&event.key==='Escape'){event.preventDefault();event.stopPropagation();setAcState(null);return;}
      // The installed Pro version submits Enter even during composition. Keep
      // the application's IME and Ctrl/Meta+Enter semantics ahead of that handler.
      if(event.key==='Enter'&&!event.shiftKey){
@@ -125,7 +198,7 @@ function ComposerView(props: ComposerProps) {
      <PromptInput.TextArea ref={input} id="composer" className="c-input" rows={1}
       aria-label={state.label} aria-describedby="composer-help" placeholder={state.placeholder}
       title={state.shortcuts} value={undefined} defaultValue={initial.current}
-      disableAutosize onInput={props.onInput}/>
+      disableAutosize onInput={()=>{props.onInput();refreshAutocomplete(input.current);}}/>
     </div></PromptInput.Content>
     <ControlSlot node={props.slots.options}/>
     <PromptInput.Toolbar className="composer-toolbar">
@@ -147,5 +220,6 @@ function ComposerView(props: ComposerProps) {
     <ControlSlot node={props.slots.help}/>
    </div>
   </PromptInput.Shell>
+  {zoom&&<ImageLightbox src={zoom.src} alt={zoom.alt} onClose={()=>setZoom(null)}/>}
  </PromptInput>;
 }

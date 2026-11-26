@@ -28,6 +28,15 @@ func TestConversationPolishUXAndScrollBehavior(t *testing.T) {
 		}
 		s1Events = append(s1Events, snapshotEvent(len(s1Events)+1, "t1", "tool_status", runEv))
 		resEv := params{"round_seq": 1, "node_id": "work", "step": step, "tool": tool, "target": target, "state": state, "duration_ms": 140}
+		if step == 1 {
+			resEv["output_preview"] = "ok  github.com/agentruntime/pkg 0.14s"
+		}
+		if step == 2 {
+			tool, target = "repo_edit", "pkg/file-2.go"
+			runEv["tool"], runEv["target"] = tool, target
+			resEv["tool"], resEv["target"] = tool, target
+			resEv["diff"] = "@@ -1 +1 @@\n-oldLine()\n+newLine()"
+		}
 		if state == "failed" {
 			resEv["error"] = "test assertion failed on line 42"
 		}
@@ -45,7 +54,7 @@ func TestConversationPolishUXAndScrollBehavior(t *testing.T) {
 			"payload": params{"value": params{
 				"status":      "TASK_STATUS_DONE",
 				"rounds":      2,
-				"deliverable": params{"value": params{"answer": "## Highlights\n\nAll **unit tests** passed."}},
+				"deliverable": params{"value": params{"answer": "## Highlights\n\nAll **unit tests** passed.\n\n![logo](/assets/favicon.svg)"}},
 			}},
 		},
 	}
@@ -64,6 +73,9 @@ func TestConversationPolishUXAndScrollBehavior(t *testing.T) {
 				baseS1 + "/tasks/t1/artifacts": params{"artifacts": []any{}},
 				baseS1 + "/env":                params{},
 				baseS1 + "/changes":            params{"files": []any{}},
+				baseS1 + "/tree":               []params{{"name": "README.md", "dir": false, "size": 120}, {"name": "pkg", "dir": true}},
+				baseS1 + "/tree?path=pkg":      []params{{"name": "file-2.go", "dir": false, "size": 42}},
+				baseS1 + "/file":               params{"content": "package pkg\nfunc newLine() {}\n", "size": 28},
 				baseS1 + "/snapshot":           params{"tasks": []params{{"task_id": "t1", "status": "running", "last_event_id": len(s1Events), "source": "events", "events": s1Events}}},
 
 				baseS2 + "/tasks":              []params{s2Task},
@@ -71,6 +83,7 @@ func TestConversationPolishUXAndScrollBehavior(t *testing.T) {
 				baseS2 + "/tasks/t2/artifacts": params{"artifacts": []any{}},
 				baseS2 + "/env":                params{},
 				baseS2 + "/changes":            params{"files": []any{}},
+				baseS2 + "/tree":               []params{{"name": "README.md", "dir": false, "size": 120}},
 				baseS2 + "/snapshot":           params{"tasks": []params{{"task_id": "t2", "status": "done", "last_event_id": 2, "source": "events", "events": s2Events}}},
 
 				"GET " + baseS1 + "/tasks/t1/events": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -153,9 +166,16 @@ try{
  firstStep.querySelector('.chat-tool__trigger').click();
  const execCode=await wait(()=>firstStep.querySelector('.execution-code'),'execution code');
  check(execCode.textContent===C.cmd,'execution code text mutated');
+ const outBox=await wait(()=>firstStep.querySelector('.flow-tool-output'),'tool output preview missing');
+ check(outBox.textContent.includes('0.14s'),'tool output text missing');
  const cmdCopy=await wait(()=>firstStep.querySelector('.execution-code-copy'),'execution copy button missing');
  cmdCopy.click();
  await wait(()=>copied===C.cmd&&cmdCopy.dataset.copied==='true','command inline copy failed');
+ const secondStep=flow.querySelectorAll('[data-execution-step]')[1];
+ secondStep.querySelector('.chat-tool__trigger').click();
+ const diffBox=await wait(()=>secondStep.querySelector('.flow-diff-preview'),'tool diff preview missing');
+ check(diffBox.textContent.includes('+newLine()'),'tool diff line missing');
+ const openFileBtn=await wait(()=>secondStep.querySelector('.execution-open-file'),'tool open file button missing');
  jumpFailed.click();
  await wait(()=>flow.querySelectorAll('[data-execution-step]').length===10,'jump to failed did not reveal all steps');
  // Generate long streaming draft so the viewport actually overflows and can scroll up.
@@ -190,10 +210,34 @@ try{
  const ansCopy=$('#turn-t2 .result-copy');
  ansCopy.click();
  await wait(()=>copied.includes('All **unit tests** passed.')&&ansCopy.dataset.copied==='true','assistant inline copy failed');
+ // Wave 2: feedback thumbs toggle, image lightbox zoom + Esc close, / and @ autocomplete
+ const thumbUp=$('#turn-t2 .result-feedback[data-feedback="up"]');
+ thumbUp.click();
+ await wait(()=>thumbUp.getAttribute('aria-pressed')==='true','feedback thumbs up not pressed');
+ const zoomBtn=await wait(()=>answer2.querySelector('.md-img-zoom'),'image zoom button missing');
+ zoomBtn.click();
+ await wait(()=>$('.image-lightbox-backdrop'),'image lightbox did not open');
+ window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+ await wait(()=>!$('.image-lightbox-backdrop'),'image lightbox did not close on Escape');
  $('#turn-t2 .msg-reuse-prompt').click();
- check($('#composer').value==='Summarize architecture highlights.','reuse prompt did not fill composer');
+ check($('#composer').value.includes('Summarize architecture highlights.'),'reuse prompt did not fill composer');
  location.hash='#/w/p/s/s1';
  await wait(()=>$('#turn-t1')&&$('#composer').value==='Draft for session one','s1 draft was lost across navigation');
+ const cInput=$('#composer');
+ cInput.value='/';
+ cInput.setSelectionRange(1,1);
+ cInput.dispatchEvent(new Event('input',{bubbles:true}));
+ const slashMenu=await wait(()=>$('.composer-ac-menu'),'slash autocomplete menu did not open');
+ check(slashMenu.textContent.includes('/files'),'/files missing from slash menu');
+ cInput.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+ await wait(()=>!$('.composer-ac-menu'),'slash menu did not close on Escape');
+ cInput.value='Check @REA';
+ cInput.setSelectionRange(10,10);
+ cInput.dispatchEvent(new Event('input',{bubbles:true}));
+ const fileMenu=await wait(()=>$('.composer-ac-menu'),'file @ autocomplete menu did not open');
+ await wait(()=>fileMenu.textContent.includes('@README.md'),'@README.md missing from file autocomplete');
+ fileMenu.querySelector('.composer-ac-item').dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));
+ await wait(()=>cInput.value.includes('@README.md'),'selecting @README.md did not insert file mention');
  for(const theme of ['light','dark']){
   document.documentElement.dataset.theme=theme;
   await frame();

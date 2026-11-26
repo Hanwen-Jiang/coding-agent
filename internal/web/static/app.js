@@ -77,6 +77,8 @@ const state = {
   sourcePolicies: new Map(),
   uploadDrafts: new Map(),
   composerDrafts: new Map(),
+  answerFeedback: new Map(),
+  workspaceFiles: new Map(),
   scrollAutoFollow: true,
   artifacts: new Map(), // taskId → { list, failed }：任务交付的文件（N-18），结束后取一次
   revealWorklog: new Map(), // taskId → explicit reveal request version
@@ -3328,8 +3330,15 @@ function waitingLine(task) {
   }
   const run = state.runs.get(task.id);
   if (run && run.events.length) return null; // 进度在工作过程与输入框上方
-  return h("div", { class: "waiting-line" }, h("span", { class: "spinner" }), run ? t("run.starting") : t("run.connecting"),
-    h("span", { class: "since", "data-since": task.created_at }, fmtSince(task.created_at)));
+  return h("div", { class: "waiting-line" },
+    h("span", { class: "spinner" }),
+    run ? t("run.starting") : t("run.connecting"),
+    h("span", { class: "since", "data-since": task.created_at }, fmtSince(task.created_at)),
+    h("div", { class: "waiting-skeleton", "aria-hidden": "true" },
+      h("span", { class: "waiting-skeleton-bar" }),
+      h("span", { class: "waiting-skeleton-bar short" }),
+    ),
+  );
 }
 
 // draftDelta 把一条逐字增量（DELTA：node_id、offset、text）拼进这个节点的草稿。offset 是 Runtime 按字符（码点）数的位置：
@@ -3490,11 +3499,15 @@ function worklog(task, events, running, finished) {
     return {kind:"tools",id,title,reveal:state.revealWorklog.get(task.id)||0,current:active&&latest?toolText(latest.event.value,false):"",running:active,plan:groupPlan,
       steps:part.calls.map(call=>{
         const ev=call.event,v=ev.value||{},info=stepInfo(ev);
-        return {id:call.id,label:toolText({...v,target:""},v.state!=="running"),target:String(v.target||""),detail:v.state==="failed"?info.detail.replace(errorText(v),"").trim():info.detail,error:v.state==="failed"?errorText(v):"",tool:String(v.tool||""),state:v.state==="failed"?"output-error":v.state==="running"?"input-available":"output-available",time:fmtClock(ev.time),duration:v.duration_ms!=null?fmtMs(num(v.duration_ms)):""};
+        const rawOut=v.output_preview||v.output||v.stdout||"";
+        const outText=rawOut?String(rawOut).slice(0,1200):"";
+        const diffText=v.diff?String(v.diff).slice(0,2400):"";
+        const rawPath=v.path||(["repo_read","repo_edit","apply_patch","write_file"].includes(String(v.tool||""))?String(v.target||"").split(":")[0].trim():"");
+        return {id:call.id,label:toolText({...v,target:""},v.state!=="running"),target:String(v.target||""),detail:v.state==="failed"?info.detail.replace(errorText(v),"").trim():info.detail,error:v.state==="failed"?errorText(v):"",output:outText||undefined,diff:diffText||undefined,path:rawPath&&!rawPath.includes(" ")?rawPath:undefined,tool:String(v.tool||""),state:v.state==="failed"?"output-error":v.state==="running"?"input-available":"output-available",time:fmtClock(ev.time),duration:v.duration_ms!=null?fmtMs(num(v.duration_ms)):""};
       })};
   });
-  const labels={more:t("flow.more",{n:"{n}"}),less:t("flow.less"),command:t("flow.commandDetail"),target:t("flow.target"),failed:t("flow.failed"),plan:t("plan.title"),copy:t("common.copy"),copied:t("common.copied"),copyFailed:t("common.copyFailed"),jumpFailed:t("flow.jumpFailed")};
-  return proPresentation("conversation-"+task.id,"conversation-island","mountConversation",{parts:projected,labels},h("div",{class:"conversation-flow"},projected.map(part=>h("p",{class:"progress-note"},part.message||part.title))));
+  const labels={more:t("flow.more",{n:"{n}"}),less:t("flow.less"),command:t("flow.commandDetail"),target:t("flow.target"),failed:t("flow.failed"),plan:t("plan.title"),copy:t("common.copy"),copied:t("common.copied"),copyFailed:t("common.copyFailed"),jumpFailed:t("flow.jumpFailed"),output:t("flow.output"),diff:t("flow.diff"),openFile:t("flow.openFile")};
+  return proPresentation("conversation-"+task.id,"conversation-island","mountConversation",{parts:projected,labels,onOpenFile:(filePath)=>openDrawer("files",{focus:filePath})},h("div",{class:"conversation-flow"},projected.map(part=>h("p",{class:"progress-note"},part.message||part.title))));
 }
 
 // Diagnostic data stays available in one deliberate advanced entry, not in
@@ -3748,6 +3761,24 @@ function result(task, r) {
       cost ? h("span", { class: "chip" }, fmtUSD(cost)) : null,
       h("span", { class: "grow" }),
       text ? inlineCopyButton(text, t("common.copy"), { extraClass: "result-copy" }) : null,
+      text ? (() => {
+        const currentVote = state.answerFeedback.get(task.id) || "";
+        const group = h("span", { class: "result-feedback-group" });
+        const toggleVote = (vote) => {
+          const next = state.answerFeedback.get(task.id) === vote ? "" : vote;
+          if (next) state.answerFeedback.set(task.id, next);
+          else state.answerFeedback.delete(task.id);
+          for (const btn of group.querySelectorAll(".result-feedback")) {
+            btn.setAttribute("aria-pressed", String(btn.getAttribute("data-feedback") === next));
+          }
+          window.dispatchEvent(new CustomEvent("coding:answer-feedback", { detail: { taskId: task.id, vote: next } }));
+        };
+        group.append(
+          h("button", { type: "button", class: "btn ghost xs result-feedback", "data-feedback": "up", "aria-pressed": String(currentVote === "up"), title: t("feedback.up"), "aria-label": t("feedback.up"), onclick: () => toggleVote("up") }, "👍"),
+          h("button", { type: "button", class: "btn ghost xs result-feedback", "data-feedback": "down", "aria-pressed": String(currentVote === "down"), title: t("feedback.down"), "aria-label": t("feedback.down"), onclick: () => toggleVote("down") }, "👎"),
+        );
+        return group;
+      })() : null,
       task.message ? h("button", { type: "button", class: "btn ghost xs result-reuse", title: t("msg.reusePrompt"), onclick: () => setComposer(task.message) }, icon("edit", "xs"), t("msg.reusePrompt")) : null,
       ok && n && task === state.tasks[state.tasks.length - 1] ? h("button", { class: "btn ghost xs", onclick: () => openDrawer("changes") }, icon("diff", "xs"), t("changes.review")) : null,
     ),
@@ -4277,6 +4308,13 @@ function dock() {
     onInput:()=>{autosize();refreshSend();},onKeyDown:onComposerKey,onFiles:addSourceFiles,onRemoveUpload:removeUpload,onRetryUpload:retryUpload,onRemoveCollection:()=>{state.collectionDrafts.delete(personalChoiceKey());refreshUploadUI();},
     onSend:()=>{const current=phase();if(current.mode==="running")steer(current.current,"next_step");else submit();},
     onMenu:(anchor)=>{const current=phase();openPop(anchor,(close)=>sendMenu(current,close));},
+    onSlashCommand:(cmdId)=>{
+      if(cmdId==="/new")createSession();
+      else if(cmdId==="/files")openDrawer("files");
+      else if(cmdId==="/changes")openDrawer("changes");
+      else if(cmdId==="/history")openDrawer("history");
+      else if(cmdId==="/settings"){state.view="settings";location.hash="#/settings";render();}
+    },
     onScrollToBottom:()=>{state.scrollAutoFollow=true;ui.composerModel?.update({hasNewOutput:false});}};
   const surface=proPresentation("composer", "composer-island", "mountComposer", props,ui.composer);
   return h("div", { class: "dock" }, h("div", { class: "dock-inner" }, ui.next, surface));
@@ -4524,6 +4562,40 @@ function networkApprovalDetails(task, permission) {
     h("p",{class:"muted small"},[permission.minutes===0?t("network.unlimitedHint"):"",t("networkApproval.limit")].filter(Boolean).join(" ")));
 }
 
+function slashCommandsList() {
+  return [
+    { id: "/files", label: "/files", description: t("slash.files"), insert: "/files" },
+    { id: "/changes", label: "/changes", description: t("slash.changes"), insert: "/changes" },
+    { id: "/history", label: "/history", description: t("slash.history"), insert: "/history" },
+    { id: "/new", label: "/new", description: t("slash.new"), insert: "/new" },
+    { id: "/settings", label: "/settings", description: t("slash.settings"), insert: "/settings" },
+    { id: "/clear", label: "/clear", description: t("slash.clear"), insert: "/clear" },
+  ];
+}
+
+function collectMentionFiles() {
+  const seen = new Set();
+  for (const p of changedPaths()) seen.add(p);
+  const base = sbase();
+  if (base) {
+    const cached = state.workspaceFiles.get(base);
+    if (Array.isArray(cached)) {
+      for (const f of cached) seen.add(f);
+    } else if (!cached) {
+      state.workspaceFiles.set(base, []);
+      api("GET", `${base}/tree?path=`).then((entries) => {
+        if (Array.isArray(entries)) {
+          state.workspaceFiles.set(base, entries.map((e) => (e.dir ? e.name + "/" : e.name)));
+          ui.composerModel?.update({ mentionFiles: collectMentionFiles() });
+        }
+      }).catch(() => {});
+    }
+    const sources = state.sourceLists.get(base)?.list || [];
+    for (const s of sources) if (s?.name) seen.add(s.name);
+  }
+  return [...seen].slice(0, 60);
+}
+
 function updateComposer(force = false) {
   if (!ui.composer || !state.project) return;
   const ph = phase();
@@ -4586,9 +4658,12 @@ function updateComposer(force = false) {
     if (!ui.composerModel?.mounted && ui.send?.isConnected && shortcuts) ui.send.title = shortcuts;
     ui.next.replaceChildren(...nextSteps(ph));
   }
+
   ui.composerModel?.update({mode:ph.mode,placeholder:ui.input.placeholder,shortcuts:ui.cHelp.textContent,
     label:t("composer.aria"),sendLabel:t(ph.mode==="running"?"hint.steer":"composer.sendTitle"),menuLabel:t("composer.queueTitle"),
-    newOutputLabel:t("scroll.newOutput"),scrollToBottomLabel:t("scroll.toBottom")});
+    newOutputLabel:t("scroll.newOutput"),scrollToBottomLabel:t("scroll.toBottom"),
+    commands:slashCommandsList(),mentionFiles:collectMentionFiles(),
+    autocompleteLabels:{commandsTitle:t("composer.ac.commands"),filesTitle:t("composer.ac.files"),empty:t("composer.ac.empty")}});
   refreshUploadUI();
 }
 
@@ -5538,8 +5613,10 @@ function drawerProps() {
 function drawView(body) {
   const d = state.drawer;
   if (d.tab === "changes") drawChanges(body, d.focus);
-  else if (d.tab === "files") loadFiles(body, state.filesPath);
-  else loadHistory(body);
+  else if (d.tab === "files") {
+    const targetPath = d.focus ? (d.focus.includes("/") ? d.focus.slice(0, d.focus.lastIndexOf("/")) : "") : state.filesPath;
+    loadFiles(body, targetPath, d.focus);
+  } else loadHistory(body);
 }
 
 function renderDrawer() {
@@ -5743,7 +5820,7 @@ function changedPaths() {
   return new Set((state.changes ? state.changes.files : []).map((f) => join(prefix, String(f.path).replace(/^.* => /, ""))));
 }
 
-async function loadFiles(body, path) {
+async function loadFiles(body, path, focusFile = null) {
   state.filesPath = path;
   let entries;
   try {
@@ -5772,6 +5849,7 @@ async function loadFiles(body, path) {
     ),
     viewer,
   );
+  if (focusFile) showFile(viewer, focusFile);
 }
 
 function join(a, b) {

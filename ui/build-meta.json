@@ -4,7 +4,7 @@
     "react": "19.3.1",
     "shiki": "4.6.0"
   },
-  "output_bytes": 2992580,
+  "output_bytes": 296886,
   "components": [
     "chat-message",
     "markdown",
@@ -22,5 +22,70 @@
     "sidebar",
     "command",
     "segment"
-  ]
+  ],
+  "outputs": {
+    "internal/web/static/chunk-CO6KYYFR.js": {
+      "bytes": 1824
+    },
+    "internal/web/static/chunk-2PUHQGL6.js": {
+      "bytes": 1811
+    },
+    "internal/web/static/chunk-4NWVWBDF.js": {
+      "bytes": 127127
+    },
+    "internal/web/static/chat-ui.js": {
+      "bytes": 296886
+    },
+    "internal/web/static/chunk-XCKMIY26.js": {
+      "bytes": 3822
+    },
+    "internal/web/static/chunk-ATB44AWD.js": {
+      "bytes": 680
+    },
+    "internal/web/static/chunk-6FBSRFPR.js": {
+      "bytes": 159
+    },
+    "internal/web/static/chunk-3WL27CJI.js": {
+      "bytes": 519900
+    },
+    "internal/web/static/chunk-HOHNZND3.js": {
+      "bytes": 1194496
+    },
+    "internal/web/static/chunk-QD7SOMVK.js": {
+      "bytes": 19551
+    },
+    "internal/web/static/chunk-5Z3NTXZ6.js": {
+      "bytes": 6197
+    },
+    "internal/web/static/chunk-BYXBJQAS.js": {
+      "bytes": 0
+    },
+    "internal/web/static/chunk-FOJFAOYT.js": {
+      "bytes": 2235
+    },
+    "internal/web/static/chunk-DOPDKKQH.js": {
+      "bytes": 11033
+    },
+    "internal/web/static/chunk-DV4NXDG5.js": {
+      "bytes": 23923
+    },
+    "internal/web/static/chunk-3OFJE4VU.js": {
+      "bytes": 168592
+    },
+    "internal/web/static/chunk-H5LO32SJ.js": {
+      "bytes": 25352
+    },
+    "internal/web/static/chunk-TEZJJVUF.js": {
+      "bytes": 980
+    },
+    "internal/web/static/chunk-IXHAUYNL.js": {
+      "bytes": 562319
+    },
+    "internal/web/static/chunk-OCOULFBT.js": {
+      "bytes": 13538
+    },
+    "internal/web/static/chunk-DRR7AHD5.js": {
+      "bytes": 708
+    }
+  }
 }
