@@ -146,6 +146,8 @@ func main() {
 		NetworkSecrets:   os.Getenv("CODING_NETWORK_SECRETS") == "1",
 		CodingDanceToken: os.Getenv("CODING_DANCE_API_TOKEN"),
 		MemoryURL:        os.Getenv("CODING_MEMORY_URL"),
+		ModelGatewayURL:  os.Getenv("CODING_MODEL_GATEWAY_URL"),
+		ModelGatewayTier: os.Getenv("CODING_MODEL_GATEWAY_TIER"),
 		Admin: server.AdminConfig{
 			Email:                 os.Getenv("CODING_ADMIN_EMAIL"),
 			PasswordHash:          os.Getenv("CODING_ADMIN_PASSWORD_HASH"),
@@ -202,6 +204,7 @@ func main() {
 			log.Fatalf("coding-web: %v", err)
 		}
 		cfg.Metrics = github.TelemetryMetrics(platform)
+		cfg.Telemetry = platform
 	}
 	if err := configureEntries(ctx, &cfg, os.Getenv); err != nil {
 		log.Fatalf("coding-web: %v", err)

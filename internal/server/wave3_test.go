@@ -16,6 +16,8 @@ import (
 	commonv1 "github.com/agentruntime/agent-runtime/proto/gen/go/agentruntime/common/v1"
 	memoryv1 "github.com/agentruntime/agent-runtime/proto/gen/go/agentruntime/memory/v1"
 	"github.com/agentruntime/agent-runtime/proto/gen/go/agentruntime/memory/v1/memoryv1connect"
+	modelgatewayv1 "github.com/agentruntime/agent-runtime/proto/gen/go/agentruntime/modelgateway/v1"
+	"github.com/agentruntime/agent-runtime/proto/gen/go/agentruntime/modelgateway/v1/modelgatewayv1connect"
 	"github.com/agentruntime/coding-agent/internal/adminops"
 )
 
@@ -344,5 +346,125 @@ func TestWave3CodingDanceCompanionAPI(t *testing.T) {
 	summary, _ := histRes["summary"].(map[string]any)
 	if code != http.StatusOK || summary["total_submissions"] != float64(2) {
 		t.Fatalf("history-analyze failed (%d): %s", code, raw)
+	}
+}
+
+type fakeModelGatewayHandler struct {
+	modelgatewayv1connect.UnimplementedModelGatewayServiceHandler
+	calls int
+	err   error
+}
+
+func (f *fakeModelGatewayHandler) Generate(_ context.Context, req *connect.Request[modelgatewayv1.GenerateRequest]) (*connect.Response[modelgatewayv1.GenerateResponse], error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return connect.NewResponse(&modelgatewayv1.GenerateResponse{
+		Text: `{"title":"小舞提示 · 下标防越界","hint":"检查循环里的下标边界，先对空输入或单个元素做特判。","next_steps":["用 2 个元素的输入手推最后一次迭代"],"quick_replies":["为什么要从 i+1 开始？"]}`,
+		Model: &modelgatewayv1.ModelChoice{
+			ModelProfileId: "a6api/deepseek-v4-flash@2026-10",
+		},
+	}), nil
+}
+
+func TestWave3CodingDanceModelGateway(t *testing.T) {
+	gwHandler := &fakeModelGatewayHandler{}
+	mux := http.NewServeMux()
+	path, h := modelgatewayv1connect.NewModelGatewayServiceHandler(gwHandler)
+	mux.Handle(path, h)
+	gwSrv := httptest.NewUnstartedServer(h2c.NewHandler(mux, &http2.Server{}))
+	gwSrv.Start()
+	defer gwSrv.Close()
+
+	ts, _, _, _ := newServerWith(t, func(c *Config) {
+		c.CodingDanceToken = "cd-companion-token"
+		c.ModelGatewayURL = gwSrv.URL
+	})
+
+	doJSON := func(method, endpoint string, body any) (int, map[string]any, string) {
+		var rBody *strings.Reader
+		if body != nil {
+			rawBytes, _ := json.Marshal(body)
+			rBody = strings.NewReader(string(rawBytes))
+		} else {
+			rBody = strings.NewReader("")
+		}
+		var req *http.Request
+		if body != nil {
+			req, _ = http.NewRequest(method, ts.URL+endpoint, rBody)
+			req.Header.Set("Content-Type", "application/json")
+		} else {
+			req, _ = http.NewRequest(method, ts.URL+endpoint, nil)
+		}
+		req.Header.Set("Authorization", "Bearer cd-companion-token")
+		req.Header.Set("X-Coding-Dance-Tenant", "gh-hanwen-jiang")
+		req.Header.Set("X-Coding-Dance-User", "hanwen")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(res.Body).Decode(&out)
+		rawOut, _ := json.Marshal(out)
+		return res.StatusCode, out, string(rawOut)
+	}
+
+	// Status reports llm_enabled=true
+	code, st, raw := doJSON(http.MethodGet, "/api/integrations/coding-dance/v1/status", nil)
+	if code != http.StatusOK || st["available"] != true || st["llm_enabled"] != true || st["engine"] != "llm" {
+		t.Fatalf("unexpected companion status (%d): %s", code, raw)
+	}
+
+	// hint-reveal routes through ModelGatewayService synchronously
+	code, rev, raw := doJSON(http.MethodPost, "/api/integrations/coding-dance/v1/hint-reveal", map[string]any{
+		"consent_mode":   "on_demand",
+		"user_consented": true,
+		"hint_level":     "L1",
+		"mode":           "acm",
+		"problem_id":     "1",
+		"problem_title":  "两数之和",
+		"language":       "python",
+		"code":           "def solve(): pass",
+	})
+	if code != http.StatusOK || rev["engine"] != "llm" || rev["source"] != "agent_runtime_gateway" || rev["model"] != "a6api/deepseek-v4-flash@2026-10" {
+		t.Fatalf("expected agent_runtime_gateway response (%d): %s", code, raw)
+	}
+
+	// chat enforces Consent-First and forwards history + question
+	code, _, _ = doJSON(http.MethodPost, "/api/integrations/coding-dance/v1/chat", map[string]any{
+		"consent_mode":   "on_demand",
+		"user_consented": false,
+		"question":       "怎么优化？",
+	})
+	if code != http.StatusForbidden {
+		t.Fatalf("expected 403 for unconsented chat, got %d", code)
+	}
+
+	code, chatRes, raw := doJSON(http.MethodPost, "/api/integrations/coding-dance/v1/chat", map[string]any{
+		"consent_mode":   "on_demand",
+		"user_consented": true,
+		"problem_id":     "1",
+		"problem_title":  "两数之和",
+		"language":       "python",
+		"question":       "这里为什么下标越界？",
+		"history":        []map[string]any{{"role": "user", "content": "思路怎么切入"}},
+	})
+	if code != http.StatusOK || chatRes["engine"] != "llm" || chatRes["source"] != "agent_runtime_gateway" || gwHandler.calls != 2 {
+		t.Fatalf("chat gateway call failed (%d, calls=%d): %s", code, gwHandler.calls, raw)
+	}
+
+	// Gateway failure degrades cleanly to companion_fast fallback without 500
+	gwHandler.err = connect.NewError(connect.CodeUnavailable, context.DeadlineExceeded)
+	code, fbRes, raw := doJSON(http.MethodPost, "/api/integrations/coding-dance/v1/chat", map[string]any{
+		"consent_mode":   "on_demand",
+		"user_consented": true,
+		"problem_id":     "1",
+		"problem_title":  "两数之和",
+		"question":       "再看下",
+	})
+	if code != http.StatusOK || fbRes["source"] != "companion_fast" {
+		t.Fatalf("expected companion_fast fallback (%d): %s", code, raw)
 	}
 }

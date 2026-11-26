@@ -28,6 +28,7 @@ import (
 	"github.com/agentruntime/agent-runtime/libs/go-core/dev/localingress"
 	"github.com/agentruntime/agent-runtime/libs/go-core/providers/cache"
 	"github.com/agentruntime/agent-runtime/libs/go-core/providers/ingress"
+	"github.com/agentruntime/agent-runtime/libs/go-core/providers/telemetry"
 	"github.com/agentruntime/coding-agent/internal/adminops"
 	"github.com/agentruntime/coding-agent/internal/entry"
 	"github.com/agentruntime/coding-agent/internal/github"
@@ -72,6 +73,8 @@ type Config struct {
 	Webhook http.Handler
 	// Metrics 是 GitHub App 一侧的计数（G-05，经 libs/go-core 的 Telemetry）；nil 时不记。
 	Metrics github.Metrics
+	// Telemetry emits OpenTelemetry spans (e.g. Wave 2 answer feedback bad-case signals); nil disables span export.
+	Telemetry telemetry.Telemetry
 	// SharedCache is coding-web's own cache namespace; it contains only rebuildable
 	// public discovery responses and scoped permission metadata, never credentials.
 	// Nil retains the local implementation for development and tests.
@@ -109,6 +112,10 @@ type Config struct {
 	CodingDanceToken string
 	// MemoryURL configures agent-runtime MemoryService gRPC address for cross-problem companion memory.
 	MemoryURL string
+	// ModelGatewayURL configures agent-runtime ModelGatewayService gRPC address for live LLM companion coaching.
+	ModelGatewayURL string
+	// ModelGatewayTier overrides the ModelGateway routing tier for companion calls (default "mid@low").
+	ModelGatewayTier string
 }
 
 // AdminConfig holds settings for the #/admin operator console.
@@ -148,6 +155,7 @@ type Server struct {
 	adminEvolution  *adminops.EvolutionManager
 	adminRunner     *adminops.EvolutionRunnerClient
 	companionMemory CompanionMemory
+	companionModel  CompanionModel
 	// github 是 GitHub App 一侧的进程内状态（G-03，githubrepo.go）。
 	github    githubState
 	store     *Store
@@ -297,6 +305,7 @@ func New(cfg Config) (*Server, error) {
 		adminEvolution:  adminEvolution,
 		adminRunner:     adminRunner,
 		companionMemory: newCompanionMemory(cfg.MemoryURL),
+		companionModel:  newCompanionModel(cfg.ModelGatewayURL, cfg.ModelGatewayTier),
 		store:          NewStore(cfg.DataDir),
 		api:       api,
 		git:       Git{Bin: cfg.Git, HooksDir: hooks},

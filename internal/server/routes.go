@@ -48,8 +48,10 @@ func (s *Server) Handler() http.Handler {
 	pub.POST("/login", s.handleLogin)
 	pub.POST("/logout", s.handleLogout)
 	s.adminRoutes(pub, r)
+	get(pub, "/integrations/coding-dance/v1/status", s.handleCodingDanceStatus)
 	pub.POST("/integrations/coding-dance/v1/hint-check", s.handleCodingDanceHintCheck)
 	pub.POST("/integrations/coding-dance/v1/hint-reveal", s.handleCodingDanceHintReveal)
+	pub.POST("/integrations/coding-dance/v1/chat", s.handleCodingDanceChat)
 	pub.POST("/integrations/coding-dance/v1/history-analyze", s.handleCodingDanceHistoryAnalyze)
 	// 第三方登录与账号关联（accounts.go）。
 	get(pub, "/auth/:provider/login", s.handleOAuthLogin)
@@ -166,6 +168,7 @@ func (s *Server) Handler() http.Handler {
 	task.POST("/message", a(s.handleEditQueued))
 	task.POST("/message/result", a(s.handleQueuedResult))
 	task.POST("/cancel", a(s.handleCancel))
+	task.POST("/feedback", a(s.handleTaskFeedback))
 	get(task, "/artifacts", a(s.handleListArtifacts))
 	get(task, "/artifacts/:artifact", a(s.handleArtifactDownload))
 

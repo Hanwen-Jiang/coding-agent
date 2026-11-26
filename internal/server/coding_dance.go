@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net/http"
 	"slices"
 	"strconv"
@@ -223,26 +224,146 @@ func (s *Server) handleCodingDanceHintCheck(c *gin.Context) {
 	})
 }
 
+// handleCodingDanceStatus reports companion & gateway availability for edge health checks.
+func (s *Server) handleCodingDanceStatus(c *gin.Context) {
+	if _, ok := s.authenticateCodingDance(c); !ok {
+		return
+	}
+	llmEnabled := s.companionModel != nil
+	engine := "template"
+	if llmEnabled {
+		engine = "llm"
+	}
+	writeJSON(c, http.StatusOK, map[string]any{
+		"available":   true,
+		"llm_enabled": llmEnabled,
+		"engine":      engine,
+	})
+}
+
+type codingDanceCoachPayload struct {
+	ConsentMode    string                   `json:"consent_mode"`
+	UserConsent    bool                     `json:"user_consented"`
+	ConsentToken   string                   `json:"consent_token"`
+	HintLevel      string                   `json:"hint_level"`
+	Intent         string                   `json:"intent"`
+	ProblemID      string                   `json:"problem_id"`
+	ProblemTitle   string                   `json:"problem_title"`
+	Language       string                   `json:"language"`
+	Locale         string                   `json:"locale"`
+	Code           string                   `json:"code"`
+	ErrorOutput    string                   `json:"error_output"`
+	Question       string                   `json:"question"`
+	Mode           string                   `json:"mode"` // "leetcode" | "acm" | "fast" | "runtime"
+	PracticeMode   string                   `json:"practice_mode"`
+	ProjectID      string                   `json:"project_id"`
+	History        []CompanionChatTurn      `json:"history"`
+	ProblemContext *CompanionProblemContext `json:"problem_context"`
+	FailedCase     *CompanionFailedCase     `json:"failed_case"`
+}
+
+func resolveCompanionPracticeMode(req codingDanceCoachPayload) string {
+	pm := strings.TrimSpace(req.PracticeMode)
+	if pm != "" {
+		return pm
+	}
+	if strings.EqualFold(strings.TrimSpace(req.Mode), "acm") {
+		return "acm"
+	}
+	return "leetcode"
+}
+
+// handleCodingDanceChat handles synchronous conversational follow-up coaching through agent-runtime ModelGateway.
+func (s *Server) handleCodingDanceChat(c *gin.Context) {
+	caller, ok := s.authenticateCodingDance(c)
+	if !ok {
+		return
+	}
+	var req codingDanceCoachPayload
+	if !readJSON(c, &req) {
+		return
+	}
+	mode, valid := resolveConsentMode(caller, req.ConsentMode)
+	if !valid {
+		writeMsg(c, http.StatusBadRequest, "请求参数不合法")
+		return
+	}
+	if mode == "off" {
+		if s.adminTelemetry != nil {
+			s.adminTelemetry.Companion.ConsentBlocked.Add(1)
+		}
+		writeMsg(c, http.StatusForbidden, "当前处于隐私静默模式（off），已阻止生成提示或分析")
+		return
+	}
+	if !req.UserConsent {
+		if s.adminTelemetry != nil {
+			s.adminTelemetry.Companion.ConsentBlocked.Add(1)
+		}
+		writeMsg(c, http.StatusForbidden, "需要用户明确点击同意后才可显示提示或分析")
+		return
+	}
+	level := strings.TrimSpace(req.HintLevel)
+	if level == "" {
+		level = "L2"
+	}
+	if !slices.Contains(codingdance.HintLevels, level) {
+		writeMsg(c, http.StatusBadRequest, "提示等级只能是 L1、L2、L3 或 L4")
+		return
+	}
+	lang := companionLang(req.Locale, caller)
+	intent := strings.TrimSpace(req.Intent)
+	if intent == "" {
+		intent = "chat"
+	}
+	if s.adminTelemetry != nil {
+		s.adminTelemetry.Companion.HintsRevealed.Add(1)
+	}
+
+	if s.companionModel != nil {
+		modelCtx, cancel := ctxTimeout(c.Request, 25*time.Second)
+		out, err := s.companionModel.Coach(modelCtx, CompanionCoachInput{
+			TenantID:       caller.tenantID,
+			UserID:         caller.userID,
+			Locale:         lang,
+			Intent:         intent,
+			HintLevel:      level,
+			PracticeMode:   resolveCompanionPracticeMode(req),
+			ProblemID:      req.ProblemID,
+			ProblemTitle:   req.ProblemTitle,
+			Language:       req.Language,
+			Code:           req.Code,
+			ErrorOutput:    req.ErrorOutput,
+			Question:       req.Question,
+			History:        req.History,
+			ProblemContext: req.ProblemContext,
+			FailedCase:     req.FailedCase,
+		})
+		cancel()
+		if err == nil {
+			writeJSON(c, http.StatusOK, out)
+			return
+		}
+		log.Printf("coding-dance: companion model gateway error (chat): %v", err)
+	}
+
+	title, body, nextSteps := synthesizeLevelHint(level, lang, req.ProblemTitle, req.Language, req.ErrorOutput, req.Code)
+	writeJSON(c, http.StatusOK, map[string]any{
+		"hint_level":       level,
+		"source":           "companion_fast",
+		"title":            title,
+		"hint":             body,
+		"next_steps":       nextSteps,
+		"available_levels": codingdance.HintLevels,
+	})
+}
+
 // handleCodingDanceHintReveal discloses an L1..L4 coaching hint ONLY after explicit user consent.
 func (s *Server) handleCodingDanceHintReveal(c *gin.Context) {
 	caller, ok := s.authenticateCodingDance(c)
 	if !ok {
 		return
 	}
-	var req struct {
-		ConsentMode  string `json:"consent_mode"`
-		UserConsent  bool   `json:"user_consented"`
-		ConsentToken string `json:"consent_token"`
-		HintLevel    string `json:"hint_level"`
-		ProblemID    string `json:"problem_id"`
-		ProblemTitle string `json:"problem_title"`
-		Language     string `json:"language"`
-		Locale       string `json:"locale"`
-		Code         string `json:"code"`
-		ErrorOutput  string `json:"error_output"`
-		Mode         string `json:"mode"` // "fast" (default synchronous analyzer) | "runtime"
-		ProjectID    string `json:"project_id"`
-	}
+	var req codingDanceCoachPayload
 	if !readJSON(c, &req) {
 		return
 	}
@@ -283,6 +404,10 @@ func (s *Server) handleCodingDanceHintReveal(c *gin.Context) {
 		return
 	}
 	lang := companionLang(req.Locale, caller)
+	intent := strings.TrimSpace(req.Intent)
+	if intent == "" {
+		intent = "hint"
+	}
 
 	var runtimeTaskID string
 	source := "companion_fast"
@@ -302,6 +427,48 @@ func (s *Server) handleCodingDanceHintReveal(c *gin.Context) {
 	if s.adminTelemetry != nil {
 		s.adminTelemetry.Companion.HintsRevealed.Add(1)
 	}
+
+	if s.companionModel != nil {
+		modelCtx, cancel := ctxTimeout(c.Request, 25*time.Second)
+		out, err := s.companionModel.Coach(modelCtx, CompanionCoachInput{
+			TenantID:       caller.tenantID,
+			UserID:         caller.userID,
+			Locale:         lang,
+			Intent:         intent,
+			HintLevel:      level,
+			PracticeMode:   resolveCompanionPracticeMode(req),
+			ProblemID:      req.ProblemID,
+			ProblemTitle:   req.ProblemTitle,
+			Language:       req.Language,
+			Code:           req.Code,
+			ErrorOutput:    req.ErrorOutput,
+			Question:       req.Question,
+			History:        req.History,
+			ProblemContext: req.ProblemContext,
+			FailedCase:     req.FailedCase,
+		})
+		cancel()
+		if err == nil {
+			resp := map[string]any{
+				"hint_level":       out.HintLevel,
+				"source":           out.Source,
+				"engine":           out.Engine,
+				"model":            out.Model,
+				"title":            out.Title,
+				"hint":             out.Hint,
+				"next_steps":       out.NextSteps,
+				"quick_replies":    out.QuickReplies,
+				"available_levels": out.AvailableLevels,
+			}
+			if runtimeTaskID != "" {
+				resp["runtime_task_id"] = runtimeTaskID
+			}
+			writeJSON(c, http.StatusOK, resp)
+			return
+		}
+		log.Printf("coding-dance: companion model gateway error (hint-reveal): %v", err)
+	}
+
 	title, body, nextSteps := synthesizeLevelHint(level, lang, req.ProblemTitle, req.Language, req.ErrorOutput, req.Code)
 	resp := map[string]any{
 		"hint_level":       level,
@@ -325,10 +492,12 @@ func (s *Server) dispatchCompanionTask(c *gin.Context, caller codingDanceCaller,
 	var out struct {
 		TaskID string `json:"taskId"`
 	}
-	err := s.api.Call(ctx, caller.token, "CreateTask", map[string]any{
-		"tenant":        map[string]any{"tenantId": caller.tenantID, "userId": caller.userID, "workspaceId": projectID},
-		"message":       msgText,
-		"effectCeiling": "EFFECT_READ",
+	err := s.api.Call(ctx, caller.token, "SubmitTask", map[string]any{
+		"workspaceId":     projectID,
+		"clientRequestId": "cd-" + companionHex(8),
+		"message":         msgText,
+		"sessionAccess":   "SESSION_ACCESS_READ_WRITE",
+		"effectCeiling":   "EFFECT_READ",
 	}, &out)
 	return out.TaskID, err
 }

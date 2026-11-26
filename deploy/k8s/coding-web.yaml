@@ -106,6 +106,7 @@ spec:
               valueFrom: {secretKeyRef: {name: coding-admin, key: evolution-runner-token, optional: true}}
             - {name: CODING_ADMIN_ALERTMANAGER_URL, value: "http://vm-alertmanager.observability.svc:9093"}
             - {name: CODING_MEMORY_URL, value: "http://ar-agent-runtime-memory:50061"}
+            - {name: CODING_MODEL_GATEWAY_URL, value: "http://ar-agent-runtime-model-gateway:8091"}
             - {name: CODING_ADMIN_CD_RUNNER_URL, value: ""}
             - {name: CODING_ADMIN_CD_API_URL, value: ""}
           # 接入点：CODING_ENTRY_DSN 未设时沿用 CODING_GITHUB_DSN。
